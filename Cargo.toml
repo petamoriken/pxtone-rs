@@ -1,0 +1,9 @@
+[package]
+name = "pxtone"
+version = "0.1.0"
+authors = ["petamoriken <moriken@kimamass.com>"]
+
+[dependencies]
+byteorder = "1.2.1"
+num-derive = "0.2.0"
+num-traits = "0.2.2"
