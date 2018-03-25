@@ -1,4 +1,7 @@
 #[macro_use]
+extern crate lazy_static;
+
+#[macro_use]
 extern crate num_derive;
 extern crate num_traits;
 
@@ -26,7 +29,7 @@ fn run() -> Result<(), Error> {
     let mut bytes = Vec::new();
 
     file.read_to_end(&mut bytes)?;
-    let noise = noise::PxtoneNoise { channel: 2, sample_rate: 44100, bits_per_sample: 16 };
+    let noise = noise::PxtoneNoise { channel: 2, smp_rate: 44100, bits_per_smp: 16 };
     noise.generate(bytes)?;
 
     Ok(())

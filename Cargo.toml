@@ -4,6 +4,7 @@ version = "0.1.0"
 authors = ["petamoriken <moriken@kimamass.com>"]
 
 [dependencies]
-byteorder = "1.2.1"
+lazy_static = "1.0.0"
 num-derive = "0.2.0"
 num-traits = "0.2.2"
+byteorder = "1.2.1"

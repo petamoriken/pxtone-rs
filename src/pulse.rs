@@ -1,4 +1,4 @@
-use std::f64;
+use std::{i16, f64};
 use std::io::*;
 use std::vec::Vec;
 
@@ -13,21 +13,21 @@ pub struct Oscillator {
 
     point_reso: i32,
 
-    volume: i32,
-    sample_num: i32,
+    volu: i32,
+    smp_num: usize,
 }
 
 impl Oscillator {
-    pub fn get_overtone(&self, index: i32) -> f64 {
+    pub fn get_overtone(&self, index: usize) -> f64 {
         let work = self.points.iter().fold(0.0, |acc, point| {
-            let sss = 2.0 * f64::consts::PI * (point.x as f64) * (index as f64) / (self.sample_num as f64);
+            let sss = 2.0 * f64::consts::PI * (point.x as f64) * (index as f64) / (self.smp_num as f64);
             acc + sss.sin() * (point.y as f64) / (point.x as f64) / 128.0
         });
-        work * (self.volume as f64) / 128.0
+        work * (self.volu as f64) / 128.0
     }
 
-    pub fn get_coodinate(&self, index: i32) -> f64 {
-        let i = self.point_reso * index / self.sample_num;
+    pub fn get_coodinate(&self, index: usize) -> f64 {
+        let i = self.point_reso * (index as i32) / (self.smp_num as i32);
         let current = self.points.iter().position(|point| point.x <= i);
 
         let x1;
@@ -70,7 +70,7 @@ impl Oscillator {
                 (y1 as f64) + (h as f64) * (n as f64) / (w as f64) / 128.0
             },
         };
-        work * (self.volume as f64) / 128.0
+        work * (self.volu as f64) / 128.0
     }
 }
 
@@ -224,3 +224,205 @@ impl Noise {
         Ok(Self { smp_num, units })
     }
 }
+
+
+const BASIC_SPS: u16 = 44100;
+const BASIC_FREQ: u16 = 100;
+
+const SMP_NUM_RAND: usize = 44100;
+const SMP_NUM: usize = (BASIC_SPS / BASIC_FREQ) as usize;
+
+lazy_static! {
+    static ref NOISE_TABLE_SINE: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        let points = vec![Point { x: 1, y: 128 }];
+        let osci = Oscillator { points, volu: 128, smp_num: SMP_NUM, point_reso: 0 };
+        for i in 0..SMP_NUM {
+            arr[i] = (osci.get_overtone(i).max(0.0).min(1.0) * (i16::MAX as f64)) as i16;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_SAW: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        let work = (i16::MAX as f64) * 2.0;
+        for i in 0..SMP_NUM {
+            arr[i] = ((i16::MAX as f64) - work * (i as f64) / (SMP_NUM as f64)) as i16;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_RECT: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/2 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/2..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+    static ref MOISE_TABLE_RANDOM: [i16; SMP_NUM_RAND] = {
+        let mut arr = [0; SMP_NUM_RAND];
+        let mut buf: [i32; 2] = [0x4444, 0x8888];
+        for i in 0..SMP_NUM_RAND {
+            let w1 = ((buf[0] as i16) as i32) + buf[1];
+            let w2 = ((w1 >> 8) + (w1 << 8)) as i16;
+            buf[1] = (buf[0] as i16) as i32;
+            buf[0] = w2 as i32;
+            arr[i] = w2;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_SAW2: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        let mut points: Vec<Point> = Vec::new();
+        for i in 0..16 {
+            points.push(Point { x: i + 1, y: 128 });
+        }
+        let osci = Oscillator { points, volu: 128, smp_num: SMP_NUM, point_reso: 0 };
+        for i in 0..SMP_NUM {
+            arr[i] = (osci.get_overtone(i).max(0.0).min(1.0) * (i16::MAX as f64)) as i16;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_RECT2: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        let mut points: Vec<Point> = Vec::new();
+        for i in 0..8 {
+            points.push(Point { x: i*2 + 1, y: 128 });
+        }
+        let osci = Oscillator { points, volu: 128, smp_num: SMP_NUM, point_reso: 0 };
+        for i in 0..SMP_NUM {
+            arr[i] = (osci.get_overtone(i).max(0.0).min(1.0) * (i16::MAX as f64)) as i16;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_TRI: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        let points = vec![Point { x: 0, y: 0 }, Point { x: (SMP_NUM/4) as i32, y: 128 }, Point { x: (SMP_NUM*3/4) as i32, y: -128 }, Point { x: SMP_NUM as i32, y: 0 }];
+        let osci = Oscillator { points, volu: 128, smp_num: SMP_NUM, point_reso: SMP_NUM as i32 };
+        for i in 0..SMP_NUM {
+            arr[i] = (osci.get_coodinate(i).max(0.0).min(1.0) * (i16::MAX as f64)) as i16;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_RECT3: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/3 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/3..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_RECT4: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/4 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/4..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_RECT8: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/8 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/8..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_RECT16: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/16 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/16..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_SAW3: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/3 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/3..SMP_NUM*2/3 {
+            arr[i] = 0;
+        }
+        for i in SMP_NUM*2/3..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_SAW4: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/4 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/4..SMP_NUM/2 {
+            arr[i] = i16::MAX/3;
+        }
+        for i in SMP_NUM/2..SMP_NUM*3/4 {
+            arr[i] = -i16::MAX/3;
+        }
+        for i in SMP_NUM*3/4..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_SAW6: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/6 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/6..SMP_NUM/3 {
+            arr[i] = i16::MAX/5*3;
+        }
+        for i in SMP_NUM/3..SMP_NUM/2 {
+            arr[i] = i16::MAX/5;
+        }
+        for i in SMP_NUM/2..SMP_NUM*2/3 {
+            arr[i] = -i16::MAX/5;
+        }
+        for i in SMP_NUM*2/3..SMP_NUM*5/6 {
+            arr[i] = -i16::MAX/5*3;
+        }
+        for i in SMP_NUM*5/6..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+    static ref NOISE_TABLE_SAW8: [i16; SMP_NUM] = {
+        let mut arr = [0; SMP_NUM];
+        for i in 0..SMP_NUM/8 {
+            arr[i] = i16::MAX;
+        }
+        for i in SMP_NUM/8..SMP_NUM/4 {
+            arr[i] = i16::MAX/7*5;
+        }
+        for i in SMP_NUM/4..SMP_NUM*3/8 {
+            arr[i] = i16::MAX/7*3;
+        }
+        for i in SMP_NUM*3/8..SMP_NUM/2 {
+            arr[i] = i16::MAX/7;
+        }
+        for i in SMP_NUM/2..SMP_NUM*5/8 {
+            arr[i] = -i16::MAX/7;
+        }
+        for i in SMP_NUM*5/8..SMP_NUM*3/4 {
+            arr[i] = -i16::MAX/7*3;
+        }
+        for i in SMP_NUM*3/4..SMP_NUM*7/8 {
+            arr[i] = -i16::MAX/7*5;
+        }
+        for i in SMP_NUM*7/8..SMP_NUM {
+            arr[i] = -i16::MAX;
+        }
+        arr
+    };
+}
+

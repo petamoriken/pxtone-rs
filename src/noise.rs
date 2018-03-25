@@ -10,11 +10,11 @@ pub struct PxtoneNoise {
 
     /// samples per second
     /// 48000, 44100, 22050, 11025
-    pub sample_rate: u32,
+    pub smp_rate: u32,
 
     /// bits per sample
     /// 16, 8
-    pub bits_per_sample: u16,
+    pub bits_per_smp: u16,
 }
 
 impl PxtoneNoise {
