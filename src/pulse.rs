@@ -410,7 +410,7 @@ lazy_static! {
 }
 
 impl Noise {
-    pub fn new(bytes: Vec<u8>) -> Result<Self> {
+    pub fn new<T: AsRef<[u8]>>(bytes: T) -> Result<Self> {
         let mut bytes = Cursor::new(bytes);
 
         // signature
