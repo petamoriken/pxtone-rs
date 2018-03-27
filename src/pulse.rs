@@ -8,17 +8,17 @@ use byteorder::{LittleEndian, ReadBytesExt};
 use helper::{Point, Descriptor};
 
 
-pub struct Oscillator {
+struct Oscillator {
     points: Vec<Point>,
-
-    point_reso: i32,
 
     volu: i32,
     smp_num: usize,
+
+    point_reso: i32,
 }
 
 impl Oscillator {
-    pub fn get_overtone(&self, index: usize) -> f64 {
+    fn get_overtone(&self, index: usize) -> f64 {
         let work = self.points.iter().fold(0.0, |acc, point| {
             let sss = 2.0 * f64::consts::PI * (point.x as f64) * (index as f64) / (self.smp_num as f64);
             acc + sss.sin() * (point.y as f64) / (point.x as f64) / 128.0
@@ -26,7 +26,7 @@ impl Oscillator {
         work * (self.volu as f64) / 128.0
     }
 
-    pub fn get_coodinate(&self, index: usize) -> f64 {
+    fn get_coodinate(&self, index: usize) -> f64 {
         let i = self.point_reso * (index as i32) / (self.smp_num as i32);
         let current = self.points.iter().position(|point| point.x <= i);
 
@@ -106,29 +106,21 @@ struct NoiseOscillator {
     offset: f32,
 }
 
+const NOISE_OSC_LIMIT_FREQ: f32 = 44100.0;
+const NOISE_OSC_LIMIT_VOLU: f32 = 200.0;
+const NOISE_OSC_LIMIT_OFFSET: f32 = 100.0;
+
 impl NoiseOscillator {
-    pub fn new<T: AsRef<[u8]>>(bytes: &mut Cursor<T>) -> Result<Self> {
+    fn new<T: AsRef<[u8]>>(bytes: &mut Cursor<T>) -> Result<Self> {
         let wave_type = NoiseWaveType::from_i32(bytes.read_i32_flex()?).unwrap();
         let rev = bytes.read_u32_flex()? != 0;
-        let freq = bytes.read_f32_flex()? / 10.0;
-        let volume = bytes.read_f32_flex()? / 10.0;
-        let offset = bytes.read_f32_flex()? / 10.0;
+        let freq = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_FREQ);
+        let volume = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_VOLU);
+        let offset = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_OFFSET);
         Ok(Self { wave_type, rev, freq, volume, offset })
     }
 }
 
-
-// const UNIT_FLAG_XX1: u32 = 0x0001;
-// const UNIT_FLAG_XX2: u32 = 0x0002;
-const UNIT_FLAG_ENVELOPE: u32 = 0x0004;
-const UNIT_FLAG_PAN: u32 = 0x0008;
-const UNIT_FLAG_OSC_MAIN: u32 = 0x0010;
-const UNIT_FLAG_OSC_FREQ: u32 = 0x0020;
-const UNIT_FLAG_OSC_VOLU: u32 = 0x0040;
-// const UNIT_FLAG_OSC_PAN: u32 = 0x0080;
-const UNIT_FLAG_UNCOVERED: u32 = 0xffffff83;
-
-const UNIT_MAX_ENVELOPE_NUM: u32 = 3;
 
 struct NoiseUnit {
     enable: bool,
@@ -139,21 +131,36 @@ struct NoiseUnit {
     volu: Option<NoiseOscillator>,
 }
 
+// const NOISE_UNIT_FLAG_XX1: u32 = 0x0001;
+// const NOISE_UNIT_FLAG_XX2: u32 = 0x0002;
+const NOISE_UNIT_FLAG_ENVELOPE: u32 = 0x0004;
+const NOISE_UNIT_FLAG_PAN: u32 = 0x0008;
+const NOISE_UNIT_FLAG_OSC_MAIN: u32 = 0x0010;
+const NOISE_UNIT_FLAG_OSC_FREQ: u32 = 0x0020;
+const NOISE_UNIT_FLAG_OSC_VOLU: u32 = 0x0040;
+// const NOISE_UNIT_FLAG_OSC_PAN: u32 = 0x0080;
+const NOISE_UNIT_FLAG_UNCOVERED: u32 = 0xffffff83;
+
+const NOISE_UNIT_MAX_ENVELOPE_NUM: u32 = 3;
+
+const NOISE_UNIT_LIMIT_ENVE_X: i32 = 1000 * 10;
+const NOISE_UNIT_LIMIT_ENVE_Y: i32 = 100;
+
 impl NoiseUnit {
-    pub fn new<T: AsRef<[u8]>>(bytes: &mut Cursor<T>) -> Result<Self> {
+    fn new<T: AsRef<[u8]>>(bytes: &mut Cursor<T>) -> Result<Self> {
         let enable = true;
 
         let flags = bytes.read_u32_flex()?;
-        assert_eq!(flags & UNIT_FLAG_UNCOVERED, 0);
+        assert_eq!(flags & NOISE_UNIT_FLAG_UNCOVERED, 0);
 
         // envelope
-        let enves = if flags & UNIT_FLAG_ENVELOPE != 0 {
+        let enves = if flags & NOISE_UNIT_FLAG_ENVELOPE != 0 {
             let enve_num = bytes.read_u32_flex()?;
-            assert!(enve_num <= UNIT_MAX_ENVELOPE_NUM);
+            assert!(enve_num <= NOISE_UNIT_MAX_ENVELOPE_NUM);
 
             let mut enves = Vec::with_capacity(enve_num as usize);
             for _ in 0..enve_num {
-                enves.push(Point { x: bytes.read_i32_flex()?, y: bytes.read_i32_flex()? });
+                enves.push(Point { x: bytes.read_i32_flex()?.max(0).min(NOISE_UNIT_LIMIT_ENVE_X), y: bytes.read_i32_flex()?.max(0).min(NOISE_UNIT_LIMIT_ENVE_Y) });
             }
             enves
         } else {
@@ -161,24 +168,24 @@ impl NoiseUnit {
         };
 
         // pan
-        let pan = if flags & UNIT_FLAG_PAN != 0 {
+        let pan = if flags & NOISE_UNIT_FLAG_PAN != 0 {
             bytes.read_i8()?
         } else {
             0
         } as i32;
 
         // oscillator
-        let main = if flags & UNIT_FLAG_OSC_MAIN != 0 {
+        let main = if flags & NOISE_UNIT_FLAG_OSC_MAIN != 0 {
             Some(NoiseOscillator::new(bytes)?)
         } else {
             None
         };
-        let freq = if flags & UNIT_FLAG_OSC_FREQ != 0 {
+        let freq = if flags & NOISE_UNIT_FLAG_OSC_FREQ != 0 {
             Some(NoiseOscillator::new(bytes)?)
         } else {
             None
         };
-        let volu = if flags & UNIT_FLAG_OSC_VOLU != 0 {
+        let volu = if flags & NOISE_UNIT_FLAG_OSC_VOLU != 0 {
             Some(NoiseOscillator::new(bytes)?)
         } else {
             None
@@ -189,43 +196,19 @@ impl NoiseUnit {
 }
 
 
-const NOISE_CODE: &'static[u8] = b"PTNOISE-";
-const NOISE_VERSION: u32 = 20120418;
-
-const NOISE_MAX_UNIT_NUM: u8 = 4;
-
 pub struct Noise {
     smp_num: u32,
     units: Vec<NoiseUnit>,
 }
 
-impl Noise {
-    pub fn new(bytes: Vec<u8>) -> Result<Self> {
-        let mut bytes = Cursor::new(bytes);
+const NOISE_CODE: &'static[u8] = b"PTNOISE-";
+const NOISE_VERSION: u32 = 20120418;
 
-        // signature
-        let mut code = [0; 8];
-        bytes.read(&mut code)?;
-        assert_eq!(code, NOISE_CODE);
+const NOISE_MAX_UNIT_NUM: u8 = 4;
 
-        let version = bytes.read_u32::<LittleEndian>()?;
-        assert!(version <= NOISE_VERSION);
+const NOISE_LIMIT_SMP_NUM: u32 = 48000 * 10;
 
-        let smp_num = bytes.read_u32_flex()?;
-
-        let unit_num = bytes.read_u8()?;
-        assert!(unit_num <= NOISE_MAX_UNIT_NUM);
-
-        let mut units = Vec::with_capacity(unit_num as usize);
-        for _ in 0..unit_num {
-            units.push(NoiseUnit::new(&mut bytes)?);
-        }
-
-        Ok(Self { smp_num, units })
-    }
-}
-
-
+// NoiseBuilder
 const BASIC_SPS: u16 = 44100;
 const BASIC_FREQ: u16 = 100;
 
@@ -426,3 +409,28 @@ lazy_static! {
     };
 }
 
+impl Noise {
+    pub fn new(bytes: Vec<u8>) -> Result<Self> {
+        let mut bytes = Cursor::new(bytes);
+
+        // signature
+        let mut code = [0; 8];
+        bytes.read(&mut code)?;
+        assert_eq!(code, NOISE_CODE);
+
+        let version = bytes.read_u32::<LittleEndian>()?;
+        assert!(version <= NOISE_VERSION);
+
+        let smp_num = bytes.read_u32_flex()?.min(NOISE_LIMIT_SMP_NUM);
+
+        let unit_num = bytes.read_u8()?;
+        assert!(unit_num <= NOISE_MAX_UNIT_NUM);
+
+        let mut units = Vec::with_capacity(unit_num as usize);
+        for _ in 0..unit_num {
+            units.push(NoiseUnit::new(&mut bytes)?);
+        }
+
+        Ok(Self { smp_num, units })
+    }
+}
