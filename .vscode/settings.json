@@ -1,0 +1,4 @@
+{
+    "rust.target": "wasm32-unknown-unknown",
+    "rust.all_targets": false
+}
