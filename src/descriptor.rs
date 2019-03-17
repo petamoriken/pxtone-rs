@@ -1,5 +1,8 @@
-use std::{io::{Read, Seek, Result}, mem, unreachable};
-use byteorder::{ReadBytesExt as _};
+use byteorder::ReadBytesExt as _;
+use std::{
+    io::{Read, Result, Seek},
+    mem, unreachable,
+};
 
 #[inline]
 fn read_32_flex<T: Read + Seek + ?Sized>(bytes: &mut T) -> Result<[u8; 4]> {
@@ -9,7 +12,9 @@ fn read_32_flex<T: Read + Seek + ?Sized>(bytes: &mut T) -> Result<[u8; 4]> {
         let byte = bytes.read_u8()?;
         *val = byte;
         len += 1;
-        if byte & 0x80 == 0 { break; }
+        if byte & 0x80 == 0 {
+            break;
+        }
     }
     let r = r;
     let len = len;
@@ -18,58 +23,58 @@ fn read_32_flex<T: Read + Seek + ?Sized>(bytes: &mut T) -> Result<[u8; 4]> {
     if cfg!(target_endian = "little") {
         match len {
             1 => {
-                buf[0] =   r[0] & 0x7F;
+                buf[0] = r[0] & 0x7F;
             }
             2 => {
-                buf[0] =  (r[0] & 0x7F)       | (r[1] << 7);
-                buf[1] =  (r[1] & 0x7F) >> 1;
+                buf[0] = (r[0] & 0x7F) | (r[1] << 7);
+                buf[1] = (r[1] & 0x7F) >> 1;
             }
             3 => {
-                buf[0] =  (r[0] & 0x7F)       | (r[1] << 7);
+                buf[0] = (r[0] & 0x7F) | (r[1] << 7);
                 buf[1] = ((r[1] & 0x7F) >> 1) | (r[2] << 6);
-                buf[2] =  (r[2] & 0x7F) >> 2;
+                buf[2] = (r[2] & 0x7F) >> 2;
             }
             4 => {
-                buf[0] =  (r[0] & 0x7F)       | (r[1] << 7);
+                buf[0] = (r[0] & 0x7F) | (r[1] << 7);
                 buf[1] = ((r[1] & 0x7F) >> 1) | (r[2] << 6);
                 buf[2] = ((r[2] & 0x7F) >> 2) | (r[3] << 5);
-                buf[3] =  (r[3] & 0x7F) >> 3;
+                buf[3] = (r[3] & 0x7F) >> 3;
             }
             5 => {
-                buf[0] =  (r[0] & 0x7F)       | (r[1] << 7);
+                buf[0] = (r[0] & 0x7F) | (r[1] << 7);
                 buf[1] = ((r[1] & 0x7F) >> 1) | (r[2] << 6);
                 buf[2] = ((r[2] & 0x7F) >> 2) | (r[3] << 5);
                 buf[3] = ((r[3] & 0x7F) >> 3) | (r[4] << 4);
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     } else {
         match len {
             1 => {
-                buf[3] =   r[0] & 0x7F;
+                buf[3] = r[0] & 0x7F;
             }
             2 => {
-                buf[3] =  (r[0] & 0x7F)       | (r[1] << 7);
-                buf[2] =  (r[1] & 0x7F) >> 1;
+                buf[3] = (r[0] & 0x7F) | (r[1] << 7);
+                buf[2] = (r[1] & 0x7F) >> 1;
             }
             3 => {
-                buf[3] =  (r[0] & 0x7F)       | (r[1] << 7);
+                buf[3] = (r[0] & 0x7F) | (r[1] << 7);
                 buf[2] = ((r[1] & 0x7F) >> 1) | (r[2] << 6);
-                buf[1] =  (r[2] & 0x7F) >> 2;
+                buf[1] = (r[2] & 0x7F) >> 2;
             }
             4 => {
-                buf[3] =  (r[0] & 0x7F)       | (r[1] << 7);
+                buf[3] = (r[0] & 0x7F) | (r[1] << 7);
                 buf[2] = ((r[1] & 0x7F) >> 1) | (r[2] << 6);
                 buf[1] = ((r[2] & 0x7F) >> 2) | (r[3] << 5);
-                buf[0] =  (r[3] & 0x7F) >> 3;
+                buf[0] = (r[3] & 0x7F) >> 3;
             }
             5 => {
-                buf[3] =  (r[0] & 0x7F)       | (r[1] << 7);
+                buf[3] = (r[0] & 0x7F) | (r[1] << 7);
                 buf[2] = ((r[1] & 0x7F) >> 1) | (r[2] << 6);
                 buf[1] = ((r[2] & 0x7F) >> 2) | (r[3] << 5);
                 buf[0] = ((r[3] & 0x7F) >> 3) | (r[4] << 4);
             }
-            _ => unreachable!()
+            _ => unreachable!(),
         }
     }
 

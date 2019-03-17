@@ -1,9 +1,13 @@
-use std::{f64, io::{Read, Seek, SeekFrom, Result}, vec::Vec};
+use std::{
+    f64,
+    io::{Read, Result, Seek, SeekFrom},
+    vec::Vec,
+};
 
 use num_traits::FromPrimitive;
 
-use byteorder::{LittleEndian, ReadBytesExt as _};
 use crate::descriptor::ReadBytesExt as _;
+use byteorder::{LittleEndian, ReadBytesExt as _};
 
 mod noise_table;
 use self::noise_table::*;
@@ -121,7 +125,14 @@ impl NoiseUnit {
             None
         };
 
-        Ok(Self { enable, enves, pan, main, freq, volu })
+        Ok(Self {
+            enable,
+            enves,
+            pan,
+            main,
+            freq,
+            volu,
+        })
     }
 }
 
@@ -141,10 +152,22 @@ impl NoiseOscillator {
     fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
         let wave_type = NoiseWaveType::from_i32(bytes.read_i32_flex()?).unwrap();
         let rev = bytes.read_u32_flex()? != 0;
-        let freq = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_FREQ);
-        let volu = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_VOLU);
-        let offset = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_OFFSET);
-        Ok(Self { wave_type, rev, freq, volu, offset })
+        let freq = (bytes.read_f32_flex()? / 10.0)
+            .max(0.0)
+            .min(NOISE_OSC_LIMIT_FREQ);
+        let volu = (bytes.read_f32_flex()? / 10.0)
+            .max(0.0)
+            .min(NOISE_OSC_LIMIT_VOLU);
+        let offset = (bytes.read_f32_flex()? / 10.0)
+            .max(0.0)
+            .min(NOISE_OSC_LIMIT_OFFSET);
+        Ok(Self {
+            wave_type,
+            rev,
+            freq,
+            volu,
+            offset,
+        })
     }
 }
 
@@ -169,8 +192,6 @@ enum NoiseWaveType {
     Saw6,
     Saw8,
 }
-
-
 
 struct Voice {
     units: Vec<VoiceUnit>,
@@ -202,7 +223,10 @@ impl Voice {
             units.push(VoiceUnit::new(&mut bytes)?);
         }
 
-        Ok(Self { units, x3x_basic_key })
+        Ok(Self {
+            units,
+            x3x_basic_key,
+        })
     }
 }
 
@@ -244,11 +268,11 @@ impl VoiceUnit {
             match wave_type {
                 VoiceWaveType::Coodinate => {
                     Some(VoiceWave::Coodinate(VoiceWaveCoodinate::new(bytes)?))
-                },
+                }
                 VoiceWaveType::Overtone => {
                     Some(VoiceWave::Overtone(VoiceWaveOvertone::new(bytes)?))
                 }
-                _ => unreachable!()
+                _ => unreachable!(),
             }
         } else {
             None
@@ -261,7 +285,15 @@ impl VoiceUnit {
             None
         };
 
-        Ok(Self { basic_key, volu, pan, tuning, voice_flags, wave, enve })
+        Ok(Self {
+            basic_key,
+            volu,
+            pan,
+            tuning,
+            voice_flags,
+            wave,
+            enve,
+        })
     }
 }
 
@@ -353,7 +385,8 @@ struct Oscillator {
 impl Oscillator {
     fn get_overtone(&self, index: i32) -> f64 {
         let work = self.points.iter().fold(0.0, |acc, point| {
-            let sss = 2.0 * f64::consts::PI * f64::from(point.x) * f64::from(index) / f64::from(self.smp_num);
+            let sss = 2.0 * f64::consts::PI * f64::from(point.x) * f64::from(index)
+                / f64::from(self.smp_num);
             acc + sss.sin() * f64::from(point.y) / f64::from(point.x) / 128.0
         });
         work * f64::from(self.volu) / 128.0
@@ -377,13 +410,13 @@ impl Oscillator {
                 y2 = first.y;
             }
             Some(c) => {
-                let first = &self.points[c-1];
+                let first = &self.points[c - 1];
                 let second = &self.points[c];
                 x1 = first.x;
                 y1 = first.y;
                 x2 = second.x;
                 y2 = second.y;
-            },
+            }
             None => {
                 let first = self.points.first().unwrap();
                 let last = self.points.last().unwrap();
@@ -391,18 +424,16 @@ impl Oscillator {
                 y1 = last.y;
                 x2 = self.point_reso;
                 y2 = first.y;
-            },
+            }
         }
 
         let work = match i - x1 {
-            0 => {
-                f64::from(y1) / 128.0
-            },
+            0 => f64::from(y1) / 128.0,
             n => {
                 let w = x2 - x1;
                 let h = y2 - y1;
                 f64::from(y1) + f64::from(h) * f64::from(n) / f64::from(w) / 128.0
-            },
+            }
         };
         work * f64::from(self.volu) / 128.0
     }
@@ -413,10 +444,8 @@ struct Point {
     y: i32,
 }
 
-
-
 pub(crate) struct Pcm {
-    ch: u16, // 1 or 2
+    ch: u16,  // 1 or 2
     sps: u32, // 11025 or 22050 or 44100
     bps: u16, // 8 or 16
     smp: Vec<u8>,
@@ -449,7 +478,9 @@ impl Pcm {
         loop {
             let mut data = [0; 4];
             bytes.read_exact(&mut data)?;
-            if data == DATA_CODE { break; }
+            if data == DATA_CODE {
+                break;
+            }
             let size = bytes.read_u32::<LittleEndian>()?;
             bytes.seek(SeekFrom::Current(i64::from(size)))?;
         }
@@ -462,7 +493,7 @@ impl Pcm {
 }
 
 struct WaveFormatTag {
-    ch: u16, // 1 or 2
+    ch: u16,  // 1 or 2
     sps: u32, // 11025 or 22050 or 44100
     bps: u16, // 8 or 16
 }
