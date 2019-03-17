@@ -268,8 +268,7 @@ impl Pcm {
             assert_eq!(wavefmt, WAVE_FMT_CODE);
         }
         let size = bytes.read_u32::<LittleEndian>()?;
-        let WaveFormatChunk { ch, sps, bps } = WaveFormatChunk::new(&mut bytes)?;
-        bytes.seek(SeekFrom::Current(i64::from(size) - 16))?;
+        let WaveFormatTag { ch, sps, bps } = WaveFormatTag::read_tag(&mut bytes, i64::from(size))?;
 
         // data chunk (skip unnecessary chunks)
         loop {
@@ -281,31 +280,32 @@ impl Pcm {
         }
         let size = bytes.read_u32::<LittleEndian>()?;
         let mut smp = Vec::with_capacity(size as usize);
-        bytes.take(u64::from(size)).read_to_end(&mut smp)?;
+        bytes.by_ref().take(u64::from(size)).read_to_end(&mut smp)?;
 
         Ok(Self { ch, sps, bps, smp })
     }
 }
 
-struct WaveFormatChunk {
+struct WaveFormatTag {
     ch: u16, // 1 or 2
     sps: u32, // 11025 or 22050 or 44100
     bps: u16, // 8 or 16
 }
 
-impl WaveFormatChunk {
-    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
+impl WaveFormatTag {
+    fn read_tag<T: Read + Seek>(bytes: &mut T, size: i64) -> Result<Self> {
         let format_id = bytes.read_u16::<LittleEndian>()?;
         let ch = bytes.read_u16::<LittleEndian>()?;
         let sps = bytes.read_u32::<LittleEndian>()?;
         let byte_per_sec = bytes.read_u32::<LittleEndian>()?;
         let block_size = bytes.read_u16::<LittleEndian>()?;
         let bps = bytes.read_u16::<LittleEndian>()?;
+        bytes.seek(SeekFrom::Current(size - 16))?;
         assert_eq!(format_id, 1);
         assert!(ch == 1 || ch == 2);
         assert!(bps == 8 || bps == 16);
         assert_eq!(byte_per_sec, sps * u32::from(ch) * u32::from(bps) / 8);
         assert_eq!(block_size, ch * bps / 8);
-        Ok(WaveFormatChunk { ch, sps, bps })
+        Ok(Self { ch, sps, bps })
     }
 }
