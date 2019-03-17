@@ -4,7 +4,6 @@ use byteorder::{ReadBytesExt as _};
 #[inline]
 fn read_32_flex<T: Read + Seek + ?Sized>(bytes: &mut T) -> Result<[u8; 4]> {
     let mut r = [0; 5];
-
     let mut len = 0;
     for val in r.iter_mut() {
         let byte = bytes.read_u8()?;
@@ -12,6 +11,8 @@ fn read_32_flex<T: Read + Seek + ?Sized>(bytes: &mut T) -> Result<[u8; 4]> {
         len += 1;
         if byte & 0x80 == 0 { break; }
     }
+    let r = r;
+    let len = len;
 
     let mut buf = [0; 4];
     if cfg!(target_endian = "little") {

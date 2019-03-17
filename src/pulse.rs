@@ -1,4 +1,4 @@
-use std::{f64, io::{Cursor, Read, Result}, vec::Vec};
+use std::{f64, io::{Read, Seek, SeekFrom, Result}, vec::Vec};
 
 use num_traits::FromPrimitive;
 
@@ -9,8 +9,8 @@ mod noise_table;
 use self::noise_table::*;
 
 pub(crate) struct Noise {
-    smp_num_44k: u32,
     units: Vec<NoiseUnit>,
+    smp_num_44k: u32,
 }
 
 static NOISE_CODE: &[u8] = b"PTNOISE-";
@@ -19,9 +19,7 @@ const NOISE_MAX_UNIT_NUM: u8 = 4;
 const NOISE_LIMIT_SMP_NUM: u32 = 48000 * 10;
 
 impl Noise {
-    pub fn new<T: AsRef<[u8]>>(bytes: T) -> Result<Self> {
-        let mut bytes = Cursor::new(bytes);
-
+    pub fn new<T: Read + Seek>(mut bytes: T) -> Result<Self> {
         // signature
         let mut code = [0; 8];
         bytes.read_exact(&mut code)?;
@@ -75,7 +73,7 @@ const NOISE_UNIT_LIMIT_ENVE_X: i32 = 1000 * 10;
 const NOISE_UNIT_LIMIT_ENVE_Y: i32 = 100;
 
 impl NoiseUnit {
-    fn new<T: AsRef<[u8]>>(bytes: &mut Cursor<T>) -> Result<Self> {
+    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
         let enable = true;
 
         let flags = bytes.read_u32_flex()?;
@@ -127,7 +125,7 @@ struct NoiseOscillator {
     wave_type: NoiseWaveType,
     rev: bool,
     freq: f32,
-    volume: f32,
+    volu: f32,
     offset: f32,
 }
 
@@ -136,13 +134,13 @@ const NOISE_OSC_LIMIT_VOLU: f32 = 200.0;
 const NOISE_OSC_LIMIT_OFFSET: f32 = 100.0;
 
 impl NoiseOscillator {
-    fn new<T: AsRef<[u8]>>(bytes: &mut Cursor<T>) -> Result<Self> {
+    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
         let wave_type = NoiseWaveType::from_i32(bytes.read_i32_flex()?).unwrap();
         let rev = bytes.read_u32_flex()? != 0;
         let freq = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_FREQ);
-        let volume = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_VOLU);
+        let volu = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_VOLU);
         let offset = (bytes.read_f32_flex()? / 10.0).max(0.0).min(NOISE_OSC_LIMIT_OFFSET);
-        Ok(Self { wave_type, rev, freq, volume, offset })
+        Ok(Self { wave_type, rev, freq, volu, offset })
     }
 }
 
@@ -168,34 +166,26 @@ enum NoiseWaveType {
     Saw8,
 }
 
-struct Point {
-    x: i32,
-    y: i32,
-}
 
 
-
-
-pub(crate) struct Oscillator {
+struct Oscillator {
     points: Vec<Point>,
-
-    volu: i32,
-    smp_num: usize,
-
     point_reso: i32,
+    volu: u32,
+    smp_num: u32,
 }
 
 impl Oscillator {
-    fn get_overtone(&self, index: usize) -> f64 {
+    fn get_overtone(&self, index: i32) -> f64 {
         let work = self.points.iter().fold(0.0, |acc, point| {
-            let sss = 2.0 * f64::consts::PI * f64::from(point.x) * f64::from(index as u32) / f64::from(self.smp_num as u32);
+            let sss = 2.0 * f64::consts::PI * f64::from(point.x) * f64::from(index) / f64::from(self.smp_num);
             acc + sss.sin() * f64::from(point.y) / f64::from(point.x) / 128.0
         });
         work * f64::from(self.volu) / 128.0
     }
 
-    fn get_coodinate(&self, index: usize) -> f64 {
-        let i = self.point_reso * (index as i32) / (self.smp_num as i32);
+    fn get_coodinate(&self, index: i32) -> f64 {
+        let i = self.point_reso * index / self.smp_num as i32;
         let current = self.points.iter().position(|point| point.x <= i);
 
         let x1;
@@ -205,7 +195,7 @@ impl Oscillator {
 
         match current {
             Some(0) => {
-                let first = &self.points.first().unwrap();
+                let first = self.points.first().unwrap();
                 x1 = first.x;
                 y1 = first.y;
                 x2 = first.x;
@@ -243,26 +233,79 @@ impl Oscillator {
     }
 }
 
-
-
-struct WaveFormat {
-    format_id: u16,
-    ch: u16,
-    sps: u16,
-    byte_per_sec: u16,
-    bps: u16,
-    ext: u16,
+struct Point {
+    x: i32,
+    y: i32,
 }
 
-pub(crate) struct PCM {
-    ch: i32,
-    sps: i32,
-    bps: i32,
-    smp: [u8],
+
+
+pub(crate) struct Pcm {
+    ch: u16, // 1 or 2
+    sps: u32, // 11025 or 22050 or 44100
+    bps: u16, // 8 or 16
+    smp: Vec<u8>,
 }
 
-// impl PCM {
-//     fn new<T: AsRef<[u8]>>(bytes: T) -> Result<Self> {
+static RIFF_CODE: &[u8] = b"RIFF";
+static WAVE_FMT_CODE: &[u8] = b"WAVEfmt ";
+static DATA_CODE: &[u8] = b"data";
 
-//     }
-// }
+impl Pcm {
+    fn new<T: Read + Seek>(mut bytes: T) -> Result<Self> {
+        // riff
+        {
+            let mut riff = [0; 4];
+            bytes.read_exact(&mut riff)?;
+            assert_eq!(riff, RIFF_CODE);
+        }
+        bytes.seek(SeekFrom::Current(4))?;
+
+        // fmt chunk
+        {
+            let mut wavefmt = [0; 8];
+            bytes.read_exact(&mut wavefmt)?;
+            assert_eq!(wavefmt, WAVE_FMT_CODE);
+        }
+        let size = bytes.read_u32::<LittleEndian>()?;
+        let WaveFormatChunk { ch, sps, bps } = WaveFormatChunk::new(&mut bytes)?;
+        bytes.seek(SeekFrom::Current(i64::from(size) - 16))?;
+
+        // data chunk (skip unnecessary chunks)
+        loop {
+            let mut data = [0; 4];
+            bytes.read_exact(&mut data)?;
+            if data == DATA_CODE { break; }
+            let size = bytes.read_u32::<LittleEndian>()?;
+            bytes.seek(SeekFrom::Current(i64::from(size)))?;
+        }
+        let size = bytes.read_u32::<LittleEndian>()?;
+        let mut smp = Vec::with_capacity(size as usize);
+        bytes.take(u64::from(size)).read_to_end(&mut smp)?;
+
+        Ok(Self { ch, sps, bps, smp })
+    }
+}
+
+struct WaveFormatChunk {
+    ch: u16, // 1 or 2
+    sps: u32, // 11025 or 22050 or 44100
+    bps: u16, // 8 or 16
+}
+
+impl WaveFormatChunk {
+    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
+        let format_id = bytes.read_u16::<LittleEndian>()?;
+        let ch = bytes.read_u16::<LittleEndian>()?;
+        let sps = bytes.read_u32::<LittleEndian>()?;
+        let byte_per_sec = bytes.read_u32::<LittleEndian>()?;
+        let block_size = bytes.read_u16::<LittleEndian>()?;
+        let bps = bytes.read_u16::<LittleEndian>()?;
+        assert_eq!(format_id, 1);
+        assert!(ch == 1 || ch == 2);
+        assert!(bps == 8 || bps == 16);
+        assert_eq!(byte_per_sec, sps * u32::from(ch) * u32::from(bps) / 8);
+        assert_eq!(block_size, ch * bps / 8);
+        Ok(WaveFormatChunk { ch, sps, bps })
+    }
+}
