@@ -1,8 +1,10 @@
 use std::{
     f64,
-    io::{Read, Result, Seek, SeekFrom},
+    io::{Read, Seek, SeekFrom},
     vec::Vec,
 };
+
+use crate::error::Error;
 
 use num_traits::FromPrimitive;
 
@@ -10,7 +12,6 @@ use crate::descriptor::ReadBytesExt as _;
 use byteorder::{LittleEndian, ReadBytesExt as _};
 
 mod noise_table;
-use self::noise_table::*;
 
 pub(crate) struct Noise {
     units: Vec<NoiseUnit>,
@@ -23,7 +24,7 @@ impl Noise {
     const MAX_UNIT_NUM: u8 = 4;
     const LIMIT_SMP_NUM: u32 = 48000 * 10;
 
-    pub fn new<T: Read + Seek>(mut bytes: T) -> Result<Self> {
+    pub fn new<T: Read + Seek>(mut bytes: T) -> Result<Self, Error> {
         // signature
         let mut code = [0; 8];
         bytes.read_exact(&mut code)?;
@@ -32,7 +33,7 @@ impl Noise {
         let version = bytes.read_u32::<LittleEndian>()?;
         assert!(version <= Self::VERSION);
 
-        let smp_num_44k = bytes.read_u32_flex()?.min(Self::LIMIT_SMP_NUM);
+        let smp_num_44k = bytes.read_var_u32()?.min(Self::LIMIT_SMP_NUM);
 
         let unit_num = bytes.read_u8()?;
         assert!(unit_num <= Self::MAX_UNIT_NUM);
@@ -45,12 +46,10 @@ impl Noise {
         Ok(Self { units, smp_num_44k })
     }
 
-    // pub fn build(&self, ch: u32, sps: u32, bps: u32) -> Vec<u8> {
-    //     let smp_num = self.smp_num_44k / 44100 / sps;
+    // pub fn build(&self, ch: u32, sps: u32, bps: u32) -> Pcm {
+    //     let smp_num = self.smp_num_44k / 44100 * sps;
 
-    //     let mut work = 0.0;
 
-    //     Vec::new()
     // }
 }
 
@@ -78,22 +77,22 @@ impl NoiseUnit {
     const LIMIT_ENVE_X: i32 = 1000 * 10;
     const LIMIT_ENVE_Y: i32 = 100;
 
-    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
+    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self, Error> {
         let enable = true;
 
-        let flags = bytes.read_u32_flex()?;
+        let flags = bytes.read_var_u32()?;
         assert_eq!(flags & Self::FLAG_UNCOVERED, 0);
 
         // envelope
         let enves = if flags & Self::FLAG_ENVELOPE != 0 {
-            let enve_num = bytes.read_u32_flex()?;
+            let enve_num = bytes.read_var_u32()?;
             assert!(enve_num <= Self::MAX_ENVELOPE_NUM);
 
             let mut enves = Vec::with_capacity(enve_num as usize);
             for _ in 0..enve_num {
                 enves.push(Point {
-                    x: bytes.read_i32_flex()?.max(0).min(Self::LIMIT_ENVE_X),
-                    y: bytes.read_i32_flex()?.max(0).min(Self::LIMIT_ENVE_Y),
+                    x: bytes.read_var_i32()?.max(0).min(Self::LIMIT_ENVE_X),
+                    y: bytes.read_var_i32()?.max(0).min(Self::LIMIT_ENVE_Y),
                 });
             }
             enves
@@ -137,7 +136,7 @@ impl NoiseUnit {
 }
 
 struct NoiseOscillator {
-    wave_type: NoiseWaveType,
+    wave: NoiseWave,
     rev: bool,
     freq: f32,
     volu: f32,
@@ -149,20 +148,20 @@ impl NoiseOscillator {
     const LIMIT_VOLU: f32 = 200.0;
     const LIMIT_OFFSET: f32 = 100.0;
 
-    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
-        let wave_type = NoiseWaveType::from_i32(bytes.read_i32_flex()?).unwrap();
-        let rev = bytes.read_u32_flex()? != 0;
-        let freq = (bytes.read_f32_flex()? / 10.0)
+    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self, Error> {
+        let wave = NoiseWave::from_i32(bytes.read_var_i32()?).unwrap();
+        let rev = bytes.read_var_u32()? != 0;
+        let freq = (bytes.read_var_f32()? / 10.0)
             .max(0.0)
             .min(Self::LIMIT_FREQ);
-        let volu = (bytes.read_f32_flex()? / 10.0)
+        let volu = (bytes.read_var_f32()? / 10.0)
             .max(0.0)
             .min(Self::LIMIT_VOLU);
-        let offset = (bytes.read_f32_flex()? / 10.0)
+        let offset = (bytes.read_var_f32()? / 10.0)
             .max(0.0)
             .min(Self::LIMIT_OFFSET);
         Ok(Self {
-            wave_type,
+            wave,
             rev,
             freq,
             volu,
@@ -172,7 +171,7 @@ impl NoiseOscillator {
 }
 
 #[derive(FromPrimitive)]
-enum NoiseWaveType {
+enum NoiseWave {
     None,
     Sine,
     Saw,
@@ -202,7 +201,7 @@ impl Voice {
     const CODE: &'static [u8] = b"PTVOICE-";
     const VERSION: u32 = 2006_0111;
 
-    pub fn new<T: Read + Seek>(mut bytes: T) -> Result<Self> {
+    pub fn new<T: Read + Seek>(mut bytes: T) -> Result<Self, Error> {
         // signature
         let mut code = [0; 8];
         bytes.read_exact(&mut code)?;
@@ -212,12 +211,12 @@ impl Voice {
         assert!(version <= Self::VERSION);
         bytes.seek(SeekFrom::Current(4))?;
 
-        let x3x_basic_key = bytes.read_i32_flex()?;
-        let work1 = bytes.read_u32_flex()?;
-        let work2 = bytes.read_u32_flex()?;
+        let x3x_basic_key = bytes.read_var_i32()?;
+        let work1 = bytes.read_var_u32()?;
+        let work2 = bytes.read_var_u32()?;
         assert!(work1 == 0 && work2 == 0);
 
-        let unit_num = bytes.read_u32_flex()?;
+        let unit_num = bytes.read_var_u32()?;
         let mut units = Vec::with_capacity(unit_num as usize);
         for _ in 0..unit_num {
             units.push(VoiceUnit::new(&mut bytes)?);
@@ -250,25 +249,25 @@ impl VoiceUnit {
     const DATA_FLAG_ENVELOPE: u32 = 0x0002;
     const DATA_FLAG_UNCOVERED: u32 = 0xffff_fffc;
 
-    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
-        let basic_key = bytes.read_i32_flex()?;
-        let volu = bytes.read_i32_flex()?;
-        let pan = bytes.read_i32_flex()?;
-        let tuning = bytes.read_f32_flex()?;
+    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self, Error> {
+        let basic_key = bytes.read_var_i32()?;
+        let volu = bytes.read_var_i32()?;
+        let pan = bytes.read_var_i32()?;
+        let tuning = bytes.read_var_f32()?;
 
-        let flags = bytes.read_u32_flex()?;
+        let flags = bytes.read_var_u32()?;
         assert_eq!(flags & Self::FLAG_UNCOVERED, 0);
 
-        let data_flags = bytes.read_u32_flex()?;
+        let data_flags = bytes.read_var_u32()?;
         assert_eq!(data_flags & Self::DATA_FLAG_UNCOVERED, 0);
 
         // wave
         let wave = if data_flags & Self::DATA_FLAG_WAVE != 0 {
-            let wave_type = VoiceWaveType::from_i32(bytes.read_i32_flex()?).unwrap();
+            let wave_type = VoiceWaveType::from_i32(bytes.read_var_i32()?).unwrap();
             match wave_type {
                 VoiceWaveType::Coodinate => {
-                    let num = bytes.read_u32_flex()?;
-                    let reso = bytes.read_i32_flex()?;
+                    let num = bytes.read_var_u32()?;
+                    let reso = bytes.read_var_i32()?;
                     let mut points = Vec::with_capacity(num as usize);
                     for _ in 0..num {
                         points.push(Point {
@@ -279,12 +278,12 @@ impl VoiceUnit {
                     Some(VoiceWave::Coodinate { points, reso })
                 }
                 VoiceWaveType::Overtone => {
-                    let num = bytes.read_u32_flex()?;
+                    let num = bytes.read_var_u32()?;
                     let mut points = Vec::with_capacity(num as usize);
                     for _ in 0..num {
                         points.push(Point {
-                            x: bytes.read_i32_flex()?,
-                            y: bytes.read_i32_flex()?,
+                            x: bytes.read_var_i32()?,
+                            y: bytes.read_var_i32()?,
                         });
                     }
                     Some(VoiceWave::Overtone { points })
@@ -334,11 +333,11 @@ struct VoiceEnvelope {
 }
 
 impl VoiceEnvelope {
-    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self> {
-        let fps = bytes.read_i32_flex()?;
-        let head_num = bytes.read_u32_flex()?;
-        let body_num = bytes.read_u32_flex()?; // 0
-        let tail_num = bytes.read_u32_flex()?; // 1
+    fn new<T: Read + Seek>(bytes: &mut T) -> Result<Self, Error> {
+        let fps = bytes.read_var_i32()?;
+        let head_num = bytes.read_var_u32()?;
+        let body_num = bytes.read_var_u32()?; // 0
+        let tail_num = bytes.read_var_u32()?; // 1
         assert_eq!(body_num, 0);
         assert_eq!(tail_num, 1);
 
@@ -346,8 +345,8 @@ impl VoiceEnvelope {
         let mut points = Vec::with_capacity(num as usize);
         for _ in 0..num {
             points.push(Point {
-                x: bytes.read_i32_flex()?,
-                y: bytes.read_i32_flex()?,
+                x: bytes.read_var_i32()?,
+                y: bytes.read_var_i32()?,
             });
         }
         Ok(Self { points, fps })
@@ -435,7 +434,7 @@ impl Pcm {
     const WAVE_FMT_CODE: &'static [u8] = b"WAVEfmt ";
     const DATA_CODE: &'static [u8] = b"data";
 
-    pub fn new<T: Read + Seek>(mut bytes: T) -> Result<Self> {
+    pub fn new<T: Read + Seek>(mut bytes: T) -> Result<Self, Error> {
         // riff
         {
             let mut riff = [0; 4];
@@ -478,7 +477,7 @@ struct WaveFormatTag {
 }
 
 impl WaveFormatTag {
-    fn read_tag<T: Read + Seek>(bytes: &mut T, size: i64) -> Result<Self> {
+    fn read_tag<T: Read + Seek>(bytes: &mut T, size: i64) -> Result<Self, Error> {
         let id = bytes.read_u16::<LittleEndian>()?;
         let ch = bytes.read_u16::<LittleEndian>()?;
         let sps = bytes.read_u32::<LittleEndian>()?;

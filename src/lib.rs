@@ -5,6 +5,7 @@ extern crate num_derive;
 
 mod descriptor;
 mod pulse;
+mod error;
 
 use pulse::Noise;
 use std::{fs::File, io::Error};
