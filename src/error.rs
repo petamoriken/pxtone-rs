@@ -1,6 +1,8 @@
 use std::{fmt, io};
 use failure::{Backtrace, Context, Fail};
 
+pub type Result<T> = std::result::Result<T, Error>;
+
 #[derive(Debug)]
 pub struct Error {
     inner: Context<ErrorKind>,
