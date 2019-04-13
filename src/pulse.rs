@@ -1,3 +1,5 @@
+mod noise_builder;
+
 use std::{
     f64,
     io::{Read, Seek, SeekFrom},
@@ -10,8 +12,6 @@ use num_traits::FromPrimitive;
 
 use crate::descriptor::ReadBytesExt as _;
 use byteorder::{LittleEndian, ReadBytesExt as _};
-
-mod noise_table;
 
 pub(crate) struct Noise {
     units: Vec<NoiseUnit>,

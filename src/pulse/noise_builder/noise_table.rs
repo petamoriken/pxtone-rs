@@ -1,8 +1,5 @@
-const BASIC_SPS: u32 = 44100;
-const BASIC_FREQUENCY: u32 = 100;
-
-const SMP_NUM: usize = (BASIC_SPS / BASIC_FREQUENCY) as usize;
-const SMP_NUM_RAND: usize = 44100;
+pub(super) const SMP_NUM: usize = (super::BASIC_SPS / super::BASIC_FREQUENCY) as usize;
+pub(super) const SMP_NUM_RAND: usize = 44100;
 
 pub(super) static NOISE_TABLE_SINE: [i16; SMP_NUM] = [
     0, 466, 933, 1400, 1866, 2332, 2797, 3262, 3726, 4190, 4652, 5114, 5574, 6034, 6492, 6949,

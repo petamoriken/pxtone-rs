@@ -6,7 +6,7 @@ use crate::error::{Error, ErrorKind};
 /// LEB128 limited to 32 bits
 #[inline]
 fn read_var_32<T: Read + ?Sized>(bytes: &mut T) -> Result<u32, Error> {
-    let result = 0;
+    let mut result = 0;
 
     for i in 0..5 {
         let byte = bytes.read_u8()? as u32;

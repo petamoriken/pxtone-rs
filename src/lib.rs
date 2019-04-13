@@ -1,11 +1,11 @@
 #![warn(clippy::all)]
 
-#[macro_use]
-extern crate num_derive;
-
 mod descriptor;
 mod pulse;
 mod error;
+
+#[macro_use]
+extern crate num_derive;
 
 use pulse::Noise;
 use std::{fs::File, io::Error};
