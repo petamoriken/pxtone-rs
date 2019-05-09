@@ -1,5 +1,5 @@
-use std::{fmt, io};
 use failure::{Backtrace, Context, Fail};
+use std::{fmt, io};
 
 pub type Result<T> = std::result::Result<T, Error>;
 
@@ -41,7 +41,9 @@ impl fmt::Display for Error {
 
 impl From<ErrorKind> for Error {
     fn from(kind: ErrorKind) -> Error {
-        Error { inner: Context::new(kind) }
+        Error {
+            inner: Context::new(kind),
+        }
     }
 }
 
@@ -53,6 +55,8 @@ impl From<Context<ErrorKind>> for Error {
 
 impl From<io::Error> for Error {
     fn from(err: io::Error) -> Error {
-        Error { inner: Context::new(ErrorKind::IO(err)) }
+        Error {
+            inner: Context::new(ErrorKind::IO(err)),
+        }
     }
 }

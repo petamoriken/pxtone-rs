@@ -1,3 +1,4 @@
+mod frequency_table;
 mod noise_builder;
 
 use std::{
@@ -12,6 +13,9 @@ use num_traits::FromPrimitive;
 
 use crate::descriptor::ReadBytesExt as _;
 use byteorder::{LittleEndian, ReadBytesExt as _};
+
+use frequency_table::*;
+use noise_builder::NoiseBuilder;
 
 pub(crate) struct Noise {
     units: Vec<NoiseUnit>,
@@ -46,11 +50,9 @@ impl Noise {
         Ok(Self { units, smp_num_44k })
     }
 
-    // pub fn build(&self, ch: u32, sps: u32, bps: u32) -> Pcm {
-    //     let smp_num = self.smp_num_44k / 44100 * sps;
-
-
-    // }
+    pub fn build(&self, ch: u16, sps: u32, bps: u16) -> Result<Pcm> {
+        NoiseBuilder::build(self, ch, sps, bps)
+    }
 }
 
 struct NoiseUnit {
@@ -421,9 +423,25 @@ struct Point {
     y: i32,
 }
 
+struct Frequency {}
+
+impl Frequency {
+    fn get(key: i32) -> f32 {
+        let i = ((key + 0x6000) * (FREQUENCY_PER_KEY as i32) / 0x100)
+            .max(0)
+            .min((FREQUENCY_TABLE_SIZE as i32) - 1) as usize;
+        FREQUENCY_TABLE[i]
+    }
+
+    fn get2(key: i32) -> f32 {
+        let i = (key >> 4).max(0).min((FREQUENCY_TABLE_SIZE as i32) - 1) as usize;
+        FREQUENCY_TABLE[i]
+    }
+}
+
 pub(crate) struct Pcm {
     ch: u16,  // 1 or 2
-    sps: u32, // 11025 or 22050 or 44100
+    sps: u32,
     bps: u16, // 8 or 16
     smp: Vec<u8>,
 }
