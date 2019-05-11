@@ -2,7 +2,7 @@ mod noise_table;
 
 use byteorder::{LittleEndian, WriteBytesExt as _};
 
-use super::{Frequency, Noise, NoiseOscillator, NoiseUnit, NoiseWave, Pcm};
+use super::{Frequency, Noise, NoiseOscillator, NoiseUnit, NoiseWave, Pcm, PcmWaveFormat};
 use noise_table::*;
 
 use crate::error::Result;
@@ -50,7 +50,7 @@ impl NoiseBuilder {
             }
         }
 
-        Ok(Pcm { ch, sps, bps, smp })
+        Ok(Pcm { fmt: PcmWaveFormat { ch, sps, bps }, smp })
     }
 }
 

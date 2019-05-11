@@ -3,7 +3,7 @@ mod noise_builder;
 
 use std::{
     f64,
-    io::{Read, Seek, SeekFrom},
+    io::{Read, Write, Seek, SeekFrom},
     vec::Vec,
 };
 
@@ -12,7 +12,7 @@ use crate::error::Result;
 use num_traits::FromPrimitive;
 
 use crate::descriptor::ReadBytesExt as _;
-use byteorder::{LittleEndian, ReadBytesExt as _};
+use byteorder::{LittleEndian, ReadBytesExt as _, WriteBytesExt as _};
 
 use frequency_table::*;
 use noise_builder::NoiseBuilder;
@@ -440,9 +440,7 @@ impl Frequency {
 }
 
 pub(crate) struct Pcm {
-    ch: u16,  // 1 or 2
-    sps: u32,
-    bps: u16, // 8 or 16
+    fmt: PcmWaveFormat,
     smp: Vec<u8>,
 }
 
@@ -451,7 +449,7 @@ impl Pcm {
     const WAVE_FMT_CODE: &'static [u8] = b"WAVEfmt ";
     const DATA_CODE: &'static [u8] = b"data";
 
-    pub fn new<T: Read + Seek>(mut bytes: T) -> Result<Self> {
+    fn new<T: Read + Seek>(mut bytes: T) -> Result<Self> {
         // riff
         {
             let mut riff = [0; 4];
@@ -467,7 +465,7 @@ impl Pcm {
             assert_eq!(wavefmt, Self::WAVE_FMT_CODE);
         }
         let size = bytes.read_u32::<LittleEndian>()?;
-        let WaveFormatTag { ch, sps, bps } = WaveFormatTag::read_tag(&mut bytes, i64::from(size))?;
+        let fmt = PcmWaveFormat::read_chunk(&mut bytes, i64::from(size))?;
 
         // data chunk (skip unnecessary chunks)
         loop {
@@ -483,18 +481,39 @@ impl Pcm {
         let mut smp = Vec::with_capacity(size as usize);
         bytes.take(u64::from(size)).read_to_end(&mut smp)?;
 
-        Ok(Self { ch, sps, bps, smp })
+        Ok(Self { fmt, smp })
+    }
+
+    pub fn into_bytes(mut self) -> Vec<u8> {
+        let size = 40 + self.smp.len();
+        let mut bytes = Vec::with_capacity(size);
+
+        // riff
+        bytes.write_all(Self::RIFF_CODE).unwrap();
+        bytes.write_u32::<LittleEndian>((size - 8) as u32).unwrap();
+
+        // fmt
+        bytes.write_all(Self::WAVE_FMT_CODE).unwrap();
+        bytes.write_u32::<LittleEndian>(16).unwrap();
+        self.fmt.write_chunk(&mut bytes).unwrap();
+
+        // data
+        bytes.write_all(Self::DATA_CODE).unwrap();
+        bytes.append(&mut self.smp);
+
+        bytes
     }
 }
 
-struct WaveFormatTag {
+struct PcmWaveFormat {
     ch: u16,  // 1 or 2
     sps: u32, // 11025 or 22050 or 44100
     bps: u16, // 8 or 16
 }
 
-impl WaveFormatTag {
-    fn read_tag<T: Read + Seek>(bytes: &mut T, size: i64) -> Result<Self> {
+impl PcmWaveFormat {
+    fn read_chunk<T: Read + Seek>(bytes: &mut T, size: i64) -> Result<Self> {
+        assert!(size >= 16);
         let id = bytes.read_u16::<LittleEndian>()?;
         let ch = bytes.read_u16::<LittleEndian>()?;
         let sps = bytes.read_u32::<LittleEndian>()?;
@@ -508,5 +527,15 @@ impl WaveFormatTag {
         assert_eq!(byte_per_sec, sps * u32::from(ch) * u32::from(bps) / 8);
         assert_eq!(block_size, ch * bps / 8);
         Ok(Self { ch, sps, bps })
+    }
+
+    fn write_chunk<T: Write>(&self, writer: &mut T) -> Result<()> {
+        writer.write_u16::<LittleEndian>(1)?;
+        writer.write_u16::<LittleEndian>(self.ch)?;
+        writer.write_u32::<LittleEndian>(self.sps)?;
+        writer.write_u32::<LittleEndian>(self.sps * u32::from(self.ch) * u32::from(self.bps) / 8)?;
+        writer.write_u16::<LittleEndian>(self.ch * self.bps / 8)?;
+        writer.write_u16::<LittleEndian>(self.bps)?;
+        Ok(())
     }
 }
