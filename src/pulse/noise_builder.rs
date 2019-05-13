@@ -2,15 +2,16 @@ mod noise_table;
 
 use byteorder::{LittleEndian, WriteBytesExt as _};
 
-use super::{Frequency, Noise, NoiseOscillator, NoiseUnit, NoiseWave, Pcm, PcmWaveFormat};
+use super::{Frequency, Noise, NoiseOscillator, NoiseUnit, NoiseWave, Pcm, PcmWaveFormat, Sample as _};
 use noise_table::*;
 
 use crate::error::Result;
 
 const BASIC_SPS: u32 = 44100;
 const BASIC_FREQUENCY: u32 = 100;
-const SAMPLING_TOP: i16 = i16::max_value();
 const KEY_TOP: u32 = 0x3200;
+
+const SAMPLING_TOP: f64 = i16::max_value() as f64;
 
 pub(super) struct NoiseBuilder {}
 
@@ -38,14 +39,13 @@ impl NoiseBuilder {
             for i in 0..ch {
                 let sample = (sample_and_pans
                     .iter()
-                    .fold(0.0, |acc, (sample, pan)| acc + sample * pan[i as usize])
-                    as i32)
-                    .max(i32::from(-SAMPLING_TOP))
-                    .min(i32::from(SAMPLING_TOP));
+                    .fold(0.0, |acc, (sample, pan)| acc + sample * pan[i as usize]) as i32)
+                    .max(i32::from(i16::min_value()))
+                    .min(i32::from(i16::max_value())) as i16;
                 if sps == 8 {
-                    smp.write_u8(((sample >> 8) + 128) as u8)?;
+                    smp.write_u8(u8::from_i16(sample))?;
                 } else {
-                    smp.write_i16::<LittleEndian>(sample as i16)?;
+                    smp.write_i16::<LittleEndian>(sample)?;
                 }
             }
         }
@@ -126,7 +126,7 @@ impl NoiseBuilderUnit {
 
         // volume
         let vol = self.volu.get_sample();
-        work *= (vol + f64::from(SAMPLING_TOP)) / (f64::from(SAMPLING_TOP) * 2.0);
+        work *= (vol + SAMPLING_TOP) / (SAMPLING_TOP + SAMPLING_TOP);
 
         // envelope
         if self.enve_index < self.enves.len() {
@@ -276,7 +276,7 @@ impl NoiseBuilderOscillator {
         };
         if let OscillatorKind::Freq = self.kind {
             if let NoiseBuilderWave::Raw { .. } = self.wave {
-                work *= f64::from(KEY_TOP) / f64::from(SAMPLING_TOP);
+                work *= f64::from(KEY_TOP) / SAMPLING_TOP;
             }
         }
 

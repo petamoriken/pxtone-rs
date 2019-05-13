@@ -444,6 +444,79 @@ pub(crate) struct Pcm {
     smp: Vec<u8>,
 }
 
+pub trait Sample {
+    fn from_u8(bits: u8) -> Self;
+    fn from_i16(bits: i16) -> Self;
+}
+
+impl Sample for u8 {
+    #[inline]
+    fn from_u8(bits: u8) -> Self {
+        bits
+    }
+
+    #[inline]
+    fn from_i16(bits: i16) -> Self {
+        ((bits >> 8) as i8) as u8 ^ 0x80
+    }
+}
+
+impl Sample for i8 {
+    #[inline]
+    fn from_u8(bits: u8) -> Self {
+        (bits ^ 0x80) as i8
+    }
+
+    #[inline]
+    fn from_i16(bits: i16) -> Self {
+        (bits >> 8) as i8
+    }
+}
+
+impl Sample for u16 {
+    #[inline]
+    fn from_u8(bits: u8) -> Self {
+        u16::from(bits) << 8
+    }
+
+    #[inline]
+    fn from_i16(bits: i16) -> Self {
+        (bits as u16) ^ 0x8000
+    }
+}
+
+impl Sample for i16 {
+    #[inline]
+    fn from_u8(bits: u8) -> Self {
+        i16::from((bits ^ 0x80) as i8) << 8
+    }
+
+    #[inline]
+    fn from_i16(bits: i16) -> Self {
+        bits
+    }
+}
+
+impl Sample for f32 {
+    #[inline]
+    #[allow(non_upper_case_globals)]
+    fn from_u8(bits: u8) -> Self {
+        const i8_min_abs: f32 = -(i8::min_value() as f32);
+        const i8_max_abs: f32 = i8::max_value() as f32;
+        let float_i8 = f32::from((bits ^ 0x80) as i8);
+        if float_i8 < 0.0 { float_i8 / i8_min_abs } else { float_i8 / i8_max_abs }
+    }
+
+    #[inline]
+    #[allow(non_upper_case_globals)]
+    fn from_i16(bits: i16) -> Self {
+        const i16_min_abs: f32 = -(i16::min_value() as f32);
+        const i16_max_abs: f32 = i16::max_value() as f32;
+        let float_i16 = f32::from(bits);
+        if float_i16 < 0.0 { float_i16 / i16_min_abs } else { float_i16 / i16_max_abs }
+    }
+}
+
 impl Pcm {
     const RIFF_CODE: &'static [u8] = b"RIFF";
     const WAVE_FMT_CODE: &'static [u8] = b"WAVEfmt ";
@@ -485,7 +558,7 @@ impl Pcm {
     }
 
     pub fn into_bytes(mut self) -> Vec<u8> {
-        let size = 40 + self.smp.len();
+        let size = 44 + self.smp.len();
         let mut bytes = Vec::with_capacity(size);
 
         // riff
@@ -499,15 +572,38 @@ impl Pcm {
 
         // data
         bytes.write_all(Self::DATA_CODE).unwrap();
+        bytes.write_u32::<LittleEndian>(self.smp.len() as u32).unwrap();
         bytes.append(&mut self.smp);
 
         bytes
+    }
+
+    pub fn to_channels<T: Sample>(&self) -> Vec<Vec<T>> {
+        let PcmWaveFormat { ch, bps, .. } = self.fmt;
+        let mut channels = Vec::with_capacity(ch as usize);
+        let size = self.smp.len() / (ch as usize) / ((bps / 8) as usize);
+        for _ in 0..ch {
+            channels.push(Vec::with_capacity(size));
+        }
+
+        let mut bytes = &self.smp[..];
+        while !bytes.is_empty() {
+            for c in channels.iter_mut() {
+                if bps == 8 {
+                    c.push(T::from_u8(bytes.read_u8().unwrap()));
+                } else {
+                    c.push(T::from_i16(bytes.read_i16::<LittleEndian>().unwrap()));
+                }
+            }
+        }
+
+        channels
     }
 }
 
 struct PcmWaveFormat {
     ch: u16,  // 1 or 2
-    sps: u32, // 11025 or 22050 or 44100
+    sps: u32,
     bps: u16, // 8 or 16
 }
 
