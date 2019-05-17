@@ -24,24 +24,30 @@ impl NoiseBuilder {
             as u32
             * (u32::from(bps) / 8)
             * u32::from(ch)) as usize;
-        let mut units: Vec<NoiseBuilderUnit> = noise
+        let mut units = noise
             .units
             .iter()
             .map(|unit| NoiseBuilderUnit::new(&unit, sps))
-            .collect();
+            .collect::<Vec<_>>();
         let mut smp = Vec::with_capacity(smp_num);
 
         while smp.len() < smp_num {
-            let sample_and_pans: Vec<(f64, [f64; 2])> = units
+            let sample_and_pans = units
                 .iter_mut()
                 .map(|unit| (unit.get_sample(), unit.pan))
-                .collect();
+                .collect::<Vec<_>>();
             for i in 0..ch {
-                let sample = (sample_and_pans
-                    .iter()
-                    .fold(0.0, |acc, (sample, pan)| acc + sample * pan[i as usize]) as i32)
-                    .max(i32::from(i16::min_value()))
-                    .min(i32::from(i16::max_value())) as i16;
+                let sample = {
+                    let sample_f64 = sample_and_pans
+                        .iter()
+                        .fold(0.0, |acc, (sample, pan)| acc + sample * pan[i as usize]);
+                    if sample_f64 < 0.0 {
+                        const NORMALIZE: f64 = (SAMPLING_TOP + 1.0) / SAMPLING_TOP;
+                        ((sample_f64 * NORMALIZE) as i32).max(i32::from(i16::min_value())) as i16
+                    } else {
+                        ((sample_f64 as i32).min(i32::from(i16::max_value()))) as i16
+                    }
+                };
                 if sps == 8 {
                     smp.write_u8(u8::from_i16(sample))?;
                 } else {
@@ -82,7 +88,7 @@ impl NoiseBuilderUnit {
                 smp: (sps as i32) * enve.x / 1000,
                 mag: f64::from(enve.y) / 100.0,
             })
-            .collect::<Vec<NoiseBuilderPoint>>();
+            .collect::<Vec<_>>();
         let enve_index = 0;
         let enve_mag_start = 0.0;
         let enve_mag_margin = 0.0;
