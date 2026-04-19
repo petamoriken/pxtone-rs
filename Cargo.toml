@@ -1,0 +1,8 @@
+[package]
+name = "pxtone"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+byteorder = "1"
+lewton = "0.10.2"
