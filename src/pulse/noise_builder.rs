@@ -128,14 +128,12 @@ struct UnitState {
 // ---- NoiseBuilder ----
 
 pub struct NoiseBuilder {
-  freq: FrequencyTable,
   tables: [Option<Vec<i16>>; WAVETYPE_NUM],
 }
 
 impl NoiseBuilder {
   pub fn new() -> Self {
     Self {
-      freq: FrequencyTable::new(),
       tables: std::array::from_fn(|_| None),
     }
   }
@@ -353,7 +351,14 @@ impl NoiseBuilder {
   }
 
   /// Generates PCM from a Noise design
-  pub fn build_noise(&mut self, noise: &mut Noise, ch: usize, sps: i32, bps: i32) -> Option<Pcm> {
+  pub fn build_noise(
+    &mut self,
+    noise: &mut Noise,
+    ch: usize,
+    sps: i32,
+    bps: i32,
+    freq: &FrequencyTable,
+  ) -> Option<Pcm> {
     noise.fix();
 
     // Build only the tables required by this Noise design
@@ -466,7 +471,7 @@ impl NoiseBuilder {
           let raw = po.get_sample(&self.tables);
           raw // already scaled by volume in get_sample
         };
-        let main_inc = u.main.increment * self.freq.get(fre as i32) as f64;
+        let main_inc = u.main.increment * freq.get(fre as i32) as f64;
         u.main.increment(main_inc, rand_tbl);
         let freq_inc = u.freq.increment;
         u.freq.increment(freq_inc, rand_tbl);

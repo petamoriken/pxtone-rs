@@ -508,10 +508,11 @@ impl PxtoneService {
   pub fn tones_ready(&mut self) -> Result<(), PxtoneError> {
     let sps = self.dst_sps;
 
-    // noise_builder (field) and woices (field) are independent, so simultaneous borrows are OK
+    // noise_builder, freq, and woices are independent fields, so simultaneous borrows are OK
     let noise_builder = &mut self.noise_builder;
+    let freq = &self.freq;
     for w in &mut self.woices {
-      w.tone_ready(noise_builder, sps)?;
+      w.tone_ready(noise_builder, freq, sps)?;
     }
     for d in &mut self.delays {
       d.tone_ready(self.master.beat_num, self.master.beat_tempo, sps);

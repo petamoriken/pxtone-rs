@@ -1,5 +1,6 @@
 use crate::error::PxtoneError;
 use crate::event::{EVENTDEFAULT_BASICKEY, read_var_int};
+use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
 use crate::pulse::oscillator::{Oscillator, Point};
@@ -331,7 +332,11 @@ impl Woice {
   }
 
   // ---- Sample buffer preparation ----
-  pub fn tone_ready_sample(&mut self, noise_builder: &mut NoiseBuilder) -> Result<(), PxtoneError> {
+  pub fn tone_ready_sample(
+    &mut self,
+    noise_builder: &mut NoiseBuilder,
+    freq: &FrequencyTable,
+  ) -> Result<(), PxtoneError> {
     let ch = 2;
     let sps = 44100;
     let bps = 16;
@@ -363,7 +368,7 @@ impl Woice {
         }
         VoiceType::Noise => {
           if let Some(noise) = &mut unit.noise {
-            if let Some(pcm) = noise_builder.build_noise(noise, ch as usize, sps, bps) {
+            if let Some(pcm) = noise_builder.build_noise(noise, ch as usize, sps, bps, freq) {
               inst.smp_body_w = noise.smp_num_44k;
               inst.samples_w = pcm.samples().to_vec();
             }
@@ -452,9 +457,10 @@ impl Woice {
   pub fn tone_ready(
     &mut self,
     noise_builder: &mut NoiseBuilder,
+    freq: &FrequencyTable,
     sps: i32,
   ) -> Result<(), PxtoneError> {
-    self.tone_ready_sample(noise_builder)?;
+    self.tone_ready_sample(noise_builder, freq)?;
     self.tone_ready_envelope(sps)?;
     Ok(())
   }
