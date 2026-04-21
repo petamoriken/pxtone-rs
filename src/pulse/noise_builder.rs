@@ -56,8 +56,7 @@ impl OscState {
     };
     let volume = osc.volume as f64 / 100.0;
     let (rdm_start, rdm_margin, rdm_index) = if ran && !rand_tbl.is_empty() {
-      let idx =
-        ((SMP_NUM_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_NUM_RAND - 1);
+      let idx = ((SMP_NUM_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_NUM_RAND - 1);
       let start = rand_tbl[idx];
       let margin = rand_tbl[(idx + 1).min(SMP_NUM_RAND - 1)] as i32 - start as i32;
       (start, margin, idx)
@@ -366,7 +365,9 @@ impl NoiseBuilder {
       }
     }
 
-    let rand_tbl = self.tables[WaveType::Random as usize].as_deref().unwrap_or(&[]);
+    let rand_tbl = self.tables[WaveType::Random as usize]
+      .as_deref()
+      .unwrap_or(&[]);
     let smp_num = (noise.smp_num_44k as f64 / (44100.0 / sps as f64)) as usize;
 
     // Build unit states

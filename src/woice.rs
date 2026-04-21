@@ -449,7 +449,11 @@ impl Woice {
     Ok(())
   }
 
-  pub fn tone_ready(&mut self, noise_builder: &mut NoiseBuilder, sps: i32) -> Result<(), PxtoneError> {
+  pub fn tone_ready(
+    &mut self,
+    noise_builder: &mut NoiseBuilder,
+    sps: i32,
+  ) -> Result<(), PxtoneError> {
     self.tone_ready_sample(noise_builder)?;
     self.tone_ready_envelope(sps)?;
     Ok(())
