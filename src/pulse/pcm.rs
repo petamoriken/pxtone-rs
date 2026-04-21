@@ -1,5 +1,5 @@
-// PCM バッファ (pxtnPulse_PCM)
-// RIFF WAV の読み込みとチャンネル数/ビット深度/サンプルレート変換
+// PCM buffer (pxtnPulse_PCM)
+// RIFF WAV loading and channel/bit-depth/sample-rate conversion
 
 use crate::error::PxtoneError;
 use byteorder::{LE, ReadBytesExt};
@@ -49,19 +49,19 @@ impl Pcm {
     (self.smp_head + self.smp_body + self.smp_tail) as f32 / self.sps as f32
   }
 
-  /// RIFF WAV を読み込む
+  /// Reads a RIFF WAV file
   pub fn read_wav<R: Read + Seek>(r: &mut R) -> Result<Self, PxtoneError> {
-    // "RIFFxxxxWAVEfmt " の 16 バイト
+    // 16-byte "RIFFxxxxWAVEfmt " header
     let mut header = [0u8; 16];
     r.read_exact(&mut header)?;
     if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" || &header[12..16] != b"fmt " {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    // fmt チャンクサイズ
+    // fmt chunk size
     let _fmt_size = r.read_u32::<LE>()?;
 
-    // WAVEFORMATEX (18 バイト読む)
+    // WAVEFORMATEX (read 18 bytes)
     let format_id = r.read_u16::<LE>()?;
     let ch = r.read_u16::<LE>()? as i32;
     let sps = r.read_u32::<LE>()? as i32;
@@ -80,7 +80,7 @@ impl Pcm {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    // "data" チャンクを探す（"RIFFxxxxWAVE" = 12 バイト の先頭にシーク）
+    // Search for the "data" chunk (seek to start of "RIFFxxxxWAVE" = 12 bytes)
     r.seek(SeekFrom::Start(12))?;
     let data_size = loop {
       let mut tag = [0u8; 4];
@@ -99,7 +99,7 @@ impl Pcm {
     Ok(pcm)
   }
 
-  // ---- 変換 ----
+  // ---- Conversion ----
 
   pub fn convert(&mut self, new_ch: i32, new_sps: i32, new_bps: i32) -> Result<(), PxtoneError> {
     self.convert_channel(new_ch)?;
@@ -256,8 +256,8 @@ impl Pcm {
     }
   }
 
-  /// moo 合成用: インターリーブされたステレオ 16bit サンプルとして読み出す
-  /// pos はサンプル単位（フレーム単位ではない）。ch=2 なら (L, R) でインターリーブ
+  /// For moo synthesis: reads as an interleaved stereo 16-bit sample.
+  /// pos is in sample units (not frame units). For ch=2, interleaved as (L, R).
   pub fn get_sample_i16_at(&self, frame: usize, ch: usize) -> i16 {
     let bytes_per_frame = (self.ch * self.bps / 8) as usize;
     let total_frames = (self.smp_head + self.smp_body + self.smp_tail) as usize;

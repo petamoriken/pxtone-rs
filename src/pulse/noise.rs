@@ -2,7 +2,7 @@ use crate::error::PxtoneError;
 use crate::event::read_var_int;
 use std::io::Read;
 
-// ---- 波形種別 ----
+// ---- Wave type ----
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u8)]
@@ -55,7 +55,7 @@ impl TryFrom<i32> for WaveType {
   }
 }
 
-// ---- オシレーター設計 ----
+// ---- Oscillator design ----
 
 #[derive(Clone, Debug, Default)]
 pub struct NoiseOscillator {
@@ -66,7 +66,7 @@ pub struct NoiseOscillator {
   pub b_rev: bool,
 }
 
-// ---- ノイズユニット設計 ----
+// ---- Noise unit design ----
 
 #[derive(Clone, Debug)]
 pub struct NoisePoint {
@@ -97,7 +97,7 @@ impl Default for NoiseUnit {
   }
 }
 
-// ---- フラグ定数 ----
+// ---- Flag constants ----
 
 const FLAG_ENVELOPE: u32 = 0x0004;
 const FLAG_PAN: u32 = 0x0008;
@@ -136,7 +136,7 @@ impl Noise {
     self.smp_num_44k as f32 / 44100.0
   }
 
-  /// 各パラメータを有効範囲にクランプ
+  /// Clamps all parameters to their valid ranges
   pub fn fix(&mut self) {
     if self.smp_num_44k > LIMIT_SMP_NUM {
       self.smp_num_44k = LIMIT_SMP_NUM;
@@ -160,7 +160,7 @@ impl Noise {
     }
   }
 
-  /// "PTNOISE-" 形式を読み込む
+  /// Reads a "PTNOISE-" format noise block
   pub fn read<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let mut code = [0u8; 8];
     r.read_exact(&mut code)?;

@@ -7,7 +7,7 @@ use crate::pulse::pcm::Pcm;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
-// ---- 定数 ----
+// ---- Constants ----
 pub const MAX_WOICE_NAME: usize = 16;
 pub const MAX_VOICE_NUM: usize = 2; // pxtnMAX_UNITCONTROLVOICE
 pub const BUFSIZE_TIMEPAN: usize = 0x40;
@@ -22,7 +22,7 @@ pub const DATA_FLAG_WAVE: u32 = 0x00000001;
 pub const DATA_FLAG_ENVELOPE: u32 = 0x00000002;
 pub const DATA_FLAG_UNCOVERED: u32 = 0xfffffffc;
 
-// ---- 種別 ----
+// ---- Types ----
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub enum WoiceType {
   #[default]
@@ -43,7 +43,7 @@ pub enum VoiceType {
   OggVorbis,
 }
 
-// ---- 波形 / エンベロープ ----
+// ---- Waveform / Envelope ----
 #[derive(Clone, Debug, Default)]
 pub struct VoiceWave {
   pub reso: i32,
@@ -59,7 +59,7 @@ pub struct VoiceEnvelope {
   pub points: Vec<(i32, i32)>,
 }
 
-// ---- ユニット（設計データ）----
+// ---- Unit (design data) ----
 pub struct VoiceUnit {
   pub basic_key: i32,
   pub volume: i32,
@@ -94,7 +94,7 @@ impl Default for VoiceUnit {
   }
 }
 
-// ---- OGG データ ----
+// ---- OGG data ----
 pub struct OggData {
   pub ch: i32,
   pub sps: i32,
@@ -102,13 +102,13 @@ pub struct OggData {
   pub data: Vec<u8>,
 }
 
-// ---- インスタンス（合成バッファ）----
+// ---- Instance (synthesis buffer) ----
 #[derive(Default)]
 pub struct VoiceInstance {
   pub smp_head_w: i32,
   pub smp_body_w: i32,
   pub smp_tail_w: i32,
-  pub samples_w: Vec<u8>, // stereo 16bit インターリーブ
+  pub samples_w: Vec<u8>, // stereo 16-bit interleaved
   pub env: Vec<u8>,
   pub env_size: i32,
   pub env_release: i32,
@@ -116,7 +116,7 @@ pub struct VoiceInstance {
 }
 
 impl VoiceInstance {
-  /// インターリーブ stereo 16bit バッファから 1 サンプル取得
+  /// Gets one sample from an interleaved stereo 16-bit buffer
   pub fn get_sample_i16(&self, frame: usize, ch: usize) -> i16 {
     let offset = frame * 4 + ch * 2;
     if offset + 1 >= self.samples_w.len() {
@@ -154,7 +154,7 @@ impl Woice {
     Self::default()
   }
 
-  // ---- PCM マテリアル読み込み ----
+  // ---- PCM material loading ----
   pub fn read_mate_pcm<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_u32::<LE>()?;
     // _MATERIALSTRUCT_PCM (24 bytes)
@@ -188,7 +188,7 @@ impl Woice {
     Ok(())
   }
 
-  // ---- PTN マテリアル読み込み ----
+  // ---- PTN material loading ----
   pub fn read_mate_ptn<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     // _MATERIALSTRUCT_PTN (16 bytes)
@@ -218,7 +218,7 @@ impl Woice {
     Ok(())
   }
 
-  // ---- PTV マテリアル読み込み ----
+  // ---- PTV material loading ----
   pub fn read_mate_ptv<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     // _MATERIALSTRUCT_PTV (12 bytes)
@@ -236,7 +236,7 @@ impl Woice {
     Ok(())
   }
 
-  // ---- OGGV マテリアル読み込み ----
+  // ---- OGGV material loading ----
   pub fn read_mate_oggv<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_u32::<LE>()?;
     // _MATERIALSTRUCT_OGGV (12 bytes)
@@ -275,7 +275,7 @@ impl Woice {
     Ok(())
   }
 
-  // ---- PTV 読み込み（PTVOICE- フォーマット）----
+  // ---- PTV loading (PTVOICE- format) ----
   fn ptv_read<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let mut code = [0u8; 8];
     r.read_exact(&mut code)?;
@@ -330,7 +330,7 @@ impl Woice {
     Ok(())
   }
 
-  // ---- サンプルバッファ準備 ----
+  // ---- Sample buffer preparation ----
   pub fn tone_ready_sample(&mut self, noise_builder: &NoiseBuilder) -> Result<(), PxtoneError> {
     let ch = 2;
     let sps = 44100;
@@ -392,7 +392,7 @@ impl Woice {
     Ok(())
   }
 
-  // ---- エンベロープバッファ準備 ----
+  // ---- Envelope buffer preparation ----
   pub fn tone_ready_envelope(&mut self, sps: i32) -> Result<(), PxtoneError> {
     for (unit, inst) in self.voices.iter().zip(self.instances.iter_mut()) {
       let env = &unit.envelope;
@@ -412,7 +412,7 @@ impl Woice {
 
         inst.env = vec![0u8; inst.env_size as usize];
 
-        // ポイントを sps スケールに変換
+        // Convert points to sps scale
         let mut pts: Vec<(i32, i32)> = Vec::new();
         let mut offset = 0i32;
         for e in 0..env.head_num as usize {
@@ -422,7 +422,7 @@ impl Woice {
           }
         }
 
-        // エンベロープテーブルを線形補間で埋める
+        // Fill the envelope table with linear interpolation
         let mut e = 0usize;
         let mut start = (0i32, 0i32);
         for s in 0..inst.env_size as usize {
@@ -456,7 +456,7 @@ impl Woice {
   }
 }
 
-// ---- PTV 波形読み込みヘルパー ----
+// ---- PTV wave-reading helpers ----
 fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneError> {
   let vtype = read_var_int(r)?;
   unit.voice_type = match vtype {
@@ -514,7 +514,7 @@ fn ptv_read_envelope<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), Pxt
   Ok(())
 }
 
-// ---- PTV 波形バッファ更新 ----
+// ---- PTV wave buffer update ----
 fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch: i32, _sps: i32, bps: i32) {
   let smp_body = inst.smp_body_w as usize;
   let pan_vol: [i32; 2] = if ch == 2 {
@@ -588,7 +588,7 @@ fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch: i32, _sps: i3
   }
 }
 
-// ---- OGG Vorbis デコード (lewton) ----
+// ---- OGG Vorbis decode (lewton) ----
 fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, String> {
   use lewton::inside_ogg::OggStreamReader;
   use std::io::Cursor;
@@ -604,7 +604,7 @@ fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, String> {
     pcm_i16.extend_from_slice(&pck);
   }
 
-  // i16 → u8 LE バイト列
+  // i16 → u8 LE byte sequence
   let mut out = vec![0u8; pcm_i16.len() * 2];
   for (i, &s) in pcm_i16.iter().enumerate() {
     let bytes = s.to_le_bytes();

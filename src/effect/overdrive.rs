@@ -45,7 +45,7 @@ impl OverDrive {
     group_smps[self.group] = (work as f32 * self.amp) as i32;
   }
 
-  /// (20 byte) オーバードライブ構造体を読み込む
+  /// Reads a (20-byte) overdrive structure
   pub fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_u32::<LE>()?;
     let xxx = r.read_u16::<LE>()?;

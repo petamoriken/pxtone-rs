@@ -1,5 +1,5 @@
-// オシレーター (pxtnPulse_Oscillator)
-// 波形テーブルからサンプルを 1 個ずつ生成する
+// Oscillator (pxtnPulse_Oscillator)
+// Generates samples one at a time from a waveform table
 
 #[derive(Clone, Debug)]
 pub struct Point {
@@ -40,7 +40,7 @@ impl Oscillator {
     self.point_reso = point_reso;
   }
 
-  /// 倍音合成でサンプルを 1 個取得
+  /// Gets one sample via overtone synthesis
   pub fn get_one_sample_overtone(&self, index: i32) -> f64 {
     use std::f64::consts::PI;
     let mut work = 0.0f64;
@@ -51,11 +51,11 @@ impl Oscillator {
     work * self.volume as f64 / 128.0
   }
 
-  /// 座標補間でサンプルを 1 個取得
+  /// Gets one sample via coordinate interpolation
   pub fn get_one_sample_coodinate(&self, index: i32) -> f64 {
     let i = self.point_reso * index / self.sample_num;
 
-    // 対象の 2 点を探す
+    // Find the two surrounding points
     let c = self
       .points
       .iter()
@@ -63,7 +63,7 @@ impl Oscillator {
       .unwrap_or(self.point_num as usize);
 
     let (x1, y1, x2, y2) = if c == self.point_num as usize {
-      // 末端
+      // End of list
       let last = &self.points[c - 1];
       let first = &self.points[0];
       (last.x, last.y, self.point_reso, first.y)

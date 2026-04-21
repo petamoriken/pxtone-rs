@@ -15,7 +15,7 @@ use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VoiceInstance, Woice};
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
-// ---- 定数 ----
+// ---- Constants ----
 const MAX_UNIT_NUM: usize = 50;
 const MAX_WOICE_NUM: usize = 100;
 const MAX_GROUP_NUM: usize = 7;
@@ -27,7 +27,7 @@ const MAX_UNIT_NAME: usize = 16;
 const VERSION_SIZE: usize = 16;
 const CODE_SIZE: usize = 8;
 
-// バージョン文字列
+// Version strings
 const CODE_TUNE_X2X: &[u8; 16] = b"PTTUNE--20050608";
 const CODE_TUNE_X3X: &[u8; 16] = b"PTTUNE--20060115";
 const CODE_TUNE_X4X: &[u8; 16] = b"PTTUNE--20060930";
@@ -47,7 +47,7 @@ enum FmtVer {
   V5,
 }
 
-// ---- 公開 API ----
+// ---- Public API ----
 
 pub struct VomitPrepFlags;
 
@@ -91,13 +91,13 @@ pub struct PxtoneService {
   noise_builder: NoiseBuilder,
   freq: FrequencyTable,
 
-  // 出力品質
+  // Output quality
   dst_ch_num: i32,
   dst_sps: i32,
 
-  // moo ランタイム
+  // moo runtime
   group_num: usize,
-  unit_woice_idxs: Vec<usize>, // ユニットごとの現在のウォイスインデックス
+  unit_woice_idxs: Vec<usize>, // current voice index per unit
 
   moo_clock_rate: f64,
   moo_smp_stride: f32,
@@ -167,7 +167,7 @@ impl PxtoneService {
     }
   }
 
-  /// 出力品質の設定（チャンネル数と SPS）
+  /// Sets the output quality (channel count and SPS)
   pub fn set_destination_quality(&mut self, ch_num: i32, sps: i32) {
     self.dst_ch_num = ch_num;
     self.dst_sps = sps;
@@ -177,9 +177,9 @@ impl PxtoneService {
     (self.dst_ch_num, self.dst_sps)
   }
 
-  // ---- ファイル読み込み ----
+  // ---- File loading ----
 
-  /// pxtone ファイルを読み込む
+  /// Reads a pxtone file
   pub fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     self.clear();
 
@@ -212,12 +212,12 @@ impl PxtoneService {
     self.b_valid_data = false;
   }
 
-  /// バージョン文字列を読み込んで FmtVer を返す
+  /// Reads the version string and returns a FmtVer
   fn read_version<R: Read>(&self, r: &mut R) -> Result<FmtVer, PxtoneError> {
     let mut ver = [0u8; VERSION_SIZE];
     r.read_exact(&mut ver)?;
 
-    // x1x / x2x は exe_ver/rrr フィールドを持たない
+    // x1x / x2x do not have exe_ver/rrr fields
     if &ver == CODE_PROJ_X1X {
       return Ok(FmtVer::X1x);
     }
@@ -238,7 +238,7 @@ impl PxtoneService {
       return Err(PxtoneError::UnknownFormat);
     };
 
-    // exe_ver + rrr (4 bytes) を読み飛ばす
+    // Skip exe_ver + rrr (4 bytes)
     let _exe_ver = r.read_u16::<LE>()?;
     let _rrr = r.read_u16::<LE>()?;
 
@@ -255,7 +255,7 @@ impl PxtoneService {
       r.read_exact(&mut code)?;
 
       match &code {
-        // v5 タグ
+        // v5 tags
         b"num UNIT" => {
           let size = r.read_i32::<LE>()?;
           if size != 4 {
@@ -333,7 +333,7 @@ impl PxtoneService {
           break;
         }
 
-        // 旧フォーマット
+        // Legacy formats
         b"evenMAST" => self.master.read_x4x(r)?,
         b"evenUNIT" => self.events.read_x4x_block(r, false, true)?,
         b"pxtnUNIT" => self.read_old_unit_v3(r)?,
@@ -464,7 +464,7 @@ impl PxtoneService {
     Ok(())
   }
 
-  // ---- x3x/x2x/x1x 後処理 ----
+  // ---- x3x/x2x/x1x post-processing ----
 
   fn x3x_tuning_key_event(&mut self) -> Result<(), PxtoneError> {
     use crate::event::EVENTKIND_KEY;
@@ -504,11 +504,11 @@ impl PxtoneService {
 
   // ---- tone_ready / tone_clear ----
 
-  /// 各 Woice / Delay / OverDrive のトーン準備（再生前に呼ぶ）
+  /// Prepares tones for all Woice/Delay/OverDrive objects (call before playback)
   pub fn tones_ready(&mut self) -> Result<(), PxtoneError> {
     let sps = self.dst_sps;
 
-    // noise_builder (field) と woices (field) は独立しているので同時借用可能
+    // noise_builder (field) and woices (field) are independent, so simultaneous borrows are OK
     for w in &mut self.woices {
       w.tone_ready(&self.noise_builder, sps)?;
     }
@@ -530,9 +530,9 @@ impl PxtoneService {
     }
   }
 
-  // ---- moo 合成エンジン ----
+  // ---- moo synthesis engine ----
 
-  /// 合成の準備（再生開始前に呼ぶ）
+  /// Prepares synthesis (call before starting playback)
   pub fn moo_preparation(&mut self, prep: Option<&VomitPreparation>) -> Result<(), PxtoneError> {
     if !self.b_valid_data || self.dst_ch_num == 0 || self.dst_sps == 0 {
       self.b_end_vomit = true;
@@ -691,8 +691,8 @@ impl PxtoneService {
     }
   }
 
-  /// 1 サンプル分を合成して `out[0..ch_num]` に書き込む。
-  /// 継続中なら `true`、終端なら `false` を返す。
+  /// Synthesizes one sample and writes it into `out[0..ch_num]`.
+  /// Returns `true` while playing, `false` when the end is reached.
   fn moo_pxtone_sample(&mut self, out: &mut [i16; 2]) -> bool {
     let unit_num = self.units.len();
     let group_num = self.group_num;
@@ -705,18 +705,18 @@ impl PxtoneService {
     let smp_end = self.moo_smp_end;
     let smp_stride = self.moo_smp_stride;
 
-    // ---- 1. エンベロープ処理 ----
+    // ---- 1. Envelope processing ----
     for u in 0..unit_num {
       let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
       if let Some(woice) = self.woices.get(wi) {
-        // SAFETY: woices[wi] と units[u] は独立したフィールド要素
+        // SAFETY: woices[wi] and units[u] are independent elements
         let instances = woice.instances.as_slice() as *const [VoiceInstance];
         let instances = unsafe { &*instances };
         self.units[u].tone_envelope(instances);
       }
     }
 
-    // ---- 2. イベント処理 ----
+    // ---- 2. Event processing ----
     let clock = (smp_count as f64 / clock_rate) as i32;
     let event_count = self.events.records().len();
 
@@ -726,7 +726,7 @@ impl PxtoneService {
         break;
       }
 
-      // イベントをクローンしてからインデックスを進める
+      // Clone the event before advancing the index
       let ev: EventRecord = self.events.records()[self.moo_eve_idx].clone();
       self.moo_eve_idx += 1;
 
@@ -748,7 +748,7 @@ impl PxtoneService {
       }
     }
 
-    // ---- 4. チャンネルごとのグループ合計 → エフェクト → 出力 ----
+    // ---- 4. Per-channel group sum → effects → output ----
     let mut group_smps = vec![0i32; group_num];
 
     for ch in 0..ch_num {
@@ -768,20 +768,20 @@ impl PxtoneService {
 
       let mut work: i32 = group_smps.iter().sum();
 
-      // フェード
+      // Fade
       if self.moo_fade_fade != 0 && self.moo_fade_max != 0 {
         work = work * (self.moo_fade_count >> 8) / self.moo_fade_max;
       }
 
-      // マスターボリューム
+      // Master volume
       work = (work as f32 * self.moo_master_vol) as i32;
 
-      // クリップ
+      // Clip
       work = work.clamp(-self.moo_top, self.moo_top);
       out[ch] = work as i16;
     }
 
-    // ---- 5. インクリメント ----
+    // ---- 5. Increment ----
     self.moo_smp_count += 1;
     self.moo_time_pan_index = (self.moo_time_pan_index + 1) & (BUFSIZE_TIMEPAN - 1);
 
@@ -800,7 +800,7 @@ impl PxtoneService {
       d.tone_increment();
     }
 
-    // ---- 6. フェード処理 ----
+    // ---- 6. Fade processing ----
     if self.moo_fade_fade < 0 {
       if self.moo_fade_count > 0 {
         self.moo_fade_count -= 1;
@@ -815,7 +815,7 @@ impl PxtoneService {
       }
     }
 
-    // ---- 7. ループ / 終端チェック ----
+    // ---- 7. Loop / end-of-stream check ----
     if self.moo_smp_count >= self.moo_smp_end {
       if !self.moo_b_loop {
         return false;
@@ -828,7 +828,7 @@ impl PxtoneService {
     true
   }
 
-  /// イベント 1 件を処理する
+  /// Processes one event
   fn process_event(
     &mut self,
     ev: &EventRecord,
@@ -928,9 +928,9 @@ impl PxtoneService {
     }
   }
 
-  /// buf に PCM データを書き込む。
-  /// buf のサイズは `dst_ch_num * 2` バイトの倍数であること。
-  /// 戻り値: 正常に書き込めたら `true`
+  /// Writes PCM data into buf.
+  /// The size of buf must be a multiple of `dst_ch_num * 2` bytes.
+  /// Returns `true` if data was written successfully.
   pub fn moo(&mut self, buf: &mut [u8]) -> bool {
     if !self.b_valid_data {
       return false;
@@ -961,7 +961,7 @@ impl PxtoneService {
       smp_written += 1;
     }
 
-    // 残りをゼロ埋め
+    // Zero-fill the remainder
     let start = smp_written * byte_per_smp;
     if start < buf.len() {
       buf[start..].fill(0);
@@ -970,7 +970,7 @@ impl PxtoneService {
     true
   }
 
-  // ---- ゲッター ----
+  // ---- Getters ----
 
   pub fn is_end_vomit(&self) -> bool {
     self.b_end_vomit

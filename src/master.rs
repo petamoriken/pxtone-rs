@@ -98,9 +98,9 @@ impl Master {
     self.beat_clock = beat_clock;
   }
 
-  /// v5 形式の Master ブロックを読み込む
-  /// ブロック: u32 size(=15), i16 beat_clock, i8 beat_num, f32 beat_tempo,
-  ///           i32 clock_repeat, i32 clock_last
+  /// Reads a v5-format Master block
+  /// Block: u32 size(=15), i16 beat_clock, i8 beat_num, f32 beat_tempo,
+  ///        i32 clock_repeat, i32 clock_last
   pub fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let size = r.read_u32::<LE>()?;
     if size != 15 {
@@ -126,7 +126,7 @@ impl Master {
     Ok(())
   }
 
-  /// v5 形式の Master ブロックをスキップしてイベント数（定数5）を返す
+  /// Skips a v5-format Master block and returns the event count (constant 5)
   pub fn count_v5<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
     let size = r.read_u32::<LE>()?;
     if size != 15 {
@@ -137,7 +137,7 @@ impl Master {
     Ok(5)
   }
 
-  /// x4x 形式の Master ブロックを読み込む
+  /// Reads an x4x-format Master block
   pub fn read_x4x<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let data_num = r.read_u16::<LE>()?;
@@ -213,7 +213,7 @@ impl Master {
     Ok(())
   }
 
-  /// x4x 形式の Master ブロックをスキップしてイベント数を返す
+  /// Skips an x4x-format Master block and returns the event count
   pub fn count_x4x<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let data_num = r.read_u16::<LE>()?;

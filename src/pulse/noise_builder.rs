@@ -1,5 +1,5 @@
-// ノイズビルダー (pxtnPulse_NoiseBuilder)
-// 波形テーブルを初期化し、Noise 設計から PCM を生成する
+// Noise builder (pxtnPulse_NoiseBuilder)
+// Initializes wave tables and generates PCM from a Noise design
 
 use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::{Noise, NoiseOscillator, WAVETYPE_NUM, WaveType};
@@ -32,7 +32,7 @@ impl Rand {
   }
 }
 
-// ---- 内部オシレーター状態 ----
+// ---- Internal oscillator state ----
 #[derive(Clone)]
 struct OscState {
   increment: f64,
@@ -107,7 +107,7 @@ impl OscState {
   }
 }
 
-// ---- ユニット状態 ----
+// ---- Unit state ----
 struct UnitState {
   enabled: bool,
   pan: [f64; 2],
@@ -219,7 +219,7 @@ impl NoiseBuilder {
       })
       .collect();
 
-    // Random2: C++ ではランダムテーブルと同じポインタを使う → None のまま（build 時に Random と同じ扱い）
+    // Random2: in C++ this shares the same pointer as the random table → kept empty (treated as Random at build time)
     tables[WaveType::Random2 as usize] = Vec::new();
 
     // Rect3
@@ -337,13 +337,13 @@ impl NoiseBuilder {
     }
   }
 
-  /// ノイズ設計から PCM を生成する
+  /// Generates PCM from a Noise design
   pub fn build_noise(&self, noise: &mut Noise, ch: usize, sps: i32, bps: i32) -> Option<Pcm> {
     noise.fix();
     let rand_tbl = &self.tables[WaveType::Random as usize];
     let smp_num = (noise.smp_num_44k as f64 / (44100.0 / sps as f64)) as usize;
 
-    // ユニット状態を構築
+    // Build unit states
     let mut units: Vec<UnitState> = noise
       .units
       .iter()

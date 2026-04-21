@@ -1,15 +1,15 @@
-// 周波数テーブル (pxtnPulse_Frequency)
-//   16 オクターブ × 12 鍵 × 16 サンプル/鍵 = 3072 エントリ
+// Frequency table (pxtnPulse_Frequency)
+//   16 octaves × 12 keys × 16 samples/key = 3072 entries
 
 const OCTAVE_NUM: usize = 16;
 const KEY_PER_OCTAVE: usize = 12;
 const FREQUENCY_PER_KEY: usize = 0x10; // 16
 const TABLE_SIZE: usize = OCTAVE_NUM * KEY_PER_OCTAVE * FREQUENCY_PER_KEY; // 3072
 
-/// 基準インデックス（オクターブ 8 の先頭 = 中央 A あたり）
+/// Base index (start of octave 8 ≈ middle A)
 pub const BASIC_FREQUENCY_INDEX: usize = (OCTAVE_NUM / 2) * KEY_PER_OCTAVE * FREQUENCY_PER_KEY;
 
-/// oct^(1/divi) を高精度で求める（C++ 移植）
+/// Computes oct^(1/divi) with high precision (ported from C++)
 fn get_divide_octave_rate(divi: usize) -> f64 {
   let mut parameter = 1.0f64;
   for i in 0..17usize {
@@ -83,14 +83,14 @@ impl FrequencyTable {
     Self { table }
   }
 
-  /// key 値（イベントのキー値）から周波数を得る
+  /// Returns the frequency for a key value (event key)
   pub fn get(&self, key: i32) -> f32 {
     let i = ((key + 0x6000) as usize) * FREQUENCY_PER_KEY / 0x100;
     let i = i.clamp(0, TABLE_SIZE - 1);
     self.table[i]
   }
 
-  /// 生インデックス（key >> 4）から周波数を得る
+  /// Returns the frequency for a raw index (key >> 4)
   pub fn get2(&self, key: i32) -> f32 {
     let i = (key >> 4) as usize;
     let i = i.clamp(0, TABLE_SIZE - 1);

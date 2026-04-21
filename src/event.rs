@@ -2,7 +2,7 @@ use crate::error::PxtoneError;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
-// イベント種別
+// Event kind constants
 pub const EVENTKIND_NULL: u8 = 0;
 pub const EVENTKIND_ON: u8 = 1;
 pub const EVENTKIND_KEY: u8 = 2;
@@ -21,7 +21,7 @@ pub const EVENTKIND_TUNING: u8 = 14;
 pub const EVENTKIND_PAN_TIME: u8 = 15;
 pub const EVENTKIND_NUM: usize = 16;
 
-// デフォルト値
+// Default values
 pub const EVENTDEFAULT_VOLUME: i32 = 104;
 pub const EVENTDEFAULT_VELOCITY: i32 = 104;
 pub const EVENTDEFAULT_PAN_VOLUME: i32 = 64;
@@ -37,12 +37,12 @@ pub const EVENTDEFAULT_BEATNUM: i32 = 4;
 pub const EVENTDEFAULT_BEATTEMPO: f32 = 120.0;
 pub const EVENTDEFAULT_BEATCLOCK: i32 = 480;
 
-/// イベントが「テール」かどうか（ON と PORTAMENT）
+/// Returns whether an event is a "tail" event (ON and PORTAMENT)
 pub fn event_kind_is_tail(kind: u8) -> bool {
   kind == EVENTKIND_ON || kind == EVENTKIND_PORTAMENT
 }
 
-/// イベント優先度テーブル
+/// Event priority table
 const PRIORITY_TABLE: [i32; EVENTKIND_NUM] = [
   0,   // NULL
   50,  // ON
@@ -76,7 +76,7 @@ fn compare_priority(kind1: u8, kind2: u8) -> i32 {
   p1 - p2
 }
 
-/// イベントレコード
+/// Event record
 #[derive(Clone, Debug, Default)]
 pub struct EventRecord {
   pub kind: u8,
@@ -85,7 +85,7 @@ pub struct EventRecord {
   pub clock: i32,
 }
 
-/// イベントリスト（ソート済み双方向リストの代替として Vec を使用）
+/// Event list (uses Vec as a substitute for a sorted doubly-linked list)
 #[derive(Debug, Default)]
 pub struct EventList {
   events: Vec<EventRecord>,
@@ -119,7 +119,7 @@ impl EventList {
       .unwrap_or(0)
   }
 
-  /// v5 形式のイベントリストを読み込む（Linear_Start / Linear_Add / Linear_End の相当）
+  /// Reads a v5-format event list (equivalent to Linear_Start / Linear_Add / Linear_End)
   pub fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let eve_num = r.read_i32::<LE>()?;
@@ -140,7 +140,7 @@ impl EventList {
       });
     }
 
-    // 時系列順にソート（priority でタイブレーク）
+    // Sort in chronological order (priority is used as a tiebreaker)
     self.events.sort_by(|a, b| {
       a.clock
         .cmp(&b.clock)
@@ -150,7 +150,7 @@ impl EventList {
     Ok(())
   }
 
-  /// v5 形式のイベント数だけカウントしてシーク（プリカウント用）
+  /// Counts v5-format events and seeks past them (for pre-counting)
   pub fn count_v5<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let eve_num = r.read_i32::<LE>()?;
@@ -165,7 +165,7 @@ impl EventList {
     Ok(eve_num)
   }
 
-  /// x4x 形式のイベントブロックを読み込む
+  /// Reads an x4x-format event block
   pub fn read_x4x_block<R: Read + Seek>(
     &mut self,
     r: &mut R,
@@ -207,7 +207,7 @@ impl EventList {
     Ok(())
   }
 
-  /// x4x 形式のイベント数をカウント（プリカウント用）
+  /// Counts x4x-format events (for pre-counting)
   pub fn count_x4x_block<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let _unit_idx = r.read_u16::<LE>()?;
@@ -228,7 +228,7 @@ impl EventList {
     Ok(event_num as i32)
   }
 
-  /// x4x 形式でイベントを優先度順に挿入する
+  /// Inserts an event in x4x format in priority order
   fn insert_x4x(&mut self, clock: i32, unit_no: u8, kind: u8, value: i32) {
     let rec = EventRecord {
       kind,
@@ -237,12 +237,12 @@ impl EventList {
       clock,
     };
 
-    // 同一クロック・ユニット・種別の既存レコードを置換するか、適切な位置に挿入
+    // Replace an existing record with the same clock/unit/kind, or insert at the appropriate position
     let pos = self.events.partition_point(|e| {
       e.clock < clock || (e.clock == clock && compare_priority(kind, e.kind) >= 0)
     });
 
-    // 同一クロック・ユニット・種別があれば置換
+    // Replace if a record with the same clock/unit/kind already exists
     if let Some(existing) = self.events[..pos]
       .iter()
       .rposition(|e| e.clock == clock && e.unit_no == unit_no && e.kind == kind)
@@ -253,7 +253,7 @@ impl EventList {
     }
   }
 
-  /// ユニット番号を持つイベントを削除し、後続ユニット番号をデクリメントする
+  /// Removes events belonging to the given unit number and decrements subsequent unit numbers
   pub fn remove_unit(&mut self, unit_no: u8) {
     self.events.retain_mut(|e| {
       if e.unit_no == unit_no {
@@ -266,7 +266,7 @@ impl EventList {
     });
   }
 
-  /// イベント追加（ソート済みリストに挿入）
+  /// Adds an event (inserts into the sorted list)
   pub fn add_i(&mut self, clock: i32, unit_no: u8, kind: u8, value: i32) {
     self.insert_x4x(clock, unit_no, kind, value);
   }
@@ -296,9 +296,9 @@ impl EventList {
   }
 }
 
-// ---- 可変長整数の読み込み ----
+// ---- Variable-length integer reading ----
 
-/// pxtone 可変長整数（最大 5 バイト）を読み込む
+/// Reads a pxtone variable-length integer (up to 5 bytes)
 pub fn read_var_int<R: Read>(r: &mut R) -> Result<i32, PxtoneError> {
   let mut bytes = [0u8; 5];
   let mut count = 0usize;

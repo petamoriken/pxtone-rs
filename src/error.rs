@@ -2,39 +2,39 @@ use std::io;
 
 #[derive(Debug)]
 pub enum PxtoneError {
-  /// I/O エラー
+  /// I/O error
   Io(io::Error),
-  /// ファイルフォーマットが不明
+  /// Unknown file format
   UnknownFormat,
-  /// ファイルフォーマットが新しすぎる
+  /// File format version is too new
   NewFormat,
-  /// ファイルが壊れている
+  /// File is corrupted
   BrokenFile,
-  /// サポートされていないフォーマット
+  /// Unsupported format
   Unsupported(&'static str),
-  /// Ogg Vorbis デコードエラー
+  /// Ogg Vorbis decode error
   OggVorbis(String),
-  /// PCM 変換エラー
+  /// PCM conversion error
   PcmConvert,
-  /// 不正なコード
+  /// Invalid code
   InvalidCode,
-  /// 不正なデータ
+  /// Invalid data
   InvalidData,
-  /// アンチオペレーション (編集禁止)
+  /// Anti-operation (editing forbidden)
   AntiOperation,
-  /// ビートクロック拒否
+  /// Beat clock denied
   DenyBeatClock,
-  /// ウォイスが満杯
+  /// Woice table is full
   WoiceFull,
-  /// イベント数超過
+  /// Too many events
   TooMuchEvent,
-  /// x3x チューニングエラー
+  /// x3x tuning error
   X3xTuning,
-  /// x1x フォーマットは無視
+  /// x1x format is ignored
   X1xIgnore,
-  /// 初期化エラー
+  /// Initialization error
   Init,
-  /// 一般的なエラー
+  /// General error
   Other(&'static str),
 }
 

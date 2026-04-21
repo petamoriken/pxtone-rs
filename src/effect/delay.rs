@@ -59,7 +59,7 @@ impl Delay {
     Self::default()
   }
 
-  /// 再生前の準備：ディレイバッファを確保する
+  /// Prepares before playback: allocates the delay buffer
   pub fn tone_ready(&mut self, beat_num: i32, beat_tempo: f32, sps: i32) {
     self.smp_num = 0;
     self.bufs[0].clear();
@@ -86,7 +86,7 @@ impl Delay {
     }
   }
 
-  /// グループサンプルにディレイを適用する
+  /// Applies delay to group samples
   pub fn tone_supple(&mut self, ch: usize, group_smps: &mut [i32]) {
     if self.smp_num == 0 {
       return;
@@ -113,7 +113,7 @@ impl Delay {
     }
   }
 
-  /// (12 byte) ディレイ構造体を読み込む
+  /// Reads a (12-byte) delay structure
   pub fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let unit = r.read_u16::<LE>()?;

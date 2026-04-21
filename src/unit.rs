@@ -7,7 +7,7 @@ use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, Voic
 pub const MAX_CHANNEL: usize = 2;
 pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
 
-/// ユニットごとの音声トーン状態
+/// Per-unit voice tone state
 #[derive(Clone, Default)]
 pub struct VoiceTone {
   pub smp_pos: f64,
@@ -21,31 +21,31 @@ pub struct VoiceTone {
   pub smooth_volume: i32,
 }
 
-/// ユニット（再生状態）
+/// Unit (playback state)
 pub struct Unit {
   pub operated: bool,
   pub played: bool,
   pub name: String,
 
-  // キー状態
+  // Key state
   pub key_now: i32,
   pub key_start: i32,
   pub key_margin: i32,
   pub portament_sample_pos: i32,
   pub portament_sample_num: i32,
 
-  // パン
+  // Pan
   pub pan_vols: [i32; MAX_CHANNEL],
   pub pan_times: [i32; MAX_CHANNEL],
   pub pan_time_bufs: [[i32; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
 
-  // ベロシティ・ボリューム等
+  // Velocity, volume, etc.
   pub v_volume: i32,
   pub v_velocity: i32,
   pub v_groupno: i32,
   pub v_tuning: f32,
 
-  // ウォイス参照（インスタンスの数だけ）
+  // Voice references (one per instance)
   pub voice_num: usize, // tone_ready 後に設定
   pub voice_flags: Vec<u32>,
   pub tones: [VoiceTone; MAX_UNIT_CONTROL_VOICE],
@@ -199,7 +199,7 @@ impl Unit {
     }
   }
 
-  /// サンプルを生成して pan_time_bufs に書き込む
+  /// Generates samples and writes them into pan_time_bufs
   pub fn tone_sample(
     &mut self,
     b_mute_by_unit: bool,
@@ -250,7 +250,7 @@ impl Unit {
     }
   }
 
-  /// グループサンプルに pan_time_bufs の値を加算する
+  /// Adds pan_time_bufs values to group samples
   pub fn tone_supple(&self, group_smps: &mut [i32], ch: usize, time_pan_index: usize) {
     let idx =
       (time_pan_index + BUFSIZE_TIMEPAN - self.pan_times[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
@@ -259,7 +259,7 @@ impl Unit {
     }
   }
 
-  /// ポルタメント処理してキーを返す
+  /// Applies portamento processing and returns the current key
   pub fn tone_increment_key(&mut self) -> i32 {
     if self.portament_sample_num != 0 && self.key_margin != 0 {
       if self.portament_sample_pos < self.portament_sample_num {
@@ -278,7 +278,7 @@ impl Unit {
     self.key_now
   }
 
-  /// サンプル位置を進める
+  /// Advances the sample position
   pub fn tone_increment_sample(&mut self, freq: f32, instances: &[VoiceInstance]) {
     for v in 0..self.voice_num {
       let vi = &instances[v];
