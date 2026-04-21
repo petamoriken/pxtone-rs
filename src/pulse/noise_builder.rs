@@ -55,10 +55,15 @@ impl OscState {
       SMP_NUM as f64 * (osc.offset as f64 / 100.0)
     };
     let volume = osc.volume as f64 / 100.0;
-    let rdm_index =
-      ((SMP_NUM_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_NUM_RAND - 1);
-    let rdm_start = rand_tbl[rdm_index];
-    let rdm_margin = rand_tbl[(rdm_index + 1).min(SMP_NUM_RAND - 1)] as i32 - rdm_start as i32;
+    let (rdm_start, rdm_margin, rdm_index) = if ran && !rand_tbl.is_empty() {
+      let idx =
+        ((SMP_NUM_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_NUM_RAND - 1);
+      let start = rand_tbl[idx];
+      let margin = rand_tbl[(idx + 1).min(SMP_NUM_RAND - 1)] as i32 - start as i32;
+      (start, margin, idx)
+    } else {
+      (0, 0, 0)
+    };
     OscState {
       increment,
       offset,
@@ -71,8 +76,8 @@ impl OscState {
     }
   }
 
-  fn get_sample(&self, tables: &[Vec<i16>; WAVETYPE_NUM]) -> f64 {
-    let tbl = &tables[self.wave_type as usize];
+  fn get_sample(&self, tables: &[Option<Vec<i16>>; WAVETYPE_NUM]) -> f64 {
+    let tbl = tables[self.wave_type as usize].as_deref().unwrap_or(&[]);
     if tbl.is_empty() {
       return 0.0;
     }
@@ -125,222 +130,243 @@ struct UnitState {
 
 pub struct NoiseBuilder {
   freq: FrequencyTable,
-  tables: [Vec<i16>; WAVETYPE_NUM],
+  tables: [Option<Vec<i16>>; WAVETYPE_NUM],
 }
 
 impl NoiseBuilder {
   pub fn new() -> Self {
-    let mut tables: [Vec<i16>; WAVETYPE_NUM] = Default::default();
-    let mut rng = Rand::new();
-    let mut osci = Oscillator::new();
-
-    // None (zero)
-    tables[WaveType::None as usize] = vec![0; SMP_NUM];
-
-    // Sine
-    osci.ready_get_sample(vec![Point { x: 1, y: 128 }], 128, SMP_NUM as i32, 0);
-    tables[WaveType::Sine as usize] = (0..SMP_NUM)
-      .map(|s| {
-        (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
-      })
-      .collect();
-
-    // Saw (down)
-    let top2 = (SAMPLING_TOP * 2) as f64;
-    tables[WaveType::Saw as usize] = (0..SMP_NUM)
-      .map(|s| (SAMPLING_TOP as f64 - top2 * s as f64 / SMP_NUM as f64) as i16)
-      .collect();
-
-    // Rect
-    let half = SMP_NUM / 2;
-    tables[WaveType::Rect as usize] = (0..SMP_NUM)
-      .map(|s| {
-        if s < half {
-          SAMPLING_TOP as i16
-        } else {
-          -(SAMPLING_TOP as i16)
-        }
-      })
-      .collect();
-
-    // Random
-    tables[WaveType::Random as usize] = (0..SMP_NUM_RAND).map(|_| rng.get()).collect();
-
-    // Saw2
-    osci.ready_get_sample(
-      (1..=16).map(|i| Point { x: i, y: 128 }).collect(),
-      128,
-      SMP_NUM as i32,
-      0,
-    );
-    tables[WaveType::Saw2 as usize] = (0..SMP_NUM)
-      .map(|s| {
-        (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
-      })
-      .collect();
-
-    // Rect2
-    osci.ready_get_sample(
-      (0..8)
-        .map(|i| Point {
-          x: 1 + i * 2,
-          y: 128,
-        })
-        .collect(),
-      128,
-      SMP_NUM as i32,
-      0,
-    );
-    tables[WaveType::Rect2 as usize] = (0..SMP_NUM)
-      .map(|s| {
-        (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
-      })
-      .collect();
-
-    // Tri
-    let n = SMP_NUM as i32;
-    osci.ready_get_sample(
-      vec![
-        Point { x: 0, y: 0 },
-        Point { x: n / 4, y: 128 },
-        Point {
-          x: n * 3 / 4,
-          y: -128,
-        },
-        Point { x: n, y: 0 },
-      ],
-      128,
-      SMP_NUM as i32,
-      SMP_NUM as i32,
-    );
-    tables[WaveType::Tri as usize] = (0..SMP_NUM)
-      .map(|s| {
-        (osci.get_one_sample_coodinate(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
-      })
-      .collect();
-
-    // Random2: in C++ this shares the same pointer as the random table → kept empty (treated as Random at build time)
-    tables[WaveType::Random2 as usize] = Vec::new();
-
-    // Rect3
-    let t3 = SMP_NUM / 3;
-    tables[WaveType::Rect3 as usize] = (0..SMP_NUM)
-      .map(|s| {
-        if s < t3 {
-          SAMPLING_TOP as i16
-        } else {
-          -(SAMPLING_TOP as i16)
-        }
-      })
-      .collect();
-
-    // Rect4
-    let t4 = SMP_NUM / 4;
-    tables[WaveType::Rect4 as usize] = (0..SMP_NUM)
-      .map(|s| {
-        if s < t4 {
-          SAMPLING_TOP as i16
-        } else {
-          -(SAMPLING_TOP as i16)
-        }
-      })
-      .collect();
-
-    // Rect8
-    let t8 = SMP_NUM / 8;
-    tables[WaveType::Rect8 as usize] = (0..SMP_NUM)
-      .map(|s| {
-        if s < t8 {
-          SAMPLING_TOP as i16
-        } else {
-          -(SAMPLING_TOP as i16)
-        }
-      })
-      .collect();
-
-    // Rect16
-    let t16 = SMP_NUM / 16;
-    tables[WaveType::Rect16 as usize] = (0..SMP_NUM)
-      .map(|s| {
-        if s < t16 {
-          SAMPLING_TOP as i16
-        } else {
-          -(SAMPLING_TOP as i16)
-        }
-      })
-      .collect();
-
-    // Saw3
-    let t1 = SMP_NUM / 3;
-    let t2 = SMP_NUM * 2 / 3;
-    tables[WaveType::Saw3 as usize] = (0..SMP_NUM)
-      .map(|s| {
-        if s < t1 {
-          SAMPLING_TOP as i16
-        } else if s < t2 {
-          0
-        } else {
-          -(SAMPLING_TOP as i16)
-        }
-      })
-      .collect();
-
-    // Saw4
-    let a1 = SMP_NUM / 4;
-    let a2 = SMP_NUM * 2 / 4;
-    let a3 = SMP_NUM * 3 / 4;
-    tables[WaveType::Saw4 as usize] = (0..SMP_NUM)
-      .map(|s| {
-        if s < a1 {
-          SAMPLING_TOP as i16
-        } else if s < a2 {
-          (SAMPLING_TOP / 3) as i16
-        } else if s < a3 {
-          -(SAMPLING_TOP / 3) as i16
-        } else {
-          -(SAMPLING_TOP as i16)
-        }
-      })
-      .collect();
-
-    // Saw6
-    let seg6 = [
-      SAMPLING_TOP as i16,
-      (SAMPLING_TOP - SAMPLING_TOP * 2 / 5) as i16,
-      (SAMPLING_TOP / 5) as i16,
-      -(SAMPLING_TOP / 5) as i16,
-      (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 2 / 5) as i16,
-      -(SAMPLING_TOP as i16),
-    ];
-    tables[WaveType::Saw6 as usize] = (0..SMP_NUM)
-      .map(|s| seg6[(s * 6 / SMP_NUM).min(5)])
-      .collect();
-
-    // Saw8
-    let seg8 = [
-      SAMPLING_TOP as i16,
-      (SAMPLING_TOP - SAMPLING_TOP * 2 / 7) as i16,
-      (SAMPLING_TOP - SAMPLING_TOP * 4 / 7) as i16,
-      (SAMPLING_TOP / 7) as i16,
-      -(SAMPLING_TOP / 7) as i16,
-      (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 4 / 7) as i16,
-      (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 2 / 7) as i16,
-      -(SAMPLING_TOP as i16),
-    ];
-    tables[WaveType::Saw8 as usize] = (0..SMP_NUM)
-      .map(|s| seg8[(s * 8 / SMP_NUM).min(7)])
-      .collect();
-
     Self {
       freq: FrequencyTable::new(),
-      tables,
+      tables: std::array::from_fn(|_| None),
     }
   }
 
+  /// Builds the wave table for `wave_type` if not already built.
+  /// `WaveType::Random2` is left empty intentionally (returns 0 in get_sample,
+  /// matching the original C++ behaviour where it shares the Random pointer
+  /// but is used differently).
+  fn build_table(&mut self, wave_type: WaveType) {
+    if matches!(wave_type, WaveType::Random2) {
+      return;
+    }
+    let idx = wave_type as usize;
+    if self.tables[idx].is_some() {
+      return;
+    }
+    let mut osci = Oscillator::new();
+    let table: Vec<i16> = match wave_type {
+      WaveType::None => vec![0i16; SMP_NUM],
+      WaveType::Sine => {
+        osci.ready_get_sample(vec![Point { x: 1, y: 128 }], 128, SMP_NUM as i32, 0);
+        (0..SMP_NUM)
+          .map(|s| {
+            (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
+          })
+          .collect()
+      }
+      WaveType::Saw => {
+        let top2 = (SAMPLING_TOP * 2) as f64;
+        (0..SMP_NUM)
+          .map(|s| (SAMPLING_TOP as f64 - top2 * s as f64 / SMP_NUM as f64) as i16)
+          .collect()
+      }
+      WaveType::Rect => {
+        let half = SMP_NUM / 2;
+        (0..SMP_NUM)
+          .map(|s| {
+            if s < half {
+              SAMPLING_TOP as i16
+            } else {
+              -(SAMPLING_TOP as i16)
+            }
+          })
+          .collect()
+      }
+      WaveType::Random => {
+        let mut rng = Rand::new();
+        (0..SMP_NUM_RAND).map(|_| rng.get()).collect()
+      }
+      WaveType::Saw2 => {
+        osci.ready_get_sample(
+          (1..=16).map(|i| Point { x: i, y: 128 }).collect(),
+          128,
+          SMP_NUM as i32,
+          0,
+        );
+        (0..SMP_NUM)
+          .map(|s| {
+            (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
+          })
+          .collect()
+      }
+      WaveType::Rect2 => {
+        osci.ready_get_sample(
+          (0..8)
+            .map(|i| Point {
+              x: 1 + i * 2,
+              y: 128,
+            })
+            .collect(),
+          128,
+          SMP_NUM as i32,
+          0,
+        );
+        (0..SMP_NUM)
+          .map(|s| {
+            (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
+          })
+          .collect()
+      }
+      WaveType::Tri => {
+        let n = SMP_NUM as i32;
+        osci.ready_get_sample(
+          vec![
+            Point { x: 0, y: 0 },
+            Point { x: n / 4, y: 128 },
+            Point {
+              x: n * 3 / 4,
+              y: -128,
+            },
+            Point { x: n, y: 0 },
+          ],
+          128,
+          SMP_NUM as i32,
+          SMP_NUM as i32,
+        );
+        (0..SMP_NUM)
+          .map(|s| {
+            (osci.get_one_sample_coodinate(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
+          })
+          .collect()
+      }
+      WaveType::Rect3 => {
+        let t3 = SMP_NUM / 3;
+        (0..SMP_NUM)
+          .map(|s| {
+            if s < t3 {
+              SAMPLING_TOP as i16
+            } else {
+              -(SAMPLING_TOP as i16)
+            }
+          })
+          .collect()
+      }
+      WaveType::Rect4 => {
+        let t4 = SMP_NUM / 4;
+        (0..SMP_NUM)
+          .map(|s| {
+            if s < t4 {
+              SAMPLING_TOP as i16
+            } else {
+              -(SAMPLING_TOP as i16)
+            }
+          })
+          .collect()
+      }
+      WaveType::Rect8 => {
+        let t8 = SMP_NUM / 8;
+        (0..SMP_NUM)
+          .map(|s| {
+            if s < t8 {
+              SAMPLING_TOP as i16
+            } else {
+              -(SAMPLING_TOP as i16)
+            }
+          })
+          .collect()
+      }
+      WaveType::Rect16 => {
+        let t16 = SMP_NUM / 16;
+        (0..SMP_NUM)
+          .map(|s| {
+            if s < t16 {
+              SAMPLING_TOP as i16
+            } else {
+              -(SAMPLING_TOP as i16)
+            }
+          })
+          .collect()
+      }
+      WaveType::Saw3 => {
+        let t1 = SMP_NUM / 3;
+        let t2 = SMP_NUM * 2 / 3;
+        (0..SMP_NUM)
+          .map(|s| {
+            if s < t1 {
+              SAMPLING_TOP as i16
+            } else if s < t2 {
+              0
+            } else {
+              -(SAMPLING_TOP as i16)
+            }
+          })
+          .collect()
+      }
+      WaveType::Saw4 => {
+        let a1 = SMP_NUM / 4;
+        let a2 = SMP_NUM * 2 / 4;
+        let a3 = SMP_NUM * 3 / 4;
+        (0..SMP_NUM)
+          .map(|s| {
+            if s < a1 {
+              SAMPLING_TOP as i16
+            } else if s < a2 {
+              (SAMPLING_TOP / 3) as i16
+            } else if s < a3 {
+              -(SAMPLING_TOP / 3) as i16
+            } else {
+              -(SAMPLING_TOP as i16)
+            }
+          })
+          .collect()
+      }
+      WaveType::Saw6 => {
+        let seg6 = [
+          SAMPLING_TOP as i16,
+          (SAMPLING_TOP - SAMPLING_TOP * 2 / 5) as i16,
+          (SAMPLING_TOP / 5) as i16,
+          -(SAMPLING_TOP / 5) as i16,
+          (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 2 / 5) as i16,
+          -(SAMPLING_TOP as i16),
+        ];
+        (0..SMP_NUM)
+          .map(|s| seg6[(s * 6 / SMP_NUM).min(5)])
+          .collect()
+      }
+      WaveType::Saw8 => {
+        let seg8 = [
+          SAMPLING_TOP as i16,
+          (SAMPLING_TOP - SAMPLING_TOP * 2 / 7) as i16,
+          (SAMPLING_TOP - SAMPLING_TOP * 4 / 7) as i16,
+          (SAMPLING_TOP / 7) as i16,
+          -(SAMPLING_TOP / 7) as i16,
+          (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 4 / 7) as i16,
+          (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 2 / 7) as i16,
+          -(SAMPLING_TOP as i16),
+        ];
+        (0..SMP_NUM)
+          .map(|s| seg8[(s * 8 / SMP_NUM).min(7)])
+          .collect()
+      }
+      WaveType::Random2 => unreachable!(),
+    };
+    self.tables[idx] = Some(table);
+  }
+
   /// Generates PCM from a Noise design
-  pub fn build_noise(&self, noise: &mut Noise, ch: usize, sps: i32, bps: i32) -> Option<Pcm> {
+  pub fn build_noise(&mut self, noise: &mut Noise, ch: usize, sps: i32, bps: i32) -> Option<Pcm> {
     noise.fix();
-    let rand_tbl = &self.tables[WaveType::Random as usize];
+
+    // Build only the tables required by this Noise design
+    for unit in &noise.units {
+      if unit.enabled {
+        self.build_table(unit.main.wave_type);
+        self.build_table(unit.freq.wave_type);
+        self.build_table(unit.volu.wave_type);
+      }
+    }
+
+    let rand_tbl = self.tables[WaveType::Random as usize].as_deref().unwrap_or(&[]);
     let smp_num = (noise.smp_num_44k as f64 / (44100.0 / sps as f64)) as usize;
 
     // Build unit states

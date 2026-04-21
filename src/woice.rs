@@ -331,7 +331,7 @@ impl Woice {
   }
 
   // ---- Sample buffer preparation ----
-  pub fn tone_ready_sample(&mut self, noise_builder: &NoiseBuilder) -> Result<(), PxtoneError> {
+  pub fn tone_ready_sample(&mut self, noise_builder: &mut NoiseBuilder) -> Result<(), PxtoneError> {
     let ch = 2;
     let sps = 44100;
     let bps = 16;
@@ -449,7 +449,7 @@ impl Woice {
     Ok(())
   }
 
-  pub fn tone_ready(&mut self, noise_builder: &NoiseBuilder, sps: i32) -> Result<(), PxtoneError> {
+  pub fn tone_ready(&mut self, noise_builder: &mut NoiseBuilder, sps: i32) -> Result<(), PxtoneError> {
     self.tone_ready_sample(noise_builder)?;
     self.tone_ready_envelope(sps)?;
     Ok(())
