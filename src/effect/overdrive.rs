@@ -8,10 +8,10 @@ const AMP_MIN: f32 = 0.0;
 const AMP_MAX: f32 = 800.0;
 
 pub struct OverDrive {
-  pub played: bool,
-  pub cut: f32,
-  pub amp: f32,
-  pub group: usize,
+  pub(crate) played: bool,
+  pub(crate) cut: f32,
+  pub(crate) amp: f32,
+  pub(crate) group: usize,
   // runtime
   cut_16bit_top: i32,
 }

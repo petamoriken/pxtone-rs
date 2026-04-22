@@ -47,33 +47,33 @@ pub enum VoiceType {
 // ---- Waveform / Envelope ----
 #[derive(Clone, Debug, Default)]
 pub struct VoiceWave {
-  pub reso: i32,
-  pub points: Vec<(i32, i32)>, // (x, y)
+  pub(crate) reso: i32,
+  pub(crate) points: Vec<(i32, i32)>, // (x, y)
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct VoiceEnvelope {
-  pub fps: i32,
-  pub head_num: i32,
-  pub body_num: i32,
-  pub tail_num: i32,
-  pub points: Vec<(i32, i32)>,
+  pub(crate) fps: i32,
+  pub(crate) head_num: i32,
+  pub(crate) body_num: i32,
+  pub(crate) tail_num: i32,
+  pub(crate) points: Vec<(i32, i32)>,
 }
 
 // ---- Unit (design data) ----
 pub struct VoiceUnit {
-  pub basic_key: i32,
-  pub volume: i32,
-  pub pan: i32,
-  pub tuning: f32,
-  pub voice_flags: u32,
-  pub data_flags: u32,
-  pub voice_type: VoiceType,
-  pub pcm: Option<Pcm>,
-  pub noise: Option<Noise>,
-  pub ogg_data: Option<OggData>,
-  pub wave: VoiceWave,
-  pub envelope: VoiceEnvelope,
+  pub(crate) basic_key: i32,
+  pub(crate) volume: i32,
+  pub(crate) pan: i32,
+  pub(crate) tuning: f32,
+  pub(crate) voice_flags: u32,
+  pub(crate) data_flags: u32,
+  pub(crate) voice_type: VoiceType,
+  pub(crate) pcm: Option<Pcm>,
+  pub(crate) noise: Option<Noise>,
+  pub(crate) ogg_data: Option<OggData>,
+  pub(crate) wave: VoiceWave,
+  pub(crate) envelope: VoiceEnvelope,
 }
 
 impl Default for VoiceUnit {
@@ -97,23 +97,23 @@ impl Default for VoiceUnit {
 
 // ---- OGG data ----
 pub struct OggData {
-  pub ch: i32,
-  pub sps: i32,
-  pub smp_num: i32,
-  pub data: Vec<u8>,
+  pub(crate) ch: i32,
+  pub(crate) sps: i32,
+  pub(crate) smp_num: i32,
+  pub(crate) data: Vec<u8>,
 }
 
 // ---- Instance (synthesis buffer) ----
 #[derive(Default)]
 pub struct VoiceInstance {
-  pub smp_head_w: i32,
-  pub smp_body_w: i32,
-  pub smp_tail_w: i32,
-  pub samples_w: Vec<u8>, // stereo 16-bit interleaved
-  pub env: Vec<u8>,
-  pub env_size: i32,
-  pub env_release: i32,
-  pub b_sine_over: bool,
+  pub(crate) smp_head_w: i32,
+  pub(crate) smp_body_w: i32,
+  pub(crate) smp_tail_w: i32,
+  pub(crate) samples_w: Vec<u8>, // stereo 16-bit interleaved
+  pub(crate) env: Vec<u8>,
+  pub(crate) env_size: i32,
+  pub(crate) env_release: i32,
+  pub(crate) b_sine_over: bool,
 }
 
 impl VoiceInstance {
@@ -129,12 +129,12 @@ impl VoiceInstance {
 
 // ---- Woice ----
 pub struct Woice {
-  pub name: String,
-  pub woice_type: WoiceType,
-  pub x3x_tuning: f32,
-  pub x3x_basic_key: i32,
-  pub voices: Vec<VoiceUnit>,
-  pub instances: Vec<VoiceInstance>,
+  pub(crate) name: String,
+  pub(crate) woice_type: WoiceType,
+  pub(crate) x3x_tuning: f32,
+  pub(crate) x3x_basic_key: i32,
+  pub(crate) voices: Vec<VoiceUnit>,
+  pub(crate) instances: Vec<VoiceInstance>,
 }
 
 impl Default for Woice {
@@ -173,7 +173,7 @@ impl Woice {
     }
 
     let sample_num = data_size as i32 * 8 / bps / ch;
-    let mut pcm = Pcm::create(ch, sps, bps, sample_num).ok_or(PxtoneError::UnknownFormat)?;
+    let mut pcm = Pcm::create(ch, sps, bps, sample_num)?;
     r.read_exact(&mut pcm.samples_mut()[..data_size as usize])?;
 
     let mut unit = VoiceUnit::default();
@@ -348,7 +348,7 @@ impl Woice {
         VoiceType::Sampling => {
           if let Some(pcm) = &unit.pcm {
             let mut work =
-              Pcm::create(pcm.ch, pcm.sps, pcm.bps, pcm.smp_body).ok_or(PxtoneError::PcmConvert)?;
+              Pcm::create(pcm.ch, pcm.sps, pcm.bps, pcm.smp_body)?;
             let src = pcm.samples();
             let copy_len = src.len().min(work.samples().len());
             work.samples_mut()[..copy_len].copy_from_slice(&src[..copy_len]);
@@ -368,10 +368,9 @@ impl Woice {
         }
         VoiceType::Noise => {
           if let Some(noise) = &mut unit.noise {
-            if let Some(pcm) = noise_builder.build_noise(noise, ch as usize, sps, bps, freq) {
-              inst.smp_body_w = noise.smp_num_44k;
-              inst.samples_w = pcm.samples().to_vec();
-            }
+            let pcm = noise_builder.build_noise(noise, ch as usize, sps, bps, freq)?;
+            inst.smp_body_w = noise.smp_num_44k;
+            inst.samples_w = pcm.samples().to_vec();
           }
         }
         VoiceType::OggVorbis => {
@@ -380,15 +379,14 @@ impl Woice {
             let ogg_ch = ogg.ch;
             let ogg_sps = ogg.sps;
             let ogg_smp = ogg.smp_num;
-            if let Some(mut work) = Pcm::create(ogg_ch, ogg_sps, 16, ogg_smp) {
-              let src = &decoded[..decoded.len().min(work.samples().len())];
-              work.samples_mut()[..src.len()].copy_from_slice(src);
-              let _ = work.convert(ch, sps, bps);
-              inst.smp_head_w = work.smp_head;
-              inst.smp_body_w = work.smp_body;
-              inst.smp_tail_w = work.smp_tail;
-              inst.samples_w = work.samples().to_vec();
-            }
+            let mut work = Pcm::create(ogg_ch, ogg_sps, 16, ogg_smp)?;
+            let src = &decoded[..decoded.len().min(work.samples().len())];
+            work.samples_mut()[..src.len()].copy_from_slice(src);
+            let _ = work.convert(ch, sps, bps);
+            inst.smp_head_w = work.smp_head;
+            inst.smp_body_w = work.smp_body;
+            inst.smp_tail_w = work.smp_tail;
+            inst.samples_w = work.samples().to_vec();
           }
         }
       }

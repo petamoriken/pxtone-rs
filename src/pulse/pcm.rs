@@ -5,25 +5,26 @@ use crate::error::PxtoneError;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek, SeekFrom};
 
+
 #[derive(Debug)]
 pub struct Pcm {
-  pub ch: i32,
-  pub sps: i32,
-  pub bps: i32,
-  pub smp_head: i32,
-  pub smp_body: i32,
-  pub smp_tail: i32,
+  pub(crate) ch: i32,
+  pub(crate) sps: i32,
+  pub(crate) bps: i32,
+  pub(crate) smp_head: i32,
+  pub(crate) smp_body: i32,
+  pub(crate) smp_tail: i32,
   samples: Vec<u8>,
 }
 
 impl Pcm {
-  pub fn create(ch: i32, sps: i32, bps: i32, sample_num: i32) -> Option<Self> {
+  pub fn create(ch: i32, sps: i32, bps: i32, sample_num: i32) -> Result<Self, PxtoneError> {
     if bps != 8 && bps != 16 {
-      return None;
+      return Err(PxtoneError::UnknownFormat);
     }
     let size = (sample_num * bps * ch / 8) as usize;
     let fill = if bps == 8 { 128u8 } else { 0u8 };
-    Some(Self {
+    Ok(Self {
       ch,
       sps,
       bps,
@@ -93,7 +94,7 @@ impl Pcm {
     };
 
     let sample_num = data_size as i32 * 8 / bps / ch;
-    let mut pcm = Self::create(ch, sps, bps, sample_num).ok_or(PxtoneError::UnknownFormat)?;
+    let mut pcm = Self::create(ch, sps, bps, sample_num)?;
     r.read_exact(&mut pcm.samples[..data_size as usize])?;
 
     Ok(pcm)

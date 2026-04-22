@@ -26,11 +26,11 @@ impl TryFrom<u16> for DelayUnit {
 }
 
 pub struct Delay {
-  pub played: bool,
-  pub unit: DelayUnit,
-  pub group: usize,
-  pub rate: f32,
-  pub freq: f32,
+  pub(crate) played: bool,
+  pub(crate) unit: DelayUnit,
+  pub(crate) group: usize,
+  pub(crate) rate: f32,
+  pub(crate) freq: f32,
   // runtime
   smp_num: usize,
   offset: usize,

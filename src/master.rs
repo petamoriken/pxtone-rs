@@ -8,12 +8,12 @@ use std::io::{Read, Seek};
 
 #[derive(Debug)]
 pub struct Master {
-  pub beat_num: i32,
-  pub beat_tempo: f32,
-  pub beat_clock: i32,
-  pub meas_num: i32,
-  pub repeat_meas: i32,
-  pub last_meas: i32,
+  pub(crate) beat_num: i32,
+  pub(crate) beat_tempo: f32,
+  pub(crate) beat_clock: i32,
+  pub(crate) meas_num: i32,
+  pub(crate) repeat_meas: i32,
+  pub(crate) last_meas: i32,
 }
 
 impl Default for Master {

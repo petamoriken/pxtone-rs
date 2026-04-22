@@ -3,8 +3,8 @@
 
 #[derive(Clone, Debug)]
 pub struct Point {
-  pub x: i32,
-  pub y: i32,
+  pub(crate) x: i32,
+  pub(crate) y: i32,
 }
 
 pub struct Oscillator {

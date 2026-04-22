@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 byteorder = "1"
+encoding_rs = "0.8"
 lewton = "0.10.2"

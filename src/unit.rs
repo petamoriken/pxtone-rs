@@ -10,45 +10,45 @@ pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
 /// Per-unit voice tone state
 #[derive(Clone, Default)]
 pub struct VoiceTone {
-  pub smp_pos: f64,
-  pub offset_freq: f32,
-  pub env_volume: i32,
-  pub life_count: i32,
-  pub on_count: i32,
-  pub env_start: i32,
-  pub env_pos: i32,
-  pub env_release_clock: i32,
-  pub smooth_volume: i32,
+  pub(crate) smp_pos: f64,
+  pub(crate) offset_freq: f32,
+  pub(crate) env_volume: i32,
+  pub(crate) life_count: i32,
+  pub(crate) on_count: i32,
+  pub(crate) env_start: i32,
+  pub(crate) env_pos: i32,
+  pub(crate) env_release_clock: i32,
+  pub(crate) smooth_volume: i32,
 }
 
 /// Unit (playback state)
 pub struct Unit {
-  pub operated: bool,
-  pub played: bool,
-  pub name: String,
+  pub(crate) operated: bool,
+  pub(crate) played: bool,
+  pub(crate) name: String,
 
   // Key state
-  pub key_now: i32,
-  pub key_start: i32,
-  pub key_margin: i32,
-  pub portament_sample_pos: i32,
-  pub portament_sample_num: i32,
+  pub(crate) key_now: i32,
+  pub(crate) key_start: i32,
+  pub(crate) key_margin: i32,
+  pub(crate) portament_sample_pos: i32,
+  pub(crate) portament_sample_num: i32,
 
   // Pan
-  pub pan_vols: [i32; MAX_CHANNEL],
-  pub pan_times: [i32; MAX_CHANNEL],
-  pub pan_time_bufs: [[i32; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
+  pub(crate) pan_vols: [i32; MAX_CHANNEL],
+  pub(crate) pan_times: [i32; MAX_CHANNEL],
+  pub(crate) pan_time_bufs: [[i32; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
 
   // Velocity, volume, etc.
-  pub v_volume: i32,
-  pub v_velocity: i32,
-  pub v_groupno: i32,
-  pub v_tuning: f32,
+  pub(crate) v_volume: i32,
+  pub(crate) v_velocity: i32,
+  pub(crate) v_groupno: i32,
+  pub(crate) v_tuning: f32,
 
   // Voice references (one per instance)
-  pub voice_num: usize, // tone_ready 後に設定
-  pub voice_flags: Vec<u32>,
-  pub tones: [VoiceTone; MAX_UNIT_CONTROL_VOICE],
+  pub(crate) voice_num: usize,
+  pub(crate) voice_flags: Vec<u32>,
+  pub(crate) tones: [VoiceTone; MAX_UNIT_CONTROL_VOICE],
 }
 
 impl Default for Unit {

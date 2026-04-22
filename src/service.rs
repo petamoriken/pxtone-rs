@@ -456,8 +456,7 @@ impl PxtoneService {
     let _bps = r.read_u16::<LE>()?;
     let _sps = r.read_u32::<LE>()?;
 
-    let end = name.iter().position(|&b| b == 0).unwrap_or(16);
-    self.text.name = Some(String::from_utf8_lossy(&name[..end]).into_owned());
+    self.text.set_name_raw(&name);
     self.master.beat_num = beat_num;
     self.master.beat_tempo = beat_tempo;
     self.master.beat_clock = beat_clock;

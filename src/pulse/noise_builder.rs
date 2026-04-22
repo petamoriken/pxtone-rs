@@ -1,6 +1,7 @@
 // Noise builder (pxtnPulse_NoiseBuilder)
 // Initializes wave tables and generates PCM from a Noise design
 
+use crate::error::PxtoneError;
 use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::{Noise, NoiseOscillator, WAVETYPE_NUM, WaveType};
 use crate::pulse::oscillator::{Oscillator, Point};
@@ -358,7 +359,7 @@ impl NoiseBuilder {
     sps: i32,
     bps: i32,
     freq: &FrequencyTable,
-  ) -> Option<Pcm> {
+  ) -> Result<Pcm, PxtoneError> {
     noise.fix();
 
     // Build only the tables required by this Noise design
@@ -500,6 +501,6 @@ impl NoiseBuilder {
       }
     }
 
-    Some(pcm)
+    Ok(pcm)
   }
 }

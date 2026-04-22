@@ -79,10 +79,10 @@ fn compare_priority(kind1: u8, kind2: u8) -> i32 {
 /// Event record
 #[derive(Clone, Debug, Default)]
 pub struct EventRecord {
-  pub kind: u8,
-  pub unit_no: u8,
-  pub value: i32,
-  pub clock: i32,
+  pub(crate) kind: u8,
+  pub(crate) unit_no: u8,
+  pub(crate) value: i32,
+  pub(crate) clock: i32,
 }
 
 /// Event list (uses Vec as a substitute for a sorted doubly-linked list)

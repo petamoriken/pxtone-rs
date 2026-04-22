@@ -59,29 +59,29 @@ impl TryFrom<i32> for WaveType {
 
 #[derive(Clone, Debug, Default)]
 pub struct NoiseOscillator {
-  pub wave_type: WaveType,
-  pub freq: f32,
-  pub volume: f32,
-  pub offset: f32,
-  pub b_rev: bool,
+  pub(crate) wave_type: WaveType,
+  pub(crate) freq: f32,
+  pub(crate) volume: f32,
+  pub(crate) offset: f32,
+  pub(crate) b_rev: bool,
 }
 
 // ---- Noise unit design ----
 
 #[derive(Clone, Debug)]
 pub struct NoisePoint {
-  pub x: i32,
-  pub y: i32,
+  pub(crate) x: i32,
+  pub(crate) y: i32,
 }
 
 #[derive(Clone, Debug)]
 pub struct NoiseUnit {
-  pub enabled: bool,
-  pub envelopes: Vec<NoisePoint>,
-  pub pan: i32,
-  pub main: NoiseOscillator,
-  pub freq: NoiseOscillator,
-  pub volu: NoiseOscillator,
+  pub(crate) enabled: bool,
+  pub(crate) envelopes: Vec<NoisePoint>,
+  pub(crate) pan: i32,
+  pub(crate) main: NoiseOscillator,
+  pub(crate) freq: NoiseOscillator,
+  pub(crate) volu: NoiseOscillator,
 }
 
 impl Default for NoiseUnit {
@@ -123,8 +123,8 @@ const LIMIT_ENVE_Y: i32 = 100;
 
 #[derive(Debug, Default)]
 pub struct Noise {
-  pub smp_num_44k: i32,
-  pub units: Vec<NoiseUnit>,
+  pub(crate) smp_num_44k: i32,
+  pub(crate) units: Vec<NoiseUnit>,
 }
 
 impl Noise {
