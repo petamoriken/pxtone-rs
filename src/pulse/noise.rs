@@ -128,16 +128,16 @@ pub struct Noise {
 }
 
 impl Noise {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
 
-  pub fn get_sec(&self) -> f32 {
+  pub(crate) fn get_sec(&self) -> f32 {
     self.smp_num_44k as f32 / 44100.0
   }
 
   /// Clamps all parameters to their valid ranges
-  pub fn fix(&mut self) {
+  pub(crate) fn fix(&mut self) {
     if self.smp_num_44k > LIMIT_SMP_NUM {
       self.smp_num_44k = LIMIT_SMP_NUM;
     }
@@ -161,7 +161,7 @@ impl Noise {
   }
 
   /// Reads a "PTNOISE-" format noise block
-  pub fn read<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let mut code = [0u8; 8];
     r.read_exact(&mut code)?;
     if &code != CODE {

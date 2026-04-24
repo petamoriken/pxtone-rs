@@ -16,14 +16,14 @@ impl Text {
 
   /// Reads text in i32 size + byte sequence format and stores raw Shift-JIS bytes.
   /// The Shift-JIS → UTF-8 conversion is deferred until name() is called.
-  pub fn read_name<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_name<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     self.name_raw = Some(read_raw(r)?);
     Ok(())
   }
 
   /// Reads text in i32 size + byte sequence format and stores raw Shift-JIS bytes.
   /// The Shift-JIS → UTF-8 conversion is deferred until comment() is called.
-  pub fn read_comment<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_comment<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     self.comment_raw = Some(read_raw(r)?);
     Ok(())
   }

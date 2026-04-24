@@ -38,7 +38,7 @@ pub const EVENTDEFAULT_BEATTEMPO: f32 = 120.0;
 pub const EVENTDEFAULT_BEATCLOCK: i32 = 480;
 
 /// Returns whether an event is a "tail" event (ON and PORTAMENT)
-pub fn event_kind_is_tail(kind: u8) -> bool {
+pub(crate) fn event_kind_is_tail(kind: u8) -> bool {
   kind == EVENTKIND_ON || kind == EVENTKIND_PORTAMENT
 }
 
@@ -120,7 +120,7 @@ impl EventList {
   }
 
   /// Reads a v5-format event list (equivalent to Linear_Start / Linear_Add / Linear_End)
-  pub fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let eve_num = r.read_i32::<LE>()?;
 
@@ -151,7 +151,7 @@ impl EventList {
   }
 
   /// Counts v5-format events and seeks past them (for pre-counting)
-  pub fn count_v5<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
+  pub(crate) fn count_v5<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let eve_num = r.read_i32::<LE>()?;
 
@@ -166,7 +166,7 @@ impl EventList {
   }
 
   /// Reads an x4x-format event block
-  pub fn read_x4x_block<R: Read + Seek>(
+  pub(crate) fn read_x4x_block<R: Read + Seek>(
     &mut self,
     r: &mut R,
     tail_absolute: bool,
@@ -208,7 +208,7 @@ impl EventList {
   }
 
   /// Counts x4x-format events (for pre-counting)
-  pub fn count_x4x_block<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
+  pub(crate) fn count_x4x_block<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let _unit_idx = r.read_u16::<LE>()?;
     let _kind = r.read_u16::<LE>()?;
@@ -299,7 +299,7 @@ impl EventList {
 // ---- Variable-length integer reading ----
 
 /// Reads a pxtone variable-length integer (up to 5 bytes)
-pub fn read_var_int<R: Read>(r: &mut R) -> Result<i32, PxtoneError> {
+pub(crate) fn read_var_int<R: Read>(r: &mut R) -> Result<i32, PxtoneError> {
   let mut bytes = [0u8; 5];
   let mut count = 0usize;
 

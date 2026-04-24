@@ -16,7 +16,7 @@ pub struct Oscillator {
 }
 
 impl Oscillator {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       volume: 0,
       sample_num: 0,
@@ -26,7 +26,7 @@ impl Oscillator {
     }
   }
 
-  pub fn ready_get_sample(
+  pub(crate) fn ready_get_sample(
     &mut self,
     points: Vec<Point>,
     volume: i32,
@@ -41,7 +41,7 @@ impl Oscillator {
   }
 
   /// Gets one sample via overtone synthesis
-  pub fn get_one_sample_overtone(&self, index: i32) -> f64 {
+  pub(crate) fn get_one_sample_overtone(&self, index: i32) -> f64 {
     use std::f64::consts::PI;
     let mut work = 0.0f64;
     for p in &self.points {
@@ -52,7 +52,7 @@ impl Oscillator {
   }
 
   /// Gets one sample via coordinate interpolation
-  pub fn get_one_sample_coodinate(&self, index: i32) -> f64 {
+  pub(crate) fn get_one_sample_coodinate(&self, index: i32) -> f64 {
     let i = self.point_reso * index / self.sample_num;
 
     // Find the two surrounding points

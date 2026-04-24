@@ -133,7 +133,7 @@ pub struct NoiseBuilder {
 }
 
 impl NoiseBuilder {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self {
       tables: std::array::from_fn(|_| None),
     }
@@ -352,7 +352,7 @@ impl NoiseBuilder {
   }
 
   /// Generates PCM from a Noise design
-  pub fn build_noise(
+  pub(crate) fn build_noise(
     &mut self,
     noise: &mut Noise,
     ch: usize,

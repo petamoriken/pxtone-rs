@@ -9,23 +9,23 @@ use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
 // ---- Constants ----
-pub const MAX_WOICE_NAME: usize = 16;
-pub const MAX_VOICE_NUM: usize = 2; // pxtnMAX_UNITCONTROLVOICE
-pub const BUFSIZE_TIMEPAN: usize = 0x40;
-pub const BIT_PER_SAMPLE: i32 = 16;
+pub(crate) const MAX_WOICE_NAME: usize = 16;
+pub(crate) const MAX_VOICE_NUM: usize = 2; // pxtnMAX_UNITCONTROLVOICE
+pub(crate) const BUFSIZE_TIMEPAN: usize = 0x40;
+pub(crate) const BIT_PER_SAMPLE: i32 = 16;
 
-pub const VOICE_FLAG_WAVELOOP: u32 = 0x00000001;
-pub const VOICE_FLAG_SMOOTH: u32 = 0x00000002;
-pub const VOICE_FLAG_BEATFIT: u32 = 0x00000004;
-pub const VOICE_FLAG_UNCOVERED: u32 = 0xfffffff8;
+pub(crate) const VOICE_FLAG_WAVELOOP: u32 = 0x00000001;
+pub(crate) const VOICE_FLAG_SMOOTH: u32 = 0x00000002;
+pub(crate) const VOICE_FLAG_BEATFIT: u32 = 0x00000004;
+pub(crate) const VOICE_FLAG_UNCOVERED: u32 = 0xfffffff8;
 
-pub const DATA_FLAG_WAVE: u32 = 0x00000001;
-pub const DATA_FLAG_ENVELOPE: u32 = 0x00000002;
-pub const DATA_FLAG_UNCOVERED: u32 = 0xfffffffc;
+pub(crate) const DATA_FLAG_WAVE: u32 = 0x00000001;
+pub(crate) const DATA_FLAG_ENVELOPE: u32 = 0x00000002;
+pub(crate) const DATA_FLAG_UNCOVERED: u32 = 0xfffffffc;
 
 // ---- Types ----
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum WoiceType {
+pub(crate) enum WoiceType {
   #[default]
   None,
   Pcm,
@@ -35,7 +35,7 @@ pub enum WoiceType {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
-pub enum VoiceType {
+pub(crate) enum VoiceType {
   #[default]
   Coodinate,
   Overtone,
@@ -46,13 +46,13 @@ pub enum VoiceType {
 
 // ---- Waveform / Envelope ----
 #[derive(Clone, Debug, Default)]
-pub struct VoiceWave {
+pub(crate) struct VoiceWave {
   pub(crate) reso: i32,
   pub(crate) points: Vec<(i32, i32)>, // (x, y)
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct VoiceEnvelope {
+pub(crate) struct VoiceEnvelope {
   pub(crate) fps: i32,
   pub(crate) head_num: i32,
   pub(crate) body_num: i32,
@@ -61,7 +61,7 @@ pub struct VoiceEnvelope {
 }
 
 // ---- Unit (design data) ----
-pub struct VoiceUnit {
+pub(crate) struct VoiceUnit {
   pub(crate) basic_key: i32,
   pub(crate) volume: i32,
   pub(crate) pan: i32,
@@ -96,7 +96,7 @@ impl Default for VoiceUnit {
 }
 
 // ---- OGG data ----
-pub struct OggData {
+pub(crate) struct OggData {
   pub(crate) ch: i32,
   pub(crate) sps: i32,
   pub(crate) smp_num: i32,
@@ -105,7 +105,7 @@ pub struct OggData {
 
 // ---- Instance (synthesis buffer) ----
 #[derive(Default)]
-pub struct VoiceInstance {
+pub(crate) struct VoiceInstance {
   pub(crate) smp_head_w: i32,
   pub(crate) smp_body_w: i32,
   pub(crate) smp_tail_w: i32,
@@ -118,7 +118,7 @@ pub struct VoiceInstance {
 
 impl VoiceInstance {
   /// Gets one sample from an interleaved stereo 16-bit buffer
-  pub fn get_sample_i16(&self, frame: usize, ch: usize) -> i16 {
+  pub(crate) fn get_sample_i16(&self, frame: usize, ch: usize) -> i16 {
     let offset = frame * 4 + ch * 2;
     if offset + 1 >= self.samples_w.len() {
       return 0;
@@ -128,7 +128,7 @@ impl VoiceInstance {
 }
 
 // ---- Woice ----
-pub struct Woice {
+pub(crate) struct Woice {
   pub(crate) name: String,
   pub(crate) woice_type: WoiceType,
   pub(crate) x3x_tuning: f32,
@@ -151,12 +151,12 @@ impl Default for Woice {
 }
 
 impl Woice {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
 
   // ---- PCM material loading ----
-  pub fn read_mate_pcm<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_mate_pcm<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_u32::<LE>()?;
     // _MATERIALSTRUCT_PCM (24 bytes)
     let _x3x_unit_no = r.read_u16::<LE>()?;
@@ -190,7 +190,7 @@ impl Woice {
   }
 
   // ---- PTN material loading ----
-  pub fn read_mate_ptn<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_mate_ptn<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     // _MATERIALSTRUCT_PTN (16 bytes)
     let _x3x_unit_no = r.read_u16::<LE>()?;
@@ -220,7 +220,7 @@ impl Woice {
   }
 
   // ---- PTV material loading ----
-  pub fn read_mate_ptv<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_mate_ptv<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     // _MATERIALSTRUCT_PTV (12 bytes)
     let _x3x_unit_no = r.read_u16::<LE>()?;
@@ -238,7 +238,7 @@ impl Woice {
   }
 
   // ---- OGGV material loading ----
-  pub fn read_mate_oggv<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_mate_oggv<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_u32::<LE>()?;
     // _MATERIALSTRUCT_OGGV (12 bytes)
     let _xxx = r.read_u16::<LE>()?;
@@ -332,7 +332,7 @@ impl Woice {
   }
 
   // ---- Sample buffer preparation ----
-  pub fn tone_ready_sample(
+  pub(crate) fn tone_ready_sample(
     &mut self,
     noise_builder: &mut NoiseBuilder,
     freq: &FrequencyTable,
@@ -395,7 +395,7 @@ impl Woice {
   }
 
   // ---- Envelope buffer preparation ----
-  pub fn tone_ready_envelope(&mut self, sps: i32) -> Result<(), PxtoneError> {
+  pub(crate) fn tone_ready_envelope(&mut self, sps: i32) -> Result<(), PxtoneError> {
     for (unit, inst) in self.voices.iter().zip(self.instances.iter_mut()) {
       let env = &unit.envelope;
       inst.env.clear();
@@ -451,7 +451,7 @@ impl Woice {
     Ok(())
   }
 
-  pub fn tone_ready(
+  pub(crate) fn tone_ready(
     &mut self,
     noise_builder: &mut NoiseBuilder,
     freq: &FrequencyTable,

@@ -17,7 +17,7 @@ pub struct Pcm {
 }
 
 impl Pcm {
-  pub fn create(ch: i32, sps: i32, bps: i32, sample_num: i32) -> Result<Self, PxtoneError> {
+  pub(crate) fn create(ch: i32, sps: i32, bps: i32, sample_num: i32) -> Result<Self, PxtoneError> {
     if bps != 8 && bps != 16 {
       return Err(PxtoneError::UnknownFormat);
     }
@@ -34,23 +34,23 @@ impl Pcm {
     })
   }
 
-  pub fn samples(&self) -> &[u8] {
+  pub(crate) fn samples(&self) -> &[u8] {
     &self.samples
   }
-  pub fn samples_mut(&mut self) -> &mut [u8] {
+  pub(crate) fn samples_mut(&mut self) -> &mut [u8] {
     &mut self.samples
   }
 
-  pub fn buf_size(&self) -> usize {
+  pub(crate) fn buf_size(&self) -> usize {
     ((self.smp_head + self.smp_body + self.smp_tail) * self.ch * self.bps / 8) as usize
   }
 
-  pub fn get_sec(&self) -> f32 {
+  pub(crate) fn get_sec(&self) -> f32 {
     (self.smp_head + self.smp_body + self.smp_tail) as f32 / self.sps as f32
   }
 
   /// Reads a RIFF WAV file
-  pub fn read_wav<R: Read + Seek>(r: &mut R) -> Result<Self, PxtoneError> {
+  pub(crate) fn read_wav<R: Read + Seek>(r: &mut R) -> Result<Self, PxtoneError> {
     // 16-byte "RIFFxxxxWAVEfmt " header
     let mut header = [0u8; 16];
     r.read_exact(&mut header)?;
@@ -101,7 +101,12 @@ impl Pcm {
 
   // ---- Conversion ----
 
-  pub fn convert(&mut self, new_ch: i32, new_sps: i32, new_bps: i32) -> Result<(), PxtoneError> {
+  pub(crate) fn convert(
+    &mut self,
+    new_ch: i32,
+    new_sps: i32,
+    new_bps: i32,
+  ) -> Result<(), PxtoneError> {
     self.convert_channel(new_ch)?;
     self.convert_bps(new_bps)?;
     self.convert_sps(new_sps)?;
@@ -235,7 +240,7 @@ impl Pcm {
     Ok(())
   }
 
-  pub fn convert_volume(&mut self, v: f32) {
+  pub(crate) fn convert_volume(&mut self, v: f32) {
     let total = (self.total_samples() * self.ch) as usize;
     match self.bps {
       8 => {
@@ -258,7 +263,7 @@ impl Pcm {
 
   /// For moo synthesis: reads as an interleaved stereo 16-bit sample.
   /// pos is in sample units (not frame units). For ch=2, interleaved as (L, R).
-  pub fn get_sample_i16_at(&self, frame: usize, ch: usize) -> i16 {
+  pub(crate) fn get_sample_i16_at(&self, frame: usize, ch: usize) -> i16 {
     let bytes_per_frame = (self.ch * self.bps / 8) as usize;
     let total_frames = (self.smp_head + self.smp_body + self.smp_tail) as usize;
     if frame >= total_frames {

@@ -75,11 +75,11 @@ impl Default for Unit {
 }
 
 impl Unit {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
 
-  pub fn tone_init(&mut self) {
+  pub(crate) fn tone_init(&mut self) {
     self.v_groupno = EVENTDEFAULT_GROUPNO;
     self.v_velocity = EVENTDEFAULT_VELOCITY;
     self.v_volume = EVENTDEFAULT_VOLUME;
@@ -92,7 +92,7 @@ impl Unit {
     }
   }
 
-  pub fn tone_clear(&mut self) {
+  pub(crate) fn tone_clear(&mut self) {
     for ch in 0..MAX_CHANNEL {
       for v in &mut self.pan_time_bufs[ch] {
         *v = 0;
@@ -100,7 +100,12 @@ impl Unit {
     }
   }
 
-  pub fn tone_reset_and_2prm(&mut self, voice_idx: usize, env_rls_clock: i32, offset_freq: f32) {
+  pub(crate) fn tone_reset_and_2prm(
+    &mut self,
+    voice_idx: usize,
+    env_rls_clock: i32,
+    offset_freq: f32,
+  ) {
     let t = &mut self.tones[voice_idx];
     t.life_count = 0;
     t.on_count = 0;
@@ -110,7 +115,7 @@ impl Unit {
     t.offset_freq = offset_freq;
   }
 
-  pub fn set_woice(&mut self, voice_num: usize, voice_flags: Vec<u32>) {
+  pub(crate) fn set_woice(&mut self, voice_num: usize, voice_flags: Vec<u32>) {
     self.voice_num = voice_num;
     self.voice_flags = voice_flags;
     self.key_now = EVENTDEFAULT_KEY;
@@ -118,25 +123,25 @@ impl Unit {
     self.key_start = EVENTDEFAULT_KEY;
   }
 
-  pub fn tone_zero_lives(&mut self) {
+  pub(crate) fn tone_zero_lives(&mut self) {
     for i in 0..MAX_UNIT_CONTROL_VOICE {
       self.tones[i].life_count = 0;
     }
   }
 
-  pub fn tone_key_on(&mut self) {
+  pub(crate) fn tone_key_on(&mut self) {
     self.key_now = self.key_start + self.key_margin;
     self.key_start = self.key_now;
     self.key_margin = 0;
   }
 
-  pub fn tone_key(&mut self, key: i32) {
+  pub(crate) fn tone_key(&mut self, key: i32) {
     self.key_start = self.key_now;
     self.key_margin = key - self.key_start;
     self.portament_sample_pos = 0;
   }
 
-  pub fn tone_pan_volume(&mut self, ch: i32, pan: i32) {
+  pub(crate) fn tone_pan_volume(&mut self, ch: i32, pan: i32) {
     self.pan_vols[0] = 64;
     self.pan_vols[1] = 64;
     if ch == 2 {
@@ -148,7 +153,7 @@ impl Unit {
     }
   }
 
-  pub fn tone_pan_time(&mut self, ch: i32, pan: i32, sps: i32) {
+  pub(crate) fn tone_pan_time(&mut self, ch: i32, pan: i32, sps: i32) {
     self.pan_times[0] = 0;
     self.pan_times[1] = 0;
     if ch == 2 {
@@ -162,23 +167,23 @@ impl Unit {
     }
   }
 
-  pub fn tone_velocity(&mut self, val: i32) {
+  pub(crate) fn tone_velocity(&mut self, val: i32) {
     self.v_velocity = val;
   }
-  pub fn tone_volume(&mut self, val: i32) {
+  pub(crate) fn tone_volume(&mut self, val: i32) {
     self.v_volume = val;
   }
-  pub fn tone_portament(&mut self, val: i32) {
+  pub(crate) fn tone_portament(&mut self, val: i32) {
     self.portament_sample_num = val;
   }
-  pub fn tone_groupno(&mut self, val: i32) {
+  pub(crate) fn tone_groupno(&mut self, val: i32) {
     self.v_groupno = val;
   }
-  pub fn tone_tuning(&mut self, val: f32) {
+  pub(crate) fn tone_tuning(&mut self, val: f32) {
     self.v_tuning = val;
   }
 
-  pub fn tone_envelope(&mut self, instances: &[VoiceInstance]) {
+  pub(crate) fn tone_envelope(&mut self, instances: &[VoiceInstance]) {
     for v in 0..self.voice_num {
       let vi = &instances[v];
       let vt = &mut self.tones[v];
@@ -198,7 +203,7 @@ impl Unit {
   }
 
   /// Generates samples and writes them into pan_time_bufs
-  pub fn tone_sample(
+  pub(crate) fn tone_sample(
     &mut self,
     b_mute_by_unit: bool,
     ch_num: i32,
@@ -249,7 +254,7 @@ impl Unit {
   }
 
   /// Adds pan_time_bufs values to group samples
-  pub fn tone_supple(&self, group_smps: &mut [i32], ch: usize, time_pan_index: usize) {
+  pub(crate) fn tone_supple(&self, group_smps: &mut [i32], ch: usize, time_pan_index: usize) {
     let idx =
       (time_pan_index + BUFSIZE_TIMEPAN - self.pan_times[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
     if (self.v_groupno as usize) < group_smps.len() {
@@ -258,7 +263,7 @@ impl Unit {
   }
 
   /// Applies portamento processing and returns the current key
-  pub fn tone_increment_key(&mut self) -> i32 {
+  pub(crate) fn tone_increment_key(&mut self) -> i32 {
     if self.portament_sample_num != 0 && self.key_margin != 0 {
       if self.portament_sample_pos < self.portament_sample_num {
         self.portament_sample_pos += 1;
@@ -277,7 +282,7 @@ impl Unit {
   }
 
   /// Advances the sample position
-  pub fn tone_increment_sample(&mut self, freq: f32, instances: &[VoiceInstance]) {
+  pub(crate) fn tone_increment_sample(&mut self, freq: f32, instances: &[VoiceInstance]) {
     for v in 0..self.voice_num {
       let vi = &instances[v];
       let vt = &mut self.tones[v];

@@ -55,12 +55,12 @@ impl Default for Delay {
 }
 
 impl Delay {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
 
   /// Prepares before playback: allocates the delay buffer
-  pub fn tone_ready(&mut self, beat_num: i32, beat_tempo: f32, sps: i32) {
+  pub(crate) fn tone_ready(&mut self, beat_num: i32, beat_tempo: f32, sps: i32) {
     self.smp_num = 0;
     self.bufs[0].clear();
     self.bufs[1].clear();
@@ -87,7 +87,7 @@ impl Delay {
   }
 
   /// Applies delay to group samples
-  pub fn tone_supple(&mut self, ch: usize, group_smps: &mut [i32]) {
+  pub(crate) fn tone_supple(&mut self, ch: usize, group_smps: &mut [i32]) {
     if self.smp_num == 0 {
       return;
     }
@@ -98,14 +98,14 @@ impl Delay {
     self.bufs[ch][self.offset] = group_smps[self.group];
   }
 
-  pub fn tone_increment(&mut self) {
+  pub(crate) fn tone_increment(&mut self) {
     if self.smp_num == 0 {
       return;
     }
     self.offset = (self.offset + 1) % self.smp_num;
   }
 
-  pub fn tone_clear(&mut self) {
+  pub(crate) fn tone_clear(&mut self) {
     for buf in &mut self.bufs {
       for v in buf.iter_mut() {
         *v = 0;
@@ -114,7 +114,7 @@ impl Delay {
   }
 
   /// Reads a (12-byte) delay structure
-  pub fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let unit = r.read_u16::<LE>()?;
     let group = r.read_u16::<LE>()? as usize;

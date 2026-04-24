@@ -53,11 +53,11 @@ impl Master {
     self.last_meas
   }
 
-  pub fn get_last_clock(&self) -> i32 {
+  pub(crate) fn get_last_clock(&self) -> i32 {
     self.last_meas * self.beat_clock * self.beat_num
   }
 
-  pub fn get_play_meas(&self) -> i32 {
+  pub(crate) fn get_play_meas(&self) -> i32 {
     if self.last_meas != 0 {
       self.last_meas
     } else {
@@ -65,11 +65,11 @@ impl Master {
     }
   }
 
-  pub fn get_this_clock(&self, meas: i32, beat: i32, clock: i32) -> i32 {
+  pub(crate) fn get_this_clock(&self, meas: i32, beat: i32, clock: i32) -> i32 {
     self.beat_num * self.beat_clock * meas + self.beat_clock * beat + clock
   }
 
-  pub fn adjust_meas_num(&mut self, clock: i32) {
+  pub(crate) fn adjust_meas_num(&mut self, clock: i32) {
     let b_num = (clock + self.beat_clock - 1) / self.beat_clock;
     let m_num = (b_num + self.beat_num - 1) / self.beat_num;
     if self.meas_num <= m_num {
@@ -83,7 +83,7 @@ impl Master {
     }
   }
 
-  pub fn set_meas_num(&mut self, mut meas_num: i32) {
+  pub(crate) fn set_meas_num(&mut self, mut meas_num: i32) {
     if meas_num < 1 {
       meas_num = 1;
     }
@@ -96,21 +96,21 @@ impl Master {
     self.meas_num = meas_num;
   }
 
-  pub fn set_repeat_meas(&mut self, mut meas: i32) {
+  pub(crate) fn set_repeat_meas(&mut self, mut meas: i32) {
     if meas < 0 {
       meas = 0;
     }
     self.repeat_meas = meas;
   }
 
-  pub fn set_last_meas(&mut self, mut meas: i32) {
+  pub(crate) fn set_last_meas(&mut self, mut meas: i32) {
     if meas < 0 {
       meas = 0;
     }
     self.last_meas = meas;
   }
 
-  pub fn set_beat_clock(&mut self, mut beat_clock: i32) {
+  pub(crate) fn set_beat_clock(&mut self, mut beat_clock: i32) {
     if beat_clock < 0 {
       beat_clock = 0;
     }
@@ -120,7 +120,7 @@ impl Master {
   /// Reads a v5-format Master block
   /// Block: u32 size(=15), i16 beat_clock, i8 beat_num, f32 beat_tempo,
   ///        i32 clock_repeat, i32 clock_last
-  pub fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let size = r.read_u32::<LE>()?;
     if size != 15 {
       return Err(PxtoneError::UnknownFormat);
@@ -146,7 +146,7 @@ impl Master {
   }
 
   /// Skips a v5-format Master block and returns the event count (constant 5)
-  pub fn count_v5<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
+  pub(crate) fn count_v5<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
     let size = r.read_u32::<LE>()?;
     if size != 15 {
       return Err(PxtoneError::UnknownFormat);
@@ -157,7 +157,7 @@ impl Master {
   }
 
   /// Reads an x4x-format Master block
-  pub fn read_x4x<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_x4x<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let data_num = r.read_u16::<LE>()?;
     let rrr = r.read_u16::<LE>()?;
@@ -233,7 +233,7 @@ impl Master {
   }
 
   /// Skips an x4x-format Master block and returns the event count
-  pub fn count_x4x<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
+  pub(crate) fn count_x4x<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let data_num = r.read_u16::<LE>()?;
     let _rrr = r.read_u16::<LE>()?;

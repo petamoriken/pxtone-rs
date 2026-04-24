@@ -29,15 +29,15 @@ impl Default for OverDrive {
 }
 
 impl OverDrive {
-  pub fn new() -> Self {
+  pub(crate) fn new() -> Self {
     Self::default()
   }
 
-  pub fn tone_ready(&mut self) {
+  pub(crate) fn tone_ready(&mut self) {
     self.cut_16bit_top = (32767.0 * (100.0 - self.cut) / 100.0) as i32;
   }
 
-  pub fn tone_supple(&self, group_smps: &mut [i32]) {
+  pub(crate) fn tone_supple(&self, group_smps: &mut [i32]) {
     if !self.played {
       return;
     }
@@ -46,7 +46,7 @@ impl OverDrive {
   }
 
   /// Reads a (20-byte) overdrive structure
-  pub fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_u32::<LE>()?;
     let xxx = r.read_u16::<LE>()?;
     let group = r.read_u16::<LE>()? as usize;
