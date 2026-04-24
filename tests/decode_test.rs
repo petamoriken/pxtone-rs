@@ -2,6 +2,7 @@ use pxtone::{PxtoneService, VomitPreparation};
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::Path;
+use toml::Table;
 
 fn open_service(path: &Path) -> PxtoneService {
   let file = File::open(path).unwrap_or_else(|e| panic!("{}: {}", path.display(), e));
@@ -55,23 +56,22 @@ fn decode_to_wav(service: &mut PxtoneService) -> Vec<u8> {
 }
 
 fn decode_to_metadata(service: &PxtoneService) -> String {
+  use toml::Value;
   let m = &service.master;
   let t = &service.text;
-  format!(
-    "name = {}\ncomment = {}\nbeat_clock = {}\nbeat_num = {}\nbeat_tempo = {}\nmeas_num = {}\nrepeat_meas = {}\nlast_meas = {}\n",
-    toml_string(t.name().as_deref().unwrap_or("")),
-    toml_string(t.comment().as_deref().unwrap_or("")),
-    m.beat_clock(),
-    m.beat_num(),
-    m.beat_tempo(),
-    m.meas_num(),
-    m.repeat_meas(),
-    m.last_meas(),
-  )
-}
-
-fn toml_string(s: &str) -> String {
-  format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\""))
+  let mut table = Table::new();
+  table.insert("name".into(), Value::String(t.name().unwrap_or_default()));
+  table.insert(
+    "comment".into(),
+    Value::String(t.comment().unwrap_or_default()),
+  );
+  table.insert("beat_clock".into(), Value::Integer(m.beat_clock() as i64));
+  table.insert("beat_num".into(), Value::Integer(m.beat_num() as i64));
+  table.insert("beat_tempo".into(), Value::Float(m.beat_tempo() as f64));
+  table.insert("meas_num".into(), Value::Integer(m.meas_num() as i64));
+  table.insert("repeat_meas".into(), Value::Integer(m.repeat_meas() as i64));
+  table.insert("last_meas".into(), Value::Integer(m.last_meas() as i64));
+  toml::to_string(&table).unwrap()
 }
 
 #[test]
@@ -119,10 +119,16 @@ fn decoded_wav_matches_reference() {
       failures.push(wav_path.display().to_string());
     }
 
-    // Metadata comparison
+    // Metadata comparison (via TOML parse to ignore formatting differences)
     let expected_txt = fs::read_to_string(&txt_path)
       .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", txt_path.display(), e));
-    if metadata != expected_txt {
+    let actual_toml: Table = metadata
+      .parse()
+      .expect("generated metadata is not valid TOML");
+    let expected_toml: Table = expected_txt
+      .parse()
+      .unwrap_or_else(|e| panic!("{}: invalid TOML: {}", txt_path.display(), e));
+    if actual_toml != expected_toml {
       failures.push(txt_path.display().to_string());
     }
   }

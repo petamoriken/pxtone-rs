@@ -5,7 +5,6 @@ use crate::error::PxtoneError;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek, SeekFrom};
 
-
 #[derive(Debug)]
 pub struct Pcm {
   pub(crate) ch: i32,

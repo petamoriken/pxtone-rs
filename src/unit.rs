@@ -23,7 +23,6 @@ pub struct VoiceTone {
 
 /// Unit (playback state)
 pub struct Unit {
-  pub(crate) operated: bool,
   pub(crate) played: bool,
   pub(crate) name: String,
 
@@ -54,7 +53,6 @@ pub struct Unit {
 impl Default for Unit {
   fn default() -> Self {
     Self {
-      operated: true,
       played: true,
       name: "no name".to_string(),
       key_now: EVENTDEFAULT_KEY,

@@ -347,8 +347,7 @@ impl Woice {
       match unit.voice_type {
         VoiceType::Sampling => {
           if let Some(pcm) = &unit.pcm {
-            let mut work =
-              Pcm::create(pcm.ch, pcm.sps, pcm.bps, pcm.smp_body)?;
+            let mut work = Pcm::create(pcm.ch, pcm.sps, pcm.bps, pcm.smp_body)?;
             let src = pcm.samples();
             let copy_len = src.len().min(work.samples().len());
             work.samples_mut()[..copy_len].copy_from_slice(&src[..copy_len]);
