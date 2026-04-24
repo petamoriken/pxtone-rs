@@ -1,0 +1,8 @@
+name = "Overworld2-nes"
+comment = ""
+beat_clock = 480
+beat_num = 4
+beat_tempo = 145
+meas_num = 44
+repeat_meas = 0
+last_meas = 0

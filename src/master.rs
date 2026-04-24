@@ -34,6 +34,25 @@ impl Master {
     Self::default()
   }
 
+  pub fn beat_clock(&self) -> i32 {
+    self.beat_clock
+  }
+  pub fn beat_num(&self) -> i32 {
+    self.beat_num
+  }
+  pub fn beat_tempo(&self) -> f32 {
+    self.beat_tempo
+  }
+  pub fn meas_num(&self) -> i32 {
+    self.meas_num
+  }
+  pub fn repeat_meas(&self) -> i32 {
+    self.repeat_meas
+  }
+  pub fn last_meas(&self) -> i32 {
+    self.last_meas
+  }
+
   pub fn get_last_clock(&self) -> i32 {
     self.last_meas * self.beat_clock * self.beat_num
   }

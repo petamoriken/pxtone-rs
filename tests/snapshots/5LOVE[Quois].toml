@@ -1,0 +1,8 @@
+name = "5LOVE"
+comment = ""
+beat_clock = 480
+beat_num = 5
+beat_tempo = 186
+meas_num = 33
+repeat_meas = 1
+last_meas = 0
