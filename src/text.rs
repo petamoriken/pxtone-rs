@@ -1,12 +1,11 @@
 use crate::error::PxtoneError;
 use byteorder::{LE, ReadBytesExt};
-use encoding_rs::SHIFT_JIS;
 use std::io::Read;
 
 #[derive(Debug, Default)]
 pub struct Text {
-  name: Option<String>,
-  comment: Option<String>,
+  name: Option<Vec<u8>>,
+  comment: Option<Vec<u8>>,
 }
 
 impl Text {
@@ -15,25 +14,25 @@ impl Text {
   }
 
   pub(crate) fn read_name<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    self.name = Some(decode_shift_jis(&read_raw(r)?));
+    self.name = Some(read_raw(r)?);
     Ok(())
   }
 
   pub(crate) fn read_comment<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    self.comment = Some(decode_shift_jis(&read_raw(r)?));
+    self.comment = Some(read_raw(r)?);
     Ok(())
   }
 
   pub(crate) fn set_name_raw(&mut self, raw: &[u8]) {
     let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-    self.name = Some(decode_shift_jis(&raw[..end]));
+    self.name = Some(raw[..end].to_vec());
   }
 
-  pub fn name(&self) -> Option<&str> {
+  pub fn name(&self) -> Option<&[u8]> {
     self.name.as_deref()
   }
 
-  pub fn comment(&self) -> Option<&str> {
+  pub fn comment(&self) -> Option<&[u8]> {
     self.comment.as_deref()
   }
 }
@@ -48,9 +47,4 @@ fn read_raw<R: Read>(r: &mut R) -> Result<Vec<u8>, PxtoneError> {
   r.read_exact(&mut buf)?;
   let end = buf.iter().position(|&b| b == 0).unwrap_or(size);
   Ok(buf[..end].to_vec())
-}
-
-fn decode_shift_jis(raw: &[u8]) -> String {
-  let (decoded, _, _) = SHIFT_JIS.decode(raw);
-  decoded.into_owned()
 }

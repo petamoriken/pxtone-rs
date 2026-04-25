@@ -1,8 +1,13 @@
+use encoding_rs::SHIFT_JIS;
 use pxtone::{PxtoneService, VomitPreparation};
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::Path;
 use toml::Table;
+
+fn decode_shift_jis(raw: &[u8]) -> String {
+  SHIFT_JIS.decode(raw).0.into_owned()
+}
 
 fn load_service(service: &mut PxtoneService, path: &Path) {
   let file = File::open(path).unwrap_or_else(|e| panic!("{}: {}", path.display(), e));
@@ -60,11 +65,11 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
   let mut table = Table::new();
   table.insert(
     "name".into(),
-    Value::String(t.name().unwrap_or_default().to_string()),
+    Value::String(decode_shift_jis(t.name().unwrap_or_default())),
   );
   table.insert(
     "comment".into(),
-    Value::String(t.comment().unwrap_or_default().to_string()),
+    Value::String(decode_shift_jis(t.comment().unwrap_or_default())),
   );
   table.insert("beat_clock".into(), Value::Integer(m.beat_clock() as i64));
   table.insert("beat_num".into(), Value::Integer(m.beat_num() as i64));
