@@ -52,13 +52,13 @@ enum FmtVer {
 pub struct VomitPrepFlags;
 
 impl VomitPrepFlags {
-  pub const UNIT_MUTE: u32 = 0x1;
-  pub const LOOP: u32 = 0x2;
+  pub const UNIT_MUTE: u8 = 0x1;
+  pub const LOOP: u8 = 0x2;
 }
 
 #[derive(Default, Clone)]
 pub struct VomitPreparation {
-  pub flags: u32,
+  pub flags: u8,
   pub start_pos_meas: i32,
   pub start_pos_sample: i32,
   pub start_pos_float: f32,
@@ -83,7 +83,7 @@ pub struct PxtoneService {
   pub text: Text,
   pub master: Master,
   pub events: EventList,
-  pub woices: Vec<Woice>,
+  pub(crate) woices: Vec<Woice>,
   pub units: Vec<Unit>,
   pub delays: Vec<Delay>,
   pub overdrives: Vec<OverDrive>,
@@ -92,8 +92,8 @@ pub struct PxtoneService {
   freq: FrequencyTable,
 
   // Output quality
-  dst_ch_num: i32,
-  dst_sps: i32,
+  dst_ch_num: u8,
+  dst_sps: u32,
 
   // moo runtime
   group_num: usize,
@@ -101,14 +101,14 @@ pub struct PxtoneService {
 
   moo_clock_rate: f64,
   moo_smp_stride: f32,
-  moo_smp_count: i32,
-  moo_smp_end: i32,
-  moo_smp_repeat: i32,
-  moo_smp_start: i32,
-  moo_smp_smooth: i32,
+  moo_smp_count: u32,
+  moo_smp_end: u32,
+  moo_smp_repeat: u32,
+  moo_smp_start: u32,
+  moo_smp_smooth: u32,
   moo_top: i32,
-  moo_bt_clock: i32,
-  moo_bt_num: i32,
+  moo_bt_clock: u16,
+  moo_bt_num: u8,
   moo_bt_tempo: f32,
   moo_time_pan_index: usize,
   moo_eve_idx: usize,
@@ -116,8 +116,8 @@ pub struct PxtoneService {
   moo_b_mute_by_unit: bool,
   moo_master_vol: f32,
   moo_fade_fade: i32,
-  moo_fade_count: i32,
-  moo_fade_max: i32,
+  moo_fade_count: u32,
+  moo_fade_max: u32,
 
   b_valid_data: bool,
   b_end_vomit: bool,
@@ -168,12 +168,12 @@ impl PxtoneService {
   }
 
   /// Sets the output quality (channel count and SPS)
-  pub fn set_destination_quality(&mut self, ch_num: i32, sps: i32) {
+  pub fn set_destination_quality(&mut self, ch_num: u8, sps: u32) {
     self.dst_ch_num = ch_num;
     self.dst_sps = sps;
   }
 
-  pub fn get_destination_quality(&self) -> (i32, i32) {
+  pub fn get_destination_quality(&self) -> (u8, u32) {
     (self.dst_ch_num, self.dst_sps)
   }
 
@@ -192,7 +192,7 @@ impl PxtoneService {
       self.x3x_set_voice_names();
     }
 
-    let clock1 = self.events.get_max_clock();
+    let clock1 = self.events.get_max_clock() as u32;
     let clock2 = self.master.get_last_clock();
     self.master.adjust_meas_num(clock1.max(clock2));
 
@@ -393,7 +393,7 @@ impl PxtoneService {
     Ok(())
   }
 
-  /// v1x ユニット構造体 (i32 size + name[16] + type:u16 + group:u16) を読み込む
+  /// v1x ユニット構造体 (size:i32 + name[16] + type:u16 + group:u16) を読み込む
   fn read_old_unit_v1<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     if self.units.len() >= MAX_UNIT_NUM {
       return Err(PxtoneError::UnknownFormat);
@@ -420,7 +420,7 @@ impl PxtoneService {
     Ok(())
   }
 
-  /// v3x ユニット構造体 (i32 size + type:u16 + group:u16) を読み込む
+  /// v3x ユニット構造体 (size:i32 + type:u16 + group:u16) を読み込む
   fn read_old_unit_v3<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     if self.units.len() >= MAX_UNIT_NUM {
       return Err(PxtoneError::UnknownFormat);
@@ -442,14 +442,14 @@ impl PxtoneService {
     Ok(())
   }
 
-  /// x1x プロジェクト情報 (i32 size + name[16] + ...) を読み込む
+  /// x1x プロジェクト情報 (size:i32 + name[16] + ...) を読み込む
   fn read_x1x_project<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let mut name = [0u8; 16];
     r.read_exact(&mut name)?;
     let beat_tempo = r.read_f32::<LE>()?;
-    let beat_clock = r.read_u16::<LE>()? as i32;
-    let beat_num = r.read_u16::<LE>()? as i32;
+    let beat_clock = r.read_u16::<LE>()?;
+    let beat_num = r.read_u16::<LE>()? as u8;
     let _beat_note = r.read_u16::<LE>()?;
     let _meas_num = r.read_u16::<LE>()?;
     let _ch_num = r.read_u16::<LE>()?;
@@ -543,8 +543,8 @@ impl PxtoneService {
     let mut start_meas = 0i32;
     let mut start_sample = 0i32;
     let mut start_float = 0.0f32;
-    let mut meas_end = self.master.get_play_meas();
-    let mut meas_repeat = self.master.repeat_meas;
+    let mut meas_end = self.master.get_play_meas() as i32;
+    let mut meas_repeat = self.master.repeat_meas as i32;
     let mut fadein_sec = 0.0f32;
 
     if let Some(p) = prep {
@@ -575,16 +575,16 @@ impl PxtoneService {
     self.moo_time_pan_index = 0;
 
     let bt = self.moo_bt_num as f64 * self.moo_bt_clock as f64 * self.moo_clock_rate;
-    self.moo_smp_end = (meas_end as f64 * bt) as i32;
-    self.moo_smp_repeat = (meas_repeat as f64 * bt) as i32;
+    self.moo_smp_end = (meas_end as f64 * bt) as u32;
+    self.moo_smp_repeat = (meas_repeat as f64 * bt) as u32;
 
     self.moo_smp_start = if start_float != 0.0 {
       let total = self.calc_total_sample();
-      (total as f32 * start_float) as i32
+      (total as f32 * start_float) as u32
     } else if start_sample != 0 {
-      start_sample
+      start_sample.max(0) as u32
     } else {
-      (start_meas as f64 * bt) as i32
+      (start_meas as f64 * bt) as u32
     };
 
     self.moo_smp_count = self.moo_smp_start;
@@ -604,7 +604,7 @@ impl PxtoneService {
   }
 
   fn moo_set_fade(&mut self, fade: i32, sec: f32) {
-    self.moo_fade_max = ((self.dst_sps as f32 * sec) as i32) >> 8;
+    self.moo_fade_max = ((self.dst_sps as f32 * sec) as u32) >> 8;
     if fade < 0 {
       self.moo_fade_fade = -1;
       self.moo_fade_count = self.moo_fade_max << 8;
@@ -617,13 +617,13 @@ impl PxtoneService {
     }
   }
 
-  fn calc_total_sample(&self) -> i32 {
+  fn calc_total_sample(&self) -> u32 {
     let tempo = self.master.beat_tempo;
     if tempo == 0.0 {
       return 0;
     }
-    let total_beats = self.master.meas_num * self.master.beat_num;
-    (self.dst_sps as f64 * 60.0 * total_beats as f64 / tempo as f64) as i32
+    let total_beats = self.master.meas_num * self.master.beat_num as u32;
+    (self.dst_sps as f64 * 60.0 * total_beats as f64 / tempo as f64) as u32
   }
 
   fn moo_reset_voice_on(&mut self, unit_idx: usize, woice_idx: usize) {
@@ -675,7 +675,7 @@ impl PxtoneService {
       };
 
       let env_rls_clock = if clock_rate > 0.0 {
-        (env_release as f64 / clock_rate) as i32
+        (env_release as f64 / clock_rate) as u32
       } else {
         0
       };
@@ -688,7 +688,7 @@ impl PxtoneService {
     let unit_num = self.units.len();
     for u in 0..unit_num {
       self.units[u].tone_init();
-      self.moo_reset_voice_on(u, EVENTDEFAULT_VOICENO as usize);
+      self.moo_reset_voice_on(u, EVENTDEFAULT_VOICENO);
     }
   }
 
@@ -771,7 +771,7 @@ impl PxtoneService {
 
       // Fade
       if self.moo_fade_fade != 0 && self.moo_fade_max != 0 {
-        work = work * (self.moo_fade_count >> 8) / self.moo_fade_max;
+        work = work * (self.moo_fade_count >> 8) as i32 / self.moo_fade_max as i32;
       }
 
       // Master volume
@@ -835,7 +835,7 @@ impl PxtoneService {
     ev: &EventRecord,
     u: usize,
     clock: i32,
-    smp_end: i32,
+    smp_end: u32,
     clock_rate: f64,
     event_count: usize,
   ) {
@@ -871,13 +871,13 @@ impl PxtoneService {
             .tones
             .get(v)
             .map(|t| t.env_release_clock)
-            .unwrap_or(0);
+            .unwrap_or(0) as i32;
 
           let life_count = if env_release > 0 {
             let max_life1 =
-              ((ev.value - (clock - ev.clock)) as f64 * clock_rate) as i32 + env_release;
+              ((ev.value - (clock - ev.clock)) as f64 * clock_rate) as i32 + env_release as i32;
             let c_limit = ev.clock + ev.value + tone_rls_clock;
-            let mut max_life2 = smp_end - (clock as f64 * clock_rate) as i32;
+            let mut max_life2 = smp_end as i32 - (clock as f64 * clock_rate) as i32;
 
             for ne_idx in self.moo_eve_idx..event_count {
               let ne_clock = self.events.records()[ne_idx].clock;
@@ -898,7 +898,7 @@ impl PxtoneService {
 
           if life_count > 0 {
             if let Some(tone) = self.units[u].tones.get_mut(v) {
-              tone.on_count = on_count;
+              tone.on_count = on_count as u32;
               tone.smp_pos = 0.0;
               tone.env_pos = 0;
               if env_size > 0 {
@@ -908,22 +908,26 @@ impl PxtoneService {
                 tone.env_volume = 128;
                 tone.env_start = 128;
               }
-              tone.life_count = life_count;
+              tone.life_count = life_count as u32;
             }
           }
         }
       }
       EVENTKIND_KEY => self.units[u].tone_key(ev.value),
-      EVENTKIND_PAN_VOLUME => self.units[u].tone_pan_volume(self.dst_ch_num, ev.value),
-      EVENTKIND_PAN_TIME => self.units[u].tone_pan_time(self.dst_ch_num, ev.value, self.dst_sps),
-      EVENTKIND_VELOCITY => self.units[u].tone_velocity(ev.value),
-      EVENTKIND_VOLUME => self.units[u].tone_volume(ev.value),
+      EVENTKIND_PAN_VOLUME => {
+        self.units[u].tone_pan_volume(self.dst_ch_num as u32, ev.value as u32)
+      }
+      EVENTKIND_PAN_TIME => {
+        self.units[u].tone_pan_time(self.dst_ch_num as u32, ev.value as u32, self.dst_sps)
+      }
+      EVENTKIND_VELOCITY => self.units[u].tone_velocity(ev.value as u32),
+      EVENTKIND_VOLUME => self.units[u].tone_volume(ev.value as u32),
       EVENTKIND_PORTAMENT => {
-        let v = (ev.value as f64 * clock_rate) as i32;
+        let v = (ev.value as f64 * clock_rate) as u32;
         self.units[u].tone_portament(v);
       }
       EVENTKIND_VOICENO => self.moo_reset_voice_on(u, ev.value as usize),
-      EVENTKIND_GROUPNO => self.units[u].tone_groupno(ev.value),
+      EVENTKIND_GROUPNO => self.units[u].tone_groupno(ev.value as u32),
       EVENTKIND_TUNING => self.units[u].tone_tuning(f32::from_bits(ev.value as u32)),
       _ => {} // BEATCLOCK, BEATTEMPO, BEATNUM, REPEAT, LAST は無視
     }
@@ -940,7 +944,7 @@ impl PxtoneService {
       return false;
     }
 
-    let byte_per_smp = (self.dst_ch_num * 2) as usize;
+    let byte_per_smp = self.dst_ch_num as usize * 2;
     if buf.len() % byte_per_smp != 0 {
       return false;
     }
@@ -996,7 +1000,7 @@ impl PxtoneService {
     }
   }
 
-  pub fn moo_get_sampling_offset(&self) -> i32 {
+  pub fn moo_get_sampling_offset(&self) -> u32 {
     if self.b_end_vomit {
       0
     } else {
@@ -1004,7 +1008,7 @@ impl PxtoneService {
     }
   }
 
-  pub fn moo_get_sampling_end(&self) -> i32 {
+  pub fn moo_get_sampling_end(&self) -> u32 {
     if self.b_end_vomit {
       0
     } else {
@@ -1012,7 +1016,7 @@ impl PxtoneService {
     }
   }
 
-  pub fn moo_get_total_sample(&self) -> i32 {
+  pub fn moo_get_total_sample(&self) -> u32 {
     self.calc_total_sample()
   }
 }

@@ -22,20 +22,20 @@ pub const EVENTKIND_PAN_TIME: u8 = 15;
 pub const EVENTKIND_NUM: usize = 16;
 
 // Default values
-pub const EVENTDEFAULT_VOLUME: i32 = 104;
-pub const EVENTDEFAULT_VELOCITY: i32 = 104;
-pub const EVENTDEFAULT_PAN_VOLUME: i32 = 64;
-pub const EVENTDEFAULT_PAN_TIME: i32 = 64;
-pub const EVENTDEFAULT_PORTAMENT: i32 = 0;
-pub const EVENTDEFAULT_VOICENO: i32 = 0;
-pub const EVENTDEFAULT_GROUPNO: i32 = 0;
+pub const EVENTDEFAULT_VOLUME: u32 = 104;
+pub const EVENTDEFAULT_VELOCITY: u32 = 104;
+pub const EVENTDEFAULT_PAN_VOLUME: u32 = 64;
+pub const EVENTDEFAULT_PAN_TIME: u32 = 64;
+pub const EVENTDEFAULT_PORTAMENT: u32 = 0;
+pub const EVENTDEFAULT_VOICENO: usize = 0;
+pub const EVENTDEFAULT_GROUPNO: usize = 0;
 pub const EVENTDEFAULT_KEY: i32 = 0x6000;
 pub const EVENTDEFAULT_BASICKEY: i32 = 0x4500;
 pub const EVENTDEFAULT_TUNING: f32 = 1.0;
 
-pub const EVENTDEFAULT_BEATNUM: i32 = 4;
+pub const EVENTDEFAULT_BEATNUM: u8 = 4;
 pub const EVENTDEFAULT_BEATTEMPO: f32 = 120.0;
-pub const EVENTDEFAULT_BEATCLOCK: i32 = 480;
+pub const EVENTDEFAULT_BEATCLOCK: u16 = 480;
 
 /// Returns whether an event is a "tail" event (ON and PORTAMENT)
 pub(crate) fn event_kind_is_tail(kind: u8) -> bool {
@@ -43,7 +43,7 @@ pub(crate) fn event_kind_is_tail(kind: u8) -> bool {
 }
 
 /// Event priority table
-const PRIORITY_TABLE: [i32; EVENTKIND_NUM] = [
+const PRIORITY_TABLE: [u8; EVENTKIND_NUM] = [
   0,   // NULL
   50,  // ON
   40,  // KEY
@@ -62,14 +62,14 @@ const PRIORITY_TABLE: [i32; EVENTKIND_NUM] = [
   100, // PAN_TIME
 ];
 
-fn compare_priority(kind1: u8, kind2: u8) -> i32 {
+fn compare_priority(kind1: u8, kind2: u8) -> i16 {
   let p1 = if (kind1 as usize) < EVENTKIND_NUM {
-    PRIORITY_TABLE[kind1 as usize]
+    PRIORITY_TABLE[kind1 as usize] as i16
   } else {
     0
   };
   let p2 = if (kind2 as usize) < EVENTKIND_NUM {
-    PRIORITY_TABLE[kind2 as usize]
+    PRIORITY_TABLE[kind2 as usize] as i16
   } else {
     0
   };
@@ -122,7 +122,7 @@ impl EventList {
   /// Reads a v5-format event list (equivalent to Linear_Start / Linear_Add / Linear_End)
   pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
-    let eve_num = r.read_i32::<LE>()?;
+    let eve_num = r.read_u32::<LE>()?;
 
     let mut absolute = 0i32;
 
@@ -148,21 +148,6 @@ impl EventList {
     });
 
     Ok(())
-  }
-
-  /// Counts v5-format events and seeks past them (for pre-counting)
-  pub(crate) fn count_v5<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
-    let eve_num = r.read_i32::<LE>()?;
-
-    for _ in 0..eve_num {
-      read_var_int(r)?;
-      r.read_u8()?;
-      r.read_u8()?;
-      read_var_int(r)?;
-    }
-
-    Ok(eve_num)
   }
 
   /// Reads an x4x-format event block
@@ -205,27 +190,6 @@ impl EventList {
     }
 
     Ok(())
-  }
-
-  /// Counts x4x-format events (for pre-counting)
-  pub(crate) fn count_x4x_block<R: Read + Seek>(r: &mut R) -> Result<i32, PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
-    let _unit_idx = r.read_u16::<LE>()?;
-    let _kind = r.read_u16::<LE>()?;
-    let data_num = r.read_u16::<LE>()?;
-    let _rrr = r.read_u16::<LE>()?;
-    let event_num = r.read_u32::<LE>()?;
-
-    if data_num != 2 {
-      return Err(PxtoneError::UnknownFormat);
-    }
-
-    for _ in 0..event_num {
-      read_var_int(r)?;
-      read_var_int(r)?;
-    }
-
-    Ok(event_num as i32)
   }
 
   /// Inserts an event in x4x format in priority order

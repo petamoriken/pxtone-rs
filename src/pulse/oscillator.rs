@@ -8,10 +8,10 @@ pub struct Point {
 }
 
 pub struct Oscillator {
-  volume: i32,
-  sample_num: i32,
-  point_num: i32,
-  point_reso: i32,
+  volume: u32,
+  sample_num: u32,
+  point_num: usize,
+  point_reso: u32,
   points: Vec<Point>,
 }
 
@@ -29,11 +29,11 @@ impl Oscillator {
   pub(crate) fn ready_get_sample(
     &mut self,
     points: Vec<Point>,
-    volume: i32,
-    sample_num: i32,
-    point_reso: i32,
+    volume: u32,
+    sample_num: u32,
+    point_reso: u32,
   ) {
-    self.point_num = points.len() as i32;
+    self.point_num = points.len();
     self.points = points;
     self.volume = volume;
     self.sample_num = sample_num;
@@ -41,7 +41,7 @@ impl Oscillator {
   }
 
   /// Gets one sample via overtone synthesis
-  pub(crate) fn get_one_sample_overtone(&self, index: i32) -> f64 {
+  pub(crate) fn get_one_sample_overtone(&self, index: u32) -> f64 {
     use std::f64::consts::PI;
     let mut work = 0.0f64;
     for p in &self.points {
@@ -52,21 +52,21 @@ impl Oscillator {
   }
 
   /// Gets one sample via coordinate interpolation
-  pub(crate) fn get_one_sample_coodinate(&self, index: i32) -> f64 {
+  pub(crate) fn get_one_sample_coodinate(&self, index: u32) -> f64 {
     let i = self.point_reso * index / self.sample_num;
 
     // Find the two surrounding points
     let c = self
       .points
       .iter()
-      .position(|p| p.x > i)
-      .unwrap_or(self.point_num as usize);
+      .position(|p| p.x > i as i32)
+      .unwrap_or(self.point_num);
 
-    let (x1, y1, x2, y2) = if c == self.point_num as usize {
+    let (x1, y1, x2, y2) = if c == self.point_num {
       // End of list
       let last = &self.points[c - 1];
       let first = &self.points[0];
-      (last.x, last.y, self.point_reso, first.y)
+      (last.x, last.y, self.point_reso as i32, first.y)
     } else if c > 0 {
       let prev = &self.points[c - 1];
       let cur = &self.points[c];
@@ -77,7 +77,7 @@ impl Oscillator {
     };
 
     let w = x2 - x1;
-    let ii = i - x1;
+    let ii = i as i32 - x1;
     let h = y2 - y1;
 
     let work = if ii != 0 {

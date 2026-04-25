@@ -60,7 +60,7 @@ impl Delay {
   }
 
   /// Prepares before playback: allocates the delay buffer
-  pub(crate) fn tone_ready(&mut self, beat_num: i32, beat_tempo: f32, sps: i32) {
+  pub(crate) fn tone_ready(&mut self, beat_num: u8, beat_tempo: f32, sps: u32) {
     self.smp_num = 0;
     self.bufs[0].clear();
     self.bufs[1].clear();

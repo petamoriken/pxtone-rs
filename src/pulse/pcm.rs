@@ -2,26 +2,24 @@
 // RIFF WAV loading and channel/bit-depth/sample-rate conversion
 
 use crate::error::PxtoneError;
-use byteorder::{LE, ReadBytesExt};
-use std::io::{Read, Seek, SeekFrom};
 
 #[derive(Debug)]
 pub struct Pcm {
-  pub(crate) ch: i32,
-  pub(crate) sps: i32,
-  pub(crate) bps: i32,
-  pub(crate) smp_head: i32,
-  pub(crate) smp_body: i32,
-  pub(crate) smp_tail: i32,
+  pub(crate) ch: u8,
+  pub(crate) sps: u32,
+  pub(crate) bps: u8,
+  pub(crate) smp_head: u32,
+  pub(crate) smp_body: u32,
+  pub(crate) smp_tail: u32,
   samples: Vec<u8>,
 }
 
 impl Pcm {
-  pub(crate) fn create(ch: i32, sps: i32, bps: i32, sample_num: i32) -> Result<Self, PxtoneError> {
+  pub(crate) fn create(ch: u8, sps: u32, bps: u8, sample_num: u32) -> Result<Self, PxtoneError> {
     if bps != 8 && bps != 16 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let size = (sample_num * bps * ch / 8) as usize;
+    let size = (sample_num * bps as u32 * ch as u32 / 8) as usize;
     let fill = if bps == 8 { 128u8 } else { 0u8 };
     Ok(Self {
       ch,
@@ -41,71 +39,13 @@ impl Pcm {
     &mut self.samples
   }
 
-  pub(crate) fn buf_size(&self) -> usize {
-    ((self.smp_head + self.smp_body + self.smp_tail) * self.ch * self.bps / 8) as usize
-  }
-
-  pub(crate) fn get_sec(&self) -> f32 {
-    (self.smp_head + self.smp_body + self.smp_tail) as f32 / self.sps as f32
-  }
-
-  /// Reads a RIFF WAV file
-  pub(crate) fn read_wav<R: Read + Seek>(r: &mut R) -> Result<Self, PxtoneError> {
-    // 16-byte "RIFFxxxxWAVEfmt " header
-    let mut header = [0u8; 16];
-    r.read_exact(&mut header)?;
-    if &header[0..4] != b"RIFF" || &header[8..12] != b"WAVE" || &header[12..16] != b"fmt " {
-      return Err(PxtoneError::UnknownFormat);
-    }
-
-    // fmt chunk size
-    let _fmt_size = r.read_u32::<LE>()?;
-
-    // WAVEFORMATEX (read 18 bytes)
-    let format_id = r.read_u16::<LE>()?;
-    let ch = r.read_u16::<LE>()? as i32;
-    let sps = r.read_u32::<LE>()? as i32;
-    let _byte_per_s = r.read_u32::<LE>()?;
-    let _block_size = r.read_u16::<LE>()?;
-    let bps = r.read_u16::<LE>()? as i32;
-    let _ext = r.read_u16::<LE>()?;
-
-    if format_id != 0x0001 {
-      return Err(PxtoneError::UnknownFormat);
-    }
-    if ch != 1 && ch != 2 {
-      return Err(PxtoneError::UnknownFormat);
-    }
-    if bps != 8 && bps != 16 {
-      return Err(PxtoneError::UnknownFormat);
-    }
-
-    // Search for the "data" chunk (seek to start of "RIFFxxxxWAVE" = 12 bytes)
-    r.seek(SeekFrom::Start(12))?;
-    let data_size = loop {
-      let mut tag = [0u8; 4];
-      r.read_exact(&mut tag)?;
-      let chunk_size = r.read_u32::<LE>()?;
-      if &tag == b"data" {
-        break chunk_size;
-      }
-      r.seek(SeekFrom::Current(chunk_size as i64))?;
-    };
-
-    let sample_num = data_size as i32 * 8 / bps / ch;
-    let mut pcm = Self::create(ch, sps, bps, sample_num)?;
-    r.read_exact(&mut pcm.samples[..data_size as usize])?;
-
-    Ok(pcm)
-  }
-
   // ---- Conversion ----
 
   pub(crate) fn convert(
     &mut self,
-    new_ch: i32,
-    new_sps: i32,
-    new_bps: i32,
+    new_ch: u8,
+    new_sps: u32,
+    new_bps: u8,
   ) -> Result<(), PxtoneError> {
     self.convert_channel(new_ch)?;
     self.convert_bps(new_bps)?;
@@ -113,11 +53,11 @@ impl Pcm {
     Ok(())
   }
 
-  fn total_samples(&self) -> i32 {
+  fn total_samples(&self) -> u32 {
     self.smp_head + self.smp_body + self.smp_tail
   }
 
-  fn convert_channel(&mut self, new_ch: i32) -> Result<(), PxtoneError> {
+  fn convert_channel(&mut self, new_ch: u8) -> Result<(), PxtoneError> {
     if self.ch == new_ch {
       return Ok(());
     }
@@ -178,11 +118,11 @@ impl Pcm {
     Ok(())
   }
 
-  fn convert_bps(&mut self, new_bps: i32) -> Result<(), PxtoneError> {
+  fn convert_bps(&mut self, new_bps: u8) -> Result<(), PxtoneError> {
     if self.bps == new_bps {
       return Ok(());
     }
-    let total = (self.total_samples() * self.ch) as usize;
+    let total = (self.total_samples() * self.ch as u32) as usize;
     let work = match (self.bps, new_bps) {
       // 16 → 8
       (16, 8) => {
@@ -211,11 +151,11 @@ impl Pcm {
     Ok(())
   }
 
-  fn convert_sps(&mut self, new_sps: i32) -> Result<(), PxtoneError> {
+  fn convert_sps(&mut self, new_sps: u32) -> Result<(), PxtoneError> {
     if self.sps == new_sps {
       return Ok(());
     }
-    let bytes_per_sample = (self.ch * self.bps / 8) as usize;
+    let bytes_per_sample = (self.ch as usize * self.bps as usize / 8) as usize;
     let old_total = self.total_samples() as usize;
     let new_head =
       ((self.smp_head as f64 * new_sps as f64 + self.sps as f64 - 1.0) / self.sps as f64) as usize;
@@ -233,47 +173,10 @@ impl Pcm {
       dst.copy_from_slice(src);
     }
     self.samples = work;
-    self.smp_head = new_head as i32;
-    self.smp_body = new_body as i32;
-    self.smp_tail = new_tail as i32;
+    self.smp_head = new_head as u32;
+    self.smp_body = new_body as u32;
+    self.smp_tail = new_tail as u32;
     self.sps = new_sps;
     Ok(())
-  }
-
-  pub(crate) fn convert_volume(&mut self, v: f32) {
-    let total = (self.total_samples() * self.ch) as usize;
-    match self.bps {
-      8 => {
-        for b in &mut self.samples[..total] {
-          *b = ((*b as f32 - 128.0) * v + 128.0) as u8;
-        }
-      }
-      16 => {
-        for i in 0..total {
-          let s = i16::from_le_bytes([self.samples[i * 2], self.samples[i * 2 + 1]]);
-          let v = (s as f32 * v) as i16;
-          let bytes = v.to_le_bytes();
-          self.samples[i * 2] = bytes[0];
-          self.samples[i * 2 + 1] = bytes[1];
-        }
-      }
-      _ => {}
-    }
-  }
-
-  /// For moo synthesis: reads as an interleaved stereo 16-bit sample.
-  /// pos is in sample units (not frame units). For ch=2, interleaved as (L, R).
-  pub(crate) fn get_sample_i16_at(&self, frame: usize, ch: usize) -> i16 {
-    let bytes_per_frame = (self.ch * self.bps / 8) as usize;
-    let total_frames = (self.smp_head + self.smp_body + self.smp_tail) as usize;
-    if frame >= total_frames {
-      return 0;
-    }
-    let offset = frame * bytes_per_frame + ch * (self.bps / 8) as usize;
-    match self.bps {
-      8 => (self.samples[offset] as i32 * 256 - 32768) as i16,
-      16 => i16::from_le_bytes([self.samples[offset], self.samples[offset + 1]]),
-      _ => 0,
-    }
   }
 }

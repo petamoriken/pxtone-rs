@@ -13,12 +13,12 @@ pub struct VoiceTone {
   pub(crate) smp_pos: f64,
   pub(crate) offset_freq: f32,
   pub(crate) env_volume: i32,
-  pub(crate) life_count: i32,
-  pub(crate) on_count: i32,
+  pub(crate) life_count: u32,
+  pub(crate) on_count: u32,
   pub(crate) env_start: i32,
-  pub(crate) env_pos: i32,
-  pub(crate) env_release_clock: i32,
-  pub(crate) smooth_volume: i32,
+  pub(crate) env_pos: u32,
+  pub(crate) env_release_clock: u32,
+  pub(crate) smooth_volume: u32,
 }
 
 /// Unit (playback state)
@@ -30,18 +30,18 @@ pub struct Unit {
   pub(crate) key_now: i32,
   pub(crate) key_start: i32,
   pub(crate) key_margin: i32,
-  pub(crate) portament_sample_pos: i32,
-  pub(crate) portament_sample_num: i32,
+  pub(crate) portament_sample_pos: u32,
+  pub(crate) portament_sample_num: u32,
 
   // Pan
-  pub(crate) pan_vols: [i32; MAX_CHANNEL],
-  pub(crate) pan_times: [i32; MAX_CHANNEL],
+  pub(crate) pan_vols: [u32; MAX_CHANNEL],
+  pub(crate) pan_times: [u32; MAX_CHANNEL],
   pub(crate) pan_time_bufs: [[i32; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
 
   // Velocity, volume, etc.
-  pub(crate) v_volume: i32,
-  pub(crate) v_velocity: i32,
-  pub(crate) v_groupno: i32,
+  pub(crate) v_volume: u32,
+  pub(crate) v_velocity: u32,
+  pub(crate) v_groupno: usize,
   pub(crate) v_tuning: f32,
 
   // Voice references (one per instance)
@@ -103,7 +103,7 @@ impl Unit {
   pub(crate) fn tone_reset_and_2prm(
     &mut self,
     voice_idx: usize,
-    env_rls_clock: i32,
+    env_rls_clock: u32,
     offset_freq: f32,
   ) {
     let t = &mut self.tones[voice_idx];
@@ -141,7 +141,7 @@ impl Unit {
     self.portament_sample_pos = 0;
   }
 
-  pub(crate) fn tone_pan_volume(&mut self, ch: i32, pan: i32) {
+  pub(crate) fn tone_pan_volume(&mut self, ch: u32, pan: u32) {
     self.pan_vols[0] = 64;
     self.pan_vols[1] = 64;
     if ch == 2 {
@@ -153,7 +153,7 @@ impl Unit {
     }
   }
 
-  pub(crate) fn tone_pan_time(&mut self, ch: i32, pan: i32, sps: i32) {
+  pub(crate) fn tone_pan_time(&mut self, ch: u32, pan: u32, sps: u32) {
     self.pan_times[0] = 0;
     self.pan_times[1] = 0;
     if ch == 2 {
@@ -167,16 +167,16 @@ impl Unit {
     }
   }
 
-  pub(crate) fn tone_velocity(&mut self, val: i32) {
+  pub(crate) fn tone_velocity(&mut self, val: u32) {
     self.v_velocity = val;
   }
-  pub(crate) fn tone_volume(&mut self, val: i32) {
+  pub(crate) fn tone_volume(&mut self, val: u32) {
     self.v_volume = val;
   }
-  pub(crate) fn tone_portament(&mut self, val: i32) {
+  pub(crate) fn tone_portament(&mut self, val: u32) {
     self.portament_sample_num = val;
   }
-  pub(crate) fn tone_groupno(&mut self, val: i32) {
+  pub(crate) fn tone_groupno(&mut self, val: usize) {
     self.v_groupno = val;
   }
   pub(crate) fn tone_tuning(&mut self, val: f32) {
@@ -195,7 +195,8 @@ impl Unit {
           }
         } else {
           // release
-          vt.env_volume = vt.env_start + (0 - vt.env_start) * vt.env_pos / vi.env_release.max(1);
+          vt.env_volume =
+            vt.env_start + (0 - vt.env_start) * vt.env_pos as i32 / vi.env_release.max(1) as i32;
           vt.env_pos += 1;
         }
       }
@@ -206,9 +207,9 @@ impl Unit {
   pub(crate) fn tone_sample(
     &mut self,
     b_mute_by_unit: bool,
-    ch_num: i32,
+    ch_num: u8,
     time_pan_index: usize,
-    smooth_smp: i32,
+    smooth_smp: u32,
     instances: &[VoiceInstance],
   ) {
     if b_mute_by_unit && !self.played {
@@ -232,9 +233,9 @@ impl Unit {
             work /= 2;
           }
 
-          work = work * self.v_velocity / 128;
-          work = work * self.v_volume / 128;
-          work = work * self.pan_vols[ch] / 64;
+          work = work * self.v_velocity as i32 / 128;
+          work = work * self.v_volume as i32 / 128;
+          work = work * self.pan_vols[ch] as i32 / 64;
 
           if vi.env_size > 0 {
             work = work * vt.env_volume / 128;
@@ -244,7 +245,7 @@ impl Unit {
           if self.voice_flags.get(v).copied().unwrap_or(0) & VOICE_FLAG_SMOOTH != 0
             && vt.life_count < smooth_smp
           {
-            work = work * vt.life_count / smooth_smp;
+            work = work * vt.life_count as i32 / smooth_smp as i32;
           }
           buf += work;
         }
@@ -257,7 +258,7 @@ impl Unit {
   pub(crate) fn tone_supple(&self, group_smps: &mut [i32], ch: usize, time_pan_index: usize) {
     let idx =
       (time_pan_index + BUFSIZE_TIMEPAN - self.pan_times[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
-    if (self.v_groupno as usize) < group_smps.len() {
+    if self.v_groupno < group_smps.len() {
       group_smps[self.v_groupno as usize] += self.pan_time_bufs[ch][idx];
     }
   }

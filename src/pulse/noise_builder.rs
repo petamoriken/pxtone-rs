@@ -9,7 +9,7 @@ use crate::pulse::pcm::Pcm;
 
 const BASIC_SPS: f64 = 44100.0;
 const BASIC_FREQUENCY: f64 = 100.0;
-const SAMPLING_TOP: i32 = 32767;
+const SAMPLING_TOP: i16 = 32767;
 const SMP_NUM_RAND: usize = 44100;
 const SMP_NUM: usize = (BASIC_SPS / BASIC_FREQUENCY) as usize; // 441
 
@@ -47,7 +47,7 @@ struct OscState {
 }
 
 impl OscState {
-  fn from_design(osc: &NoiseOscillator, sps: i32, rand_tbl: &[i16]) -> Self {
+  fn from_design(osc: &NoiseOscillator, sps: u32, rand_tbl: &[i16]) -> Self {
     let ran = matches!(osc.wave_type, WaveType::Random | WaveType::Random2);
     let increment = (BASIC_SPS / sps as f64) * (osc.freq as f64 / BASIC_FREQUENCY);
     let offset = if ran {
@@ -155,15 +155,13 @@ impl NoiseBuilder {
     let table: Vec<i16> = match wave_type {
       WaveType::None => vec![0i16; SMP_NUM],
       WaveType::Sine => {
-        osci.ready_get_sample(vec![Point { x: 1, y: 128 }], 128, SMP_NUM as i32, 0);
-        (0..SMP_NUM)
-          .map(|s| {
-            (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
-          })
+        osci.ready_get_sample(vec![Point { x: 1, y: 128 }], 128, SMP_NUM as u32, 0);
+        (0..SMP_NUM as u32)
+          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
           .collect()
       }
       WaveType::Saw => {
-        let top2 = (SAMPLING_TOP * 2) as f64;
+        let top2 = (SAMPLING_TOP as i32 * 2) as f64;
         (0..SMP_NUM)
           .map(|s| (SAMPLING_TOP as f64 - top2 * s as f64 / SMP_NUM as f64) as i16)
           .collect()
@@ -173,9 +171,9 @@ impl NoiseBuilder {
         (0..SMP_NUM)
           .map(|s| {
             if s < half {
-              SAMPLING_TOP as i16
+              SAMPLING_TOP
             } else {
-              -(SAMPLING_TOP as i16)
+              -SAMPLING_TOP
             }
           })
           .collect()
@@ -188,13 +186,11 @@ impl NoiseBuilder {
         osci.ready_get_sample(
           (1..=16).map(|i| Point { x: i, y: 128 }).collect(),
           128,
-          SMP_NUM as i32,
+          SMP_NUM as u32,
           0,
         );
-        (0..SMP_NUM)
-          .map(|s| {
-            (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
-          })
+        (0..SMP_NUM as u32)
+          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
           .collect()
       }
       WaveType::Rect2 => {
@@ -206,13 +202,11 @@ impl NoiseBuilder {
             })
             .collect(),
           128,
-          SMP_NUM as i32,
+          SMP_NUM as u32,
           0,
         );
-        (0..SMP_NUM)
-          .map(|s| {
-            (osci.get_one_sample_overtone(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
-          })
+        (0..SMP_NUM as u32)
+          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
           .collect()
       }
       WaveType::Tri => {
@@ -228,61 +222,35 @@ impl NoiseBuilder {
             Point { x: n, y: 0 },
           ],
           128,
-          SMP_NUM as i32,
-          SMP_NUM as i32,
+          SMP_NUM as u32,
+          SMP_NUM as u32,
         );
-        (0..SMP_NUM)
-          .map(|s| {
-            (osci.get_one_sample_coodinate(s as i32).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
-          })
+        (0..SMP_NUM as u32)
+          .map(|s| (osci.get_one_sample_coodinate(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
           .collect()
       }
       WaveType::Rect3 => {
         let t3 = SMP_NUM / 3;
         (0..SMP_NUM)
-          .map(|s| {
-            if s < t3 {
-              SAMPLING_TOP as i16
-            } else {
-              -(SAMPLING_TOP as i16)
-            }
-          })
+          .map(|s| if s < t3 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
       WaveType::Rect4 => {
         let t4 = SMP_NUM / 4;
         (0..SMP_NUM)
-          .map(|s| {
-            if s < t4 {
-              SAMPLING_TOP as i16
-            } else {
-              -(SAMPLING_TOP as i16)
-            }
-          })
+          .map(|s| if s < t4 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
       WaveType::Rect8 => {
         let t8 = SMP_NUM / 8;
         (0..SMP_NUM)
-          .map(|s| {
-            if s < t8 {
-              SAMPLING_TOP as i16
-            } else {
-              -(SAMPLING_TOP as i16)
-            }
-          })
+          .map(|s| if s < t8 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
       WaveType::Rect16 => {
         let t16 = SMP_NUM / 16;
         (0..SMP_NUM)
-          .map(|s| {
-            if s < t16 {
-              SAMPLING_TOP as i16
-            } else {
-              -(SAMPLING_TOP as i16)
-            }
-          })
+          .map(|s| if s < t16 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
       WaveType::Saw3 => {
@@ -291,11 +259,11 @@ impl NoiseBuilder {
         (0..SMP_NUM)
           .map(|s| {
             if s < t1 {
-              SAMPLING_TOP as i16
+              SAMPLING_TOP
             } else if s < t2 {
               0
             } else {
-              -(SAMPLING_TOP as i16)
+              -SAMPLING_TOP
             }
           })
           .collect()
@@ -307,25 +275,25 @@ impl NoiseBuilder {
         (0..SMP_NUM)
           .map(|s| {
             if s < a1 {
-              SAMPLING_TOP as i16
+              SAMPLING_TOP
             } else if s < a2 {
-              (SAMPLING_TOP / 3) as i16
+              SAMPLING_TOP / 3
             } else if s < a3 {
-              -(SAMPLING_TOP / 3) as i16
+              -(SAMPLING_TOP / 3)
             } else {
-              -(SAMPLING_TOP as i16)
+              -SAMPLING_TOP
             }
           })
           .collect()
       }
       WaveType::Saw6 => {
         let seg6 = [
-          SAMPLING_TOP as i16,
-          (SAMPLING_TOP - SAMPLING_TOP * 2 / 5) as i16,
-          (SAMPLING_TOP / 5) as i16,
-          -(SAMPLING_TOP / 5) as i16,
-          (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 2 / 5) as i16,
-          -(SAMPLING_TOP as i16),
+          SAMPLING_TOP,
+          (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 2 / 5) as i16,
+          (SAMPLING_TOP / 5),
+          -(SAMPLING_TOP / 5),
+          (-(SAMPLING_TOP as i32) + SAMPLING_TOP as i32 * 2 / 5) as i16,
+          -SAMPLING_TOP,
         ];
         (0..SMP_NUM)
           .map(|s| seg6[(s * 6 / SMP_NUM).min(5)])
@@ -333,14 +301,14 @@ impl NoiseBuilder {
       }
       WaveType::Saw8 => {
         let seg8 = [
-          SAMPLING_TOP as i16,
-          (SAMPLING_TOP - SAMPLING_TOP * 2 / 7) as i16,
-          (SAMPLING_TOP - SAMPLING_TOP * 4 / 7) as i16,
-          (SAMPLING_TOP / 7) as i16,
-          -(SAMPLING_TOP / 7) as i16,
-          (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 4 / 7) as i16,
-          (-(SAMPLING_TOP as i32) + SAMPLING_TOP * 2 / 7) as i16,
-          -(SAMPLING_TOP as i16),
+          SAMPLING_TOP,
+          (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 2 / 7) as i16,
+          (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 4 / 7) as i16,
+          SAMPLING_TOP / 7,
+          -SAMPLING_TOP / 7,
+          (-SAMPLING_TOP as i32 + SAMPLING_TOP as i32 * 4 / 7) as i16,
+          (-SAMPLING_TOP as i32 + SAMPLING_TOP as i32 * 2 / 7) as i16,
+          -SAMPLING_TOP,
         ];
         (0..SMP_NUM)
           .map(|s| seg8[(s * 8 / SMP_NUM).min(7)])
@@ -356,8 +324,8 @@ impl NoiseBuilder {
     &mut self,
     noise: &mut Noise,
     ch: usize,
-    sps: i32,
-    bps: i32,
+    sps: u32,
+    bps: u8,
     freq: &FrequencyTable,
   ) -> Result<Pcm, PxtoneError> {
     noise.fix();
@@ -392,7 +360,7 @@ impl NoiseBuilder {
         let enves: Vec<(i32, f64)> = du
           .envelopes
           .iter()
-          .map(|e| (sps * e.x / 1000, e.y as f64 / 100.0))
+          .map(|e| (sps as i32 * e.x as i32 / 1000, e.y as f64 / 100.0))
           .collect();
 
         let mut enve_index = 0usize;
@@ -422,7 +390,7 @@ impl NoiseBuilder {
       })
       .collect();
 
-    let mut pcm = Pcm::create(ch as i32, sps, bps, smp_num as i32)?;
+    let mut pcm = Pcm::create(ch as u8, sps, bps, smp_num as u32)?;
     let buf = pcm.samples_mut();
     let mut buf_pos = 0usize;
 
@@ -449,7 +417,7 @@ impl NoiseBuilder {
           }
           store += work;
         }
-        let byte4 = (store as i32).clamp(-SAMPLING_TOP, SAMPLING_TOP);
+        let byte4 = (store as i32).clamp(-SAMPLING_TOP as i32, SAMPLING_TOP as i32);
         if bps == 8 {
           buf[buf_pos] = ((byte4 >> 8) + 128) as u8;
           buf_pos += 1;

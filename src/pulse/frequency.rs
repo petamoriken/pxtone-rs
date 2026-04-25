@@ -6,10 +6,6 @@ const KEY_PER_OCTAVE: usize = 12;
 const FREQUENCY_PER_KEY: usize = 0x10; // 16
 const TABLE_SIZE: usize = OCTAVE_NUM * KEY_PER_OCTAVE * FREQUENCY_PER_KEY; // 3072
 
-/// Base index (start of octave 8 ≈ middle A)
-pub(crate) const BASIC_FREQUENCY_INDEX: usize =
-  (OCTAVE_NUM / 2) * KEY_PER_OCTAVE * FREQUENCY_PER_KEY;
-
 /// Computes oct^(1/divi) with high precision (ported from C++)
 fn get_divide_octave_rate(divi: usize) -> f64 {
   let mut parameter = 1.0f64;
@@ -95,9 +91,5 @@ impl FrequencyTable {
   pub(crate) fn get2(&self, key: i32) -> f32 {
     let i = (key >> 4).clamp(0, (TABLE_SIZE - 1) as i32) as usize;
     self.table[i]
-  }
-
-  pub(crate) fn table_size() -> usize {
-    TABLE_SIZE
   }
 }

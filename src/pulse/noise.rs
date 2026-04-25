@@ -112,7 +112,7 @@ const MAX_ENVELOPE_NUM: usize = 3;
 const CODE: &[u8; 8] = b"PTNOISE-";
 const VER: u32 = 20120418;
 
-const LIMIT_SMP_NUM: i32 = 48000 * 10;
+const LIMIT_SMP_NUM: u32 = 48000 * 10;
 const LIMIT_OSC_FREQUENCY: f32 = 44100.0;
 const LIMIT_OSC_VOLUME: f32 = 200.0;
 const LIMIT_OSC_OFFSET: f32 = 100.0;
@@ -123,17 +123,13 @@ const LIMIT_ENVE_Y: i32 = 100;
 
 #[derive(Debug, Default)]
 pub struct Noise {
-  pub(crate) smp_num_44k: i32,
+  pub(crate) smp_num_44k: u32,
   pub(crate) units: Vec<NoiseUnit>,
 }
 
 impl Noise {
   pub(crate) fn new() -> Self {
     Self::default()
-  }
-
-  pub(crate) fn get_sec(&self) -> f32 {
-    self.smp_num_44k as f32 / 44100.0
   }
 
   /// Clamps all parameters to their valid ranges
@@ -175,7 +171,7 @@ impl Noise {
       return Err(PxtoneError::NewFormat);
     }
 
-    self.smp_num_44k = read_var_int(r)?;
+    self.smp_num_44k = read_var_int(r)? as u32;
 
     let mut unit_num_byte = [0u8; 1];
     r.read_exact(&mut unit_num_byte)?;
