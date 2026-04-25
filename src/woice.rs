@@ -1,10 +1,11 @@
 use crate::error::PxtoneError;
-use crate::event::{EVENTDEFAULT_BASICKEY, read_var_int};
+use crate::event::EVENTDEFAULT_BASICKEY;
 use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
 use crate::pulse::oscillator::{Oscillator, Point};
 use crate::pulse::pcm::Pcm;
+use crate::read_ext::ReadExt;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
@@ -287,26 +288,26 @@ impl Woice {
       return Err(PxtoneError::NewFormat);
     }
 
-    let x3x_basic_key = read_var_int(r)?;
-    let work1 = read_var_int(r)?;
-    let work2 = read_var_int(r)?;
+    let x3x_basic_key = r.read_var_int()?;
+    let work1 = r.read_var_int()?;
+    let work2 = r.read_var_int()?;
     if work1 != 0 || work2 != 0 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let voice_num = read_var_int(r)?;
+    let voice_num = r.read_var_int()?;
 
     self.x3x_basic_key = x3x_basic_key;
     self.voices.clear();
 
     for _ in 0..voice_num {
       let mut unit = VoiceUnit::default();
-      unit.basic_key = read_var_int(r)?;
-      unit.volume = read_var_int(r)? as u32;
-      unit.pan = read_var_int(r)?;
-      let tuning_bits = read_var_int(r)? as u32;
+      unit.basic_key = r.read_var_int()?;
+      unit.volume = r.read_var_int()? as u32;
+      unit.pan = r.read_var_int()?;
+      let tuning_bits = r.read_var_int()? as u32;
       unit.tuning = f32::from_bits(tuning_bits);
-      unit.voice_flags = read_var_int(r)? as u32;
-      unit.data_flags = read_var_int(r)? as u32;
+      unit.voice_flags = r.read_var_int()? as u32;
+      unit.data_flags = r.read_var_int()? as u32;
 
       if unit.voice_flags & VOICE_FLAG_UNCOVERED != 0 {
         return Err(PxtoneError::UnknownFormat);
@@ -462,7 +463,7 @@ impl Woice {
 
 // ---- PTV wave-reading helpers ----
 fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneError> {
-  let vtype = read_var_int(r)?;
+  let vtype = r.read_var_int()?;
   unit.voice_type = match vtype {
     0 => VoiceType::Coodinate,
     1 => VoiceType::Overtone,
@@ -470,8 +471,8 @@ fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneE
   };
   match unit.voice_type {
     VoiceType::Coodinate => {
-      let num = read_var_int(r)?;
-      let reso = read_var_int(r)?;
+      let num = r.read_var_int()?;
+      let reso = r.read_var_int()?;
       unit.wave.reso = reso as u32;
       for _ in 0..num {
         let x = r.read_u8()? as i32;
@@ -480,10 +481,10 @@ fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneE
       }
     }
     VoiceType::Overtone => {
-      let num = read_var_int(r)?;
+      let num = r.read_var_int()?;
       for _ in 0..num {
-        let x = read_var_int(r)?;
-        let y = read_var_int(r)?;
+        let x = r.read_var_int()?;
+        let y = r.read_var_int()?;
         unit.wave.points.push((x, y));
       }
     }
@@ -493,10 +494,10 @@ fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneE
 }
 
 fn ptv_read_envelope<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneError> {
-  let fps = read_var_int(r)?;
-  let head_num = read_var_int(r)?;
-  let body_num = read_var_int(r)?;
-  let tail_num = read_var_int(r)?;
+  let fps = r.read_var_int()?;
+  let head_num = r.read_var_int()?;
+  let body_num = r.read_var_int()?;
+  let tail_num = r.read_var_int()?;
   if body_num != 0 {
     return Err(PxtoneError::UnknownFormat);
   }
@@ -511,8 +512,8 @@ fn ptv_read_envelope<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), Pxt
 
   let total = head_num + body_num + tail_num;
   for _ in 0..total {
-    let x = read_var_int(r)?;
-    let y = read_var_int(r)?;
+    let x = r.read_var_int()?;
+    let y = r.read_var_int()?;
     unit.envelope.points.push((x, y));
   }
   Ok(())

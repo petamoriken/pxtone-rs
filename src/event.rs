@@ -1,4 +1,5 @@
 use crate::error::PxtoneError;
+use crate::read_ext::ReadExt;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
@@ -127,10 +128,10 @@ impl EventList {
     let mut absolute = 0i32;
 
     for _ in 0..eve_num {
-      let clock_delta = read_var_int(r)?;
+      let clock_delta = r.read_var_int()?;
       let unit_no = r.read_u8()?;
       let kind = r.read_u8()?;
-      let value = read_var_int(r)?;
+      let value = r.read_var_int()?;
       absolute += clock_delta;
       self.events.push(EventRecord {
         kind,
@@ -177,8 +178,8 @@ impl EventList {
     let mut absolute = 0i32;
 
     for _ in 0..event_num {
-      let clock_delta = read_var_int(r)?;
-      let value = read_var_int(r)?;
+      let clock_delta = r.read_var_int()?;
+      let value = r.read_var_int()?;
       absolute += clock_delta;
       let clock = absolute;
 
@@ -258,56 +259,4 @@ impl EventList {
       }
     }
   }
-}
-
-// ---- Variable-length integer reading ----
-
-/// Reads a pxtone variable-length integer (up to 5 bytes)
-pub(crate) fn read_var_int<R: Read>(r: &mut R) -> Result<i32, PxtoneError> {
-  let mut bytes = [0u8; 5];
-  let mut count = 0usize;
-
-  for i in 0..5 {
-    let b = r.read_u8()?;
-    bytes[i] = b;
-    count = i + 1;
-    if b & 0x80 == 0 {
-      break;
-    }
-  }
-
-  let value = v_to_int(&bytes[..count]);
-  Ok(value as i32)
-}
-
-fn v_to_int(bytes: &[u8]) -> u32 {
-  let mut b = [0u8; 5];
-  match bytes.len() {
-    0 => {}
-    1 => {
-      b[0] = (bytes[0] & 0x7F) >> 0;
-    }
-    2 => {
-      b[0] = ((bytes[0] & 0x7F) >> 0) | (bytes[1] << 7);
-      b[1] = (bytes[1] & 0x7F) >> 1;
-    }
-    3 => {
-      b[0] = ((bytes[0] & 0x7F) >> 0) | (bytes[1] << 7);
-      b[1] = ((bytes[1] & 0x7F) >> 1) | (bytes[2] << 6);
-      b[2] = (bytes[2] & 0x7F) >> 2;
-    }
-    4 => {
-      b[0] = ((bytes[0] & 0x7F) >> 0) | (bytes[1] << 7);
-      b[1] = ((bytes[1] & 0x7F) >> 1) | (bytes[2] << 6);
-      b[2] = ((bytes[2] & 0x7F) >> 2) | (bytes[3] << 5);
-      b[3] = (bytes[3] & 0x7F) >> 3;
-    }
-    _ => {
-      b[0] = ((bytes[0] & 0x7F) >> 0) | (bytes[1] << 7);
-      b[1] = ((bytes[1] & 0x7F) >> 1) | (bytes[2] << 6);
-      b[2] = ((bytes[2] & 0x7F) >> 2) | (bytes[3] << 5);
-      b[3] = ((bytes[3] & 0x7F) >> 3) | (bytes[4] << 4);
-    }
-  }
-  u32::from_le_bytes([b[0], b[1], b[2], b[3]])
 }

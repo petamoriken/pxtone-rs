@@ -927,7 +927,7 @@ impl PxtoneService {
         self.units[u].tone_portament(v);
       }
       EVENTKIND_VOICENO => self.moo_reset_voice_on(u, ev.value as usize),
-      EVENTKIND_GROUPNO => self.units[u].tone_groupno(ev.value as u32),
+      EVENTKIND_GROUPNO => self.units[u].tone_groupno(ev.value as usize),
       EVENTKIND_TUNING => self.units[u].tone_tuning(f32::from_bits(ev.value as u32)),
       _ => {} // BEATCLOCK, BEATTEMPO, BEATNUM, REPEAT, LAST は無視
     }

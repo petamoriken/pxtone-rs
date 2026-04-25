@@ -1,5 +1,5 @@
 use crate::error::PxtoneError;
-use crate::event::read_var_int;
+use crate::read_ext::ReadExt;
 use std::io::Read;
 
 // ---- Wave type ----
@@ -171,7 +171,7 @@ impl Noise {
       return Err(PxtoneError::NewFormat);
     }
 
-    self.smp_num_44k = read_var_int(r)? as u32;
+    self.smp_num_44k = r.read_var_int()? as u32;
 
     let mut unit_num_byte = [0u8; 1];
     r.read_exact(&mut unit_num_byte)?;
@@ -190,19 +190,19 @@ impl Noise {
         ..Default::default()
       };
 
-      let flags = read_var_int(r)? as u32;
+      let flags = r.read_var_int()? as u32;
       if flags & FLAG_UNCOVERED != 0 {
         return Err(PxtoneError::UnknownFormat);
       }
 
       if flags & FLAG_ENVELOPE != 0 {
-        let enve_num = read_var_int(r)?;
+        let enve_num = r.read_var_int()?;
         if enve_num as usize > MAX_ENVELOPE_NUM {
           return Err(PxtoneError::UnknownFormat);
         }
         for _ in 0..enve_num {
-          let x = read_var_int(r)?;
-          let y = read_var_int(r)?;
+          let x = r.read_var_int()?;
+          let y = r.read_var_int()?;
           unit.envelopes.push(NoisePoint { x, y });
         }
       }
@@ -249,15 +249,15 @@ fn fix_osc(osc: &mut NoiseOscillator) {
 }
 
 fn read_oscillator<R: Read>(r: &mut R, osc: &mut NoiseOscillator) -> Result<(), PxtoneError> {
-  let type_val = read_var_int(r)?;
+  let type_val = r.read_var_int()?;
   osc.wave_type = WaveType::try_from(type_val).map_err(|_| PxtoneError::UnknownFormat)?;
-  let b_rev = read_var_int(r)?;
+  let b_rev = r.read_var_int()?;
   osc.b_rev = b_rev != 0;
-  let freq = read_var_int(r)?;
+  let freq = r.read_var_int()?;
   osc.freq = freq as f32 / 10.0;
-  let volume = read_var_int(r)?;
+  let volume = r.read_var_int()?;
   osc.volume = volume as f32 / 10.0;
-  let offset = read_var_int(r)?;
+  let offset = r.read_var_int()?;
   osc.offset = offset as f32 / 10.0;
   Ok(())
 }

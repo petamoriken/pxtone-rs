@@ -1,8 +1,9 @@
 use crate::error::PxtoneError;
 use crate::event::{
   EVENTDEFAULT_BEATCLOCK, EVENTDEFAULT_BEATNUM, EVENTDEFAULT_BEATTEMPO, EVENTKIND_BEATCLOCK,
-  EVENTKIND_BEATNUM, EVENTKIND_BEATTEMPO, EVENTKIND_LAST, EVENTKIND_REPEAT, read_var_int,
+  EVENTKIND_BEATNUM, EVENTKIND_BEATTEMPO, EVENTKIND_LAST, EVENTKIND_REPEAT,
 };
+use crate::read_ext::ReadExt;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
@@ -137,9 +138,9 @@ impl Master {
     let mut absolute = 0i32;
 
     for _ in 0..event_num {
-      let status = read_var_int(r)?;
-      let clock_delta = read_var_int(r)?;
-      let volume = read_var_int(r)?;
+      let status = r.read_var_int()?;
+      let clock_delta = r.read_var_int()?;
+      let volume = r.read_var_int()?;
       absolute += clock_delta;
       let clock = absolute;
 
