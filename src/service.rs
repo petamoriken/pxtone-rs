@@ -168,11 +168,13 @@ impl PxtoneService {
   }
 
   /// Sets the output quality (channel count and SPS)
+  #[inline]
   pub fn set_destination_quality(&mut self, ch_num: u8, sps: u32) {
     self.dst_ch_num = ch_num;
     self.dst_sps = sps;
   }
 
+  #[inline]
   pub fn get_destination_quality(&self) -> (u8, u32) {
     (self.dst_ch_num, self.dst_sps)
   }
@@ -393,7 +395,7 @@ impl PxtoneService {
     Ok(())
   }
 
-  /// v1x ユニット構造体 (size:i32 + name[16] + type:u16 + group:u16) を読み込む
+  /// Reads a v1x unit struct (size:i32 + name[16] + type:u16 + group:u16)
   fn read_old_unit_v1<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     if self.units.len() >= MAX_UNIT_NUM {
       return Err(PxtoneError::UnknownFormat);
@@ -420,7 +422,7 @@ impl PxtoneService {
     Ok(())
   }
 
-  /// v3x ユニット構造体 (size:i32 + type:u16 + group:u16) を読み込む
+  /// Reads a v3x unit struct (size:i32 + type:u16 + group:u16)
   fn read_old_unit_v3<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     if self.units.len() >= MAX_UNIT_NUM {
       return Err(PxtoneError::UnknownFormat);
@@ -442,7 +444,7 @@ impl PxtoneService {
     Ok(())
   }
 
-  /// x1x プロジェクト情報 (size:i32 + name[16] + ...) を読み込む
+  /// Reads x1x project info (size:i32 + name[16] + ...)
   fn read_x1x_project<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let mut name = [0u8; 16];
@@ -636,7 +638,7 @@ impl PxtoneService {
 
     let woice_idx = woice_idx.min(self.woices.len() - 1);
 
-    // ウォイスから voice_flags を収集
+    // Collect voice_flags from the woice
     let voice_num = self.woices[woice_idx].voices.len();
     let voice_flags: Vec<u32> = self.woices[woice_idx]
       .voices
@@ -650,7 +652,7 @@ impl PxtoneService {
       self.unit_woice_idxs[unit_idx] = woice_idx;
     }
 
-    // 各ボイスの ofs_freq と env_release_clock を計算してリセット
+    // Compute ofs_freq and env_release_clock for each voice, then reset
     let clock_rate = self.moo_clock_rate;
     let bt_tempo = self.moo_bt_tempo;
     let inst_len = self.woices[woice_idx].instances.len();
@@ -852,7 +854,7 @@ impl PxtoneService {
         let voice_num = self.woices.get(wi).map(|w| w.voices.len()).unwrap_or(0);
 
         for v in 0..voice_num {
-          // インスタンスデータを先に読み出し（imm borrow of self.woices）
+          // Read instance data first (immutable borrow of self.woices)
           let env_release = self
             .woices
             .get(wi)
@@ -866,7 +868,7 @@ impl PxtoneService {
             .map(|i| i.env_size)
             .unwrap_or(0);
 
-          // tones の env_release_clock を読み出し（imm borrow of self.units）
+          // Read env_release_clock from tones (immutable borrow of self.units)
           let tone_rls_clock = self.units[u]
             .tones
             .get(v)
@@ -929,7 +931,7 @@ impl PxtoneService {
       EVENTKIND_VOICENO => self.moo_reset_voice_on(u, ev.value as usize),
       EVENTKIND_GROUPNO => self.units[u].tone_groupno(ev.value as usize),
       EVENTKIND_TUNING => self.units[u].tone_tuning(f32::from_bits(ev.value as u32)),
-      _ => {} // BEATCLOCK, BEATTEMPO, BEATNUM, REPEAT, LAST は無視
+      _ => {} // BEATCLOCK, BEATTEMPO, BEATNUM, REPEAT, LAST are ignored
     }
   }
 
@@ -977,13 +979,16 @@ impl PxtoneService {
 
   // ---- Getters ----
 
+  #[inline]
   pub fn is_end_vomit(&self) -> bool {
     self.b_end_vomit
   }
+  #[inline]
   pub fn is_valid_data(&self) -> bool {
     self.b_valid_data
   }
 
+  #[inline]
   pub fn moo_get_now_clock(&self) -> i32 {
     if self.moo_clock_rate > 0.0 {
       (self.moo_smp_count as f64 / self.moo_clock_rate) as i32
@@ -992,6 +997,7 @@ impl PxtoneService {
     }
   }
 
+  #[inline]
   pub fn moo_get_end_clock(&self) -> i32 {
     if self.moo_clock_rate > 0.0 {
       (self.moo_smp_end as f64 / self.moo_clock_rate) as i32
@@ -1000,6 +1006,7 @@ impl PxtoneService {
     }
   }
 
+  #[inline]
   pub fn moo_get_sampling_offset(&self) -> u32 {
     if self.b_end_vomit {
       0
@@ -1008,6 +1015,7 @@ impl PxtoneService {
     }
   }
 
+  #[inline]
   pub fn moo_get_sampling_end(&self) -> u32 {
     if self.b_end_vomit {
       0
@@ -1016,6 +1024,7 @@ impl PxtoneService {
     }
   }
 
+  #[inline]
   pub fn moo_get_total_sample(&self) -> u32 {
     self.calc_total_sample()
   }

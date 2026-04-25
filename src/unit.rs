@@ -123,18 +123,21 @@ impl Unit {
     self.key_start = EVENTDEFAULT_KEY;
   }
 
+  #[inline]
   pub(crate) fn tone_zero_lives(&mut self) {
     for i in 0..MAX_UNIT_CONTROL_VOICE {
       self.tones[i].life_count = 0;
     }
   }
 
+  #[inline]
   pub(crate) fn tone_key_on(&mut self) {
     self.key_now = self.key_start + self.key_margin;
     self.key_start = self.key_now;
     self.key_margin = 0;
   }
 
+  #[inline]
   pub(crate) fn tone_key(&mut self, key: i32) {
     self.key_start = self.key_now;
     self.key_margin = key - self.key_start;
@@ -167,18 +170,23 @@ impl Unit {
     }
   }
 
+  #[inline]
   pub(crate) fn tone_velocity(&mut self, val: u32) {
     self.v_velocity = val;
   }
+  #[inline]
   pub(crate) fn tone_volume(&mut self, val: u32) {
     self.v_volume = val;
   }
+  #[inline]
   pub(crate) fn tone_portament(&mut self, val: u32) {
     self.portament_sample_num = val;
   }
+  #[inline]
   pub(crate) fn tone_groupno(&mut self, val: usize) {
     self.v_groupno = val;
   }
+  #[inline]
   pub(crate) fn tone_tuning(&mut self, val: f32) {
     self.v_tuning = val;
   }
@@ -253,6 +261,7 @@ impl Unit {
   }
 
   /// Adds pan_time_bufs values to group samples
+  #[inline]
   pub(crate) fn tone_supple(&self, group_smps: &mut [i32], ch: usize, time_pan_index: usize) {
     let idx =
       (time_pan_index + BUFSIZE_TIMEPAN - self.pan_times[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
@@ -262,6 +271,7 @@ impl Unit {
   }
 
   /// Applies portamento processing and returns the current key
+  #[inline]
   pub(crate) fn tone_increment_key(&mut self) -> i32 {
     if self.portament_sample_num != 0 && self.key_margin != 0 {
       if self.portament_sample_pos < self.portament_sample_num {

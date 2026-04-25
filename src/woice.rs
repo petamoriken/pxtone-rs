@@ -116,6 +116,7 @@ pub(crate) struct VoiceInstance {
 
 impl VoiceInstance {
   /// Gets one sample from an interleaved stereo 16-bit buffer
+  #[inline]
   pub(crate) fn get_sample_i16(&self, frame: usize, ch: usize) -> i16 {
     let offset = frame * 4 + ch * 2;
     if offset + 1 >= self.samples_w.len() {

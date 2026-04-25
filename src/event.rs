@@ -39,6 +39,7 @@ pub const EVENTDEFAULT_BEATTEMPO: f32 = 120.0;
 pub const EVENTDEFAULT_BEATCLOCK: u16 = 480;
 
 /// Returns whether an event is a "tail" event (ON and PORTAMENT)
+#[inline]
 pub(crate) fn event_kind_is_tail(kind: u8) -> bool {
   kind == EVENTKIND_ON || kind == EVENTKIND_PORTAMENT
 }
@@ -63,6 +64,7 @@ const PRIORITY_TABLE: [u8; EVENTKIND_NUM] = [
   100, // PAN_TIME
 ];
 
+#[inline]
 fn compare_priority(kind1: u8, kind2: u8) -> i16 {
   let p1 = if (kind1 as usize) < EVENTKIND_NUM {
     PRIORITY_TABLE[kind1 as usize] as i16
@@ -101,6 +103,7 @@ impl EventList {
     self.events.clear();
   }
 
+  #[inline]
   pub fn records(&self) -> &[EventRecord] {
     &self.events
   }

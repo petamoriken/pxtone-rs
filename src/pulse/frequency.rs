@@ -81,6 +81,7 @@ impl FrequencyTable {
   }
 
   /// Returns the frequency for a key value (event key)
+  #[inline]
   pub(crate) fn get(&self, key: i32) -> f32 {
     let i = key.saturating_add(0x6000) / 0x10;
     let i = i.clamp(0, (TABLE_SIZE - 1) as i32) as usize;
@@ -88,6 +89,7 @@ impl FrequencyTable {
   }
 
   /// Returns the frequency for a raw index (key >> 4)
+  #[inline]
   pub(crate) fn get2(&self, key: i32) -> f32 {
     let i = (key >> 4).clamp(0, (TABLE_SIZE - 1) as i32) as usize;
     self.table[i]
