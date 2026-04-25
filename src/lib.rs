@@ -11,4 +11,4 @@ pub(crate) mod read_ext;
 pub(crate) mod woice;
 
 pub use error::PxtoneError;
-pub use service::{PxtoneService, VomitPrepFlags, VomitPreparation};
+pub use service::{DestinationQuality, PxtoneService, VomitPrepFlags, VomitPreparation};

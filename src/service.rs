@@ -49,6 +49,18 @@ enum FmtVer {
 
 // ---- Public API ----
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct DestinationQuality {
+  pub ch_num: u8,
+  pub sps: u32,
+}
+
+impl Default for DestinationQuality {
+  fn default() -> Self {
+    Self { ch_num: 2, sps: 44100 }
+  }
+}
+
 pub struct VomitPrepFlags;
 
 impl VomitPrepFlags {
@@ -56,23 +68,29 @@ impl VomitPrepFlags {
   pub const LOOP: u8 = 0x2;
 }
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct VomitPreparation {
   pub flags: u8,
   pub start_pos_meas: i32,
   pub start_pos_sample: i32,
   pub start_pos_float: f32,
-  pub meas_end: i32,
-  pub meas_repeat: i32,
+  pub meas_end: Option<i32>,
+  pub meas_repeat: Option<i32>,
   pub fadein_sec: f32,
   pub master_volume: f32,
 }
 
-impl VomitPreparation {
-  pub fn new() -> Self {
+impl Default for VomitPreparation {
+  fn default() -> Self {
     Self {
+      flags: 0,
+      start_pos_meas: 0,
+      start_pos_sample: 0,
+      start_pos_float: 0.0,
+      meas_end: None,
+      meas_repeat: None,
+      fadein_sec: 0.0,
       master_volume: 1.0,
-      ..Default::default()
     }
   }
 }
@@ -168,16 +186,15 @@ impl PxtoneService {
     }
   }
 
-  /// Sets the output quality (channel count and SPS)
   #[inline]
-  pub fn set_destination_quality(&mut self, ch_num: u8, sps: u32) {
-    self.dst_ch_num = ch_num;
-    self.dst_sps = sps;
+  pub fn set_destination_quality(&mut self, quality: DestinationQuality) {
+    self.dst_ch_num = quality.ch_num;
+    self.dst_sps = quality.sps;
   }
 
   #[inline]
-  pub fn get_destination_quality(&self) -> (u8, u32) {
-    (self.dst_ch_num, self.dst_sps)
+  pub fn get_destination_quality(&self) -> DestinationQuality {
+    DestinationQuality { ch_num: self.dst_ch_num, sps: self.dst_sps }
   }
 
   // ---- File loading ----
@@ -537,36 +554,21 @@ impl PxtoneService {
   // ---- moo synthesis engine ----
 
   /// Prepares synthesis (call before starting playback)
-  pub fn moo_preparation(&mut self, prep: Option<&VomitPreparation>) -> Result<(), PxtoneError> {
+  pub fn moo_preparation(&mut self, prep: VomitPreparation) -> Result<(), PxtoneError> {
     if !self.b_valid_data || self.dst_ch_num == 0 || self.dst_sps == 0 {
       self.b_end_vomit = true;
       return Err(PxtoneError::Init);
     }
 
-    let mut start_meas = 0i32;
-    let mut start_sample = 0i32;
-    let mut start_float = 0.0f32;
-    let mut meas_end = self.master.get_play_meas() as i32;
-    let mut meas_repeat = self.master.repeat_meas as i32;
-    let mut fadein_sec = 0.0f32;
-
-    if let Some(p) = prep {
-      start_meas = p.start_pos_meas;
-      start_sample = p.start_pos_sample;
-      start_float = p.start_pos_float;
-      if p.meas_end != 0 {
-        meas_end = p.meas_end;
-      }
-      if p.meas_repeat != 0 {
-        meas_repeat = p.meas_repeat;
-      }
-      if p.fadein_sec != 0.0 {
-        fadein_sec = p.fadein_sec;
-      }
-      self.moo_b_mute_by_unit = p.flags & VomitPrepFlags::UNIT_MUTE != 0;
-      self.moo_b_loop = p.flags & VomitPrepFlags::LOOP != 0;
-      self.moo_master_vol = p.master_volume;
-    }
+    let start_meas = prep.start_pos_meas;
+    let start_sample = prep.start_pos_sample;
+    let start_float = prep.start_pos_float;
+    let meas_end = prep.meas_end.unwrap_or_else(|| self.master.get_play_meas() as i32);
+    let meas_repeat = prep.meas_repeat.unwrap_or(self.master.repeat_meas as i32);
+    let fadein_sec = prep.fadein_sec;
+    self.moo_b_mute_by_unit = prep.flags & VomitPrepFlags::UNIT_MUTE != 0;
+    self.moo_b_loop = prep.flags & VomitPrepFlags::LOOP != 0;
+    self.moo_master_vol = prep.master_volume;
 
     self.moo_bt_clock = self.master.beat_clock;
     self.moo_bt_num = self.master.beat_num;

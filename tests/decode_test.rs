@@ -16,12 +16,12 @@ fn load_service(service: &mut PxtoneService, path: &Path) {
 }
 
 fn decode_to_wav(service: &mut PxtoneService) -> Vec<u8> {
-  let prep = VomitPreparation::new(); // flags = 0 → no loop
   service
-    .moo_preparation(Some(&prep))
+    .moo_preparation(VomitPreparation::default())
     .expect("moo_preparation failed");
 
-  let (ch, sps) = service.get_destination_quality();
+  let q = service.get_destination_quality();
+  let (ch, sps) = (q.ch_num, q.sps);
   let bytes_per_frame = (ch * 2) as usize;
   let mut chunk = vec![0u8; bytes_per_frame * 4096];
   let mut pcm = Vec::new();
