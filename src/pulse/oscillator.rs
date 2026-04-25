@@ -2,12 +2,12 @@
 // Generates samples one at a time from a waveform table
 
 #[derive(Clone, Debug)]
-pub struct Point {
+pub(crate) struct Point {
   pub(crate) x: i32,
   pub(crate) y: i32,
 }
 
-pub struct Oscillator {
+pub(crate) struct Oscillator {
   volume: u32,
   sample_num: u32,
   point_num: usize,

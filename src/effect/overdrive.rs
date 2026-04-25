@@ -7,7 +7,7 @@ const CUT_MAX: f32 = 100.0;
 const AMP_MIN: f32 = 0.0;
 const AMP_MAX: f32 = 800.0;
 
-pub struct OverDrive {
+pub(crate) struct OverDrive {
   pub(crate) played: bool,
   pub(crate) cut: f32,
   pub(crate) amp: f32,

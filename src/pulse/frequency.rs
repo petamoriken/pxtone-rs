@@ -39,7 +39,7 @@ fn get_divide_octave_rate(divi: usize) -> f64 {
   parameter
 }
 
-pub struct FrequencyTable {
+pub(crate) struct FrequencyTable {
   table: Box<[f32; TABLE_SIZE]>,
 }
 

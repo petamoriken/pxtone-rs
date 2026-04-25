@@ -4,17 +4,15 @@ use std::io::BufReader;
 use std::path::Path;
 use toml::Table;
 
-fn open_service(path: &Path) -> PxtoneService {
+fn load_service(service: &mut PxtoneService, path: &Path) {
   let file = File::open(path).unwrap_or_else(|e| panic!("{}: {}", path.display(), e));
   let mut reader = BufReader::new(file);
-  let mut service = PxtoneService::new();
   service
     .read(&mut reader)
     .unwrap_or_else(|e| panic!("{}: read failed: {:?}", path.display(), e));
   service
     .tones_ready()
     .unwrap_or_else(|e| panic!("{}: tones_ready failed: {:?}", path.display(), e));
-  service
 }
 
 fn decode_to_wav(service: &mut PxtoneService) -> Vec<u8> {
@@ -60,10 +58,13 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
   let m = &service.master;
   let t = &service.text;
   let mut table = Table::new();
-  table.insert("name".into(), Value::String(t.name().unwrap_or_default()));
+  table.insert(
+    "name".into(),
+    Value::String(t.name().unwrap_or_default().to_string()),
+  );
   table.insert(
     "comment".into(),
-    Value::String(t.comment().unwrap_or_default()),
+    Value::String(t.comment().unwrap_or_default().to_string()),
   );
   table.insert("beat_clock".into(), Value::Integer(m.beat_clock() as i64));
   table.insert("beat_num".into(), Value::Integer(m.beat_num() as i64));
@@ -92,23 +93,24 @@ fn decoded_wav_matches_reference() {
     "no .ptcop files found in tests/sample/"
   );
 
+  let mut service = PxtoneService::new();
   let mut failures = Vec::new();
 
   for entry in &entries {
     let ptcop_path = entry.path();
     let stem = ptcop_path.file_stem().unwrap().to_string_lossy();
     let wav_path = snapshot_dir.join(format!("{}.wav", stem));
-    let txt_path = snapshot_dir.join(format!("{}.toml", stem));
+    let toml_path = snapshot_dir.join(format!("{}.toml", stem));
 
-    let mut service = open_service(&ptcop_path);
-    let metadata = decode_to_metadata(&service);
+    load_service(&mut service, &ptcop_path);
     let wav = decode_to_wav(&mut service);
+    let metadata = decode_to_metadata(&service);
 
     if update {
       fs::write(&wav_path, &wav)
         .unwrap_or_else(|e| panic!("{}: failed to write snapshot: {}", wav_path.display(), e));
-      fs::write(&txt_path, &metadata)
-        .unwrap_or_else(|e| panic!("{}: failed to write snapshot: {}", txt_path.display(), e));
+      fs::write(&toml_path, &metadata)
+        .unwrap_or_else(|e| panic!("{}: failed to write snapshot: {}", toml_path.display(), e));
       continue;
     }
 
@@ -120,16 +122,16 @@ fn decoded_wav_matches_reference() {
     }
 
     // Metadata comparison (via TOML parse to ignore formatting differences)
-    let expected_txt = fs::read_to_string(&txt_path)
-      .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", txt_path.display(), e));
+    let expected_txt = fs::read_to_string(&toml_path)
+      .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", toml_path.display(), e));
     let actual_toml: Table = metadata
       .parse()
       .expect("generated metadata is not valid TOML");
     let expected_toml: Table = expected_txt
       .parse()
-      .unwrap_or_else(|e| panic!("{}: invalid TOML: {}", txt_path.display(), e));
+      .unwrap_or_else(|e| panic!("{}: invalid TOML: {}", toml_path.display(), e));
     if actual_toml != expected_toml {
-      failures.push(txt_path.display().to_string());
+      failures.push(toml_path.display().to_string());
     }
   }
 

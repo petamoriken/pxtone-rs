@@ -83,10 +83,11 @@ pub struct PxtoneService {
   pub text: Text,
   pub master: Master,
   pub events: EventList,
-  pub(crate) woices: Vec<Woice>,
   pub units: Vec<Unit>,
-  pub delays: Vec<Delay>,
-  pub overdrives: Vec<OverDrive>,
+
+  pub(crate) delays: Vec<Delay>,
+  pub(crate) overdrives: Vec<OverDrive>,
+  pub(crate) woices: Vec<Woice>,
 
   noise_builder: NoiseBuilder,
   freq: FrequencyTable,

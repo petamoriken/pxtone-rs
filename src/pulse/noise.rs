@@ -6,7 +6,7 @@ use std::io::Read;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u8)]
-pub enum WaveType {
+pub(crate) enum WaveType {
   #[default]
   None = 0,
   Sine = 1,
@@ -27,7 +27,7 @@ pub enum WaveType {
   Saw8 = 16,
 }
 
-pub const WAVETYPE_NUM: usize = 17;
+pub(crate) const WAVETYPE_NUM: usize = 17;
 
 impl TryFrom<i32> for WaveType {
   type Error = ();
@@ -58,7 +58,7 @@ impl TryFrom<i32> for WaveType {
 // ---- Oscillator design ----
 
 #[derive(Clone, Debug, Default)]
-pub struct NoiseOscillator {
+pub(crate) struct NoiseOscillator {
   pub(crate) wave_type: WaveType,
   pub(crate) freq: f32,
   pub(crate) volume: f32,
@@ -69,13 +69,13 @@ pub struct NoiseOscillator {
 // ---- Noise unit design ----
 
 #[derive(Clone, Debug)]
-pub struct NoisePoint {
+pub(crate) struct NoisePoint {
   pub(crate) x: i32,
   pub(crate) y: i32,
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct NoiseUnit {
+pub(crate) struct NoiseUnit {
   pub(crate) enabled: bool,
   pub(crate) envelopes: Vec<NoisePoint>,
   pub(crate) pan: i32,
@@ -109,7 +109,7 @@ const LIMIT_ENVE_Y: i32 = 100;
 // ---- Noise ----
 
 #[derive(Debug, Default)]
-pub struct Noise {
+pub(crate) struct Noise {
   pub(crate) smp_num_44k: u32,
   pub(crate) units: Vec<NoiseUnit>,
 }

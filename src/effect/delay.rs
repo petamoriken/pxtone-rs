@@ -2,11 +2,11 @@ use crate::error::PxtoneError;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
-pub const MAX_GROUP_NUM: usize = 4; // pxtnMAX_TUNEGROUPNUM
+pub(crate) const MAX_GROUP_NUM: usize = 4; // pxtnMAX_TUNEGROUPNUM
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u16)]
-pub enum DelayUnit {
+pub(crate) enum DelayUnit {
   #[default]
   Beat = 0,
   Meas = 1,
@@ -25,7 +25,7 @@ impl TryFrom<u16> for DelayUnit {
   }
 }
 
-pub struct Delay {
+pub(crate) struct Delay {
   pub(crate) played: bool,
   pub(crate) unit: DelayUnit,
   pub(crate) group: usize,

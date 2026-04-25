@@ -128,7 +128,7 @@ struct UnitState {
 
 // ---- NoiseBuilder ----
 
-pub struct NoiseBuilder {
+pub(crate) struct NoiseBuilder {
   tables: [Option<Vec<i16>>; WAVETYPE_NUM],
 }
 

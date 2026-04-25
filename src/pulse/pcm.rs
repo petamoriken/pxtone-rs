@@ -4,7 +4,7 @@
 use crate::error::PxtoneError;
 
 #[derive(Debug)]
-pub struct Pcm {
+pub(crate) struct Pcm {
   pub(crate) ch: u8,
   pub(crate) sps: u32,
   pub(crate) bps: u8,
