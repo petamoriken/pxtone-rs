@@ -184,8 +184,7 @@ impl Unit {
   }
 
   pub(crate) fn tone_envelope(&mut self, instances: &[VoiceInstance]) {
-    for v in 0..self.voice_num {
-      let vi = &instances[v];
+    for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
       let vt = &mut self.tones[v];
       if vt.life_count > 0 && vi.env_size > 0 {
         if vt.on_count > 0 {
@@ -221,9 +220,8 @@ impl Unit {
 
     for ch in 0..MAX_CHANNEL {
       let mut buf = 0i32;
-      for v in 0..self.voice_num {
+      for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
         let vt = &self.tones[v];
-        let vi = &instances[v];
         if vt.life_count > 0 {
           let pos = vt.smp_pos as usize;
           let mut work = vi.get_sample_i16(pos, ch) as i32;
@@ -259,7 +257,7 @@ impl Unit {
     let idx =
       (time_pan_index + BUFSIZE_TIMEPAN - self.pan_times[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
     if self.v_groupno < group_smps.len() {
-      group_smps[self.v_groupno as usize] += self.pan_time_bufs[ch][idx];
+      group_smps[self.v_groupno] += self.pan_time_bufs[ch][idx];
     }
   }
 
@@ -284,8 +282,7 @@ impl Unit {
 
   /// Advances the sample position
   pub(crate) fn tone_increment_sample(&mut self, freq: f32, instances: &[VoiceInstance]) {
-    for v in 0..self.voice_num {
-      let vi = &instances[v];
+    for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
         vt.life_count -= 1;

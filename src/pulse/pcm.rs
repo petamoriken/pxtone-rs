@@ -91,10 +91,10 @@ impl Pcm {
         let mut w = vec![0u8; total * self.bps as usize / 8 / 2];
         match self.bps {
           8 => {
-            for i in 0..total / 2 {
+            for (i, item) in w.iter_mut().enumerate().take(total / 2) {
               let a = self.samples[i * 2] as i32;
               let b = self.samples[i * 2 + 1] as i32;
-              w[i] = ((a + b) / 2) as u8;
+              *item = ((a + b) / 2) as u8;
             }
           }
           16 => {
@@ -127,9 +127,9 @@ impl Pcm {
       // 16 → 8
       (16, 8) => {
         let mut w = vec![0u8; total / 2];
-        for i in 0..w.len() {
+        for (i, item) in w.iter_mut().enumerate() {
           let v = i16::from_le_bytes([self.samples[i * 2], self.samples[i * 2 + 1]]);
-          w[i] = ((v as i32 / 0x100) + 128) as u8;
+          *item = ((v as i32 / 0x100) + 128) as u8;
         }
         w
       }
@@ -155,7 +155,7 @@ impl Pcm {
     if self.sps == new_sps {
       return Ok(());
     }
-    let bytes_per_sample = (self.ch as usize * self.bps as usize / 8) as usize;
+    let bytes_per_sample = self.ch as usize * self.bps as usize / 8;
     let old_total = self.total_samples() as usize;
     let new_head =
       ((self.smp_head as f64 * new_sps as f64 + self.sps as f64 - 1.0) / self.sps as f64) as usize;

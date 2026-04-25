@@ -74,7 +74,7 @@ pub struct NoisePoint {
   pub(crate) y: i32,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NoiseUnit {
   pub(crate) enabled: bool,
   pub(crate) envelopes: Vec<NoisePoint>,
@@ -82,19 +82,6 @@ pub struct NoiseUnit {
   pub(crate) main: NoiseOscillator,
   pub(crate) freq: NoiseOscillator,
   pub(crate) volu: NoiseOscillator,
-}
-
-impl Default for NoiseUnit {
-  fn default() -> Self {
-    Self {
-      enabled: false,
-      envelopes: Vec::new(),
-      pan: 0,
-      main: NoiseOscillator::default(),
-      freq: NoiseOscillator::default(),
-      volu: NoiseOscillator::default(),
-    }
-  }
 }
 
 // ---- Flag constants ----
@@ -143,12 +130,7 @@ impl Noise {
           env.x = env.x.clamp(0, LIMIT_ENVE_X);
           env.y = env.y.clamp(0, LIMIT_ENVE_Y);
         }
-        if unit.pan < -100 {
-          unit.pan = -100;
-        }
-        if unit.pan > 100 {
-          unit.pan = 100;
-        }
+        unit.pan = unit.pan.clamp(-100, 100);
         fix_osc(&mut unit.main);
         fix_osc(&mut unit.freq);
         fix_osc(&mut unit.volu);
@@ -228,24 +210,9 @@ impl Noise {
 }
 
 fn fix_osc(osc: &mut NoiseOscillator) {
-  if osc.freq > LIMIT_OSC_FREQUENCY {
-    osc.freq = LIMIT_OSC_FREQUENCY;
-  }
-  if osc.freq <= 0.0 {
-    osc.freq = 0.0;
-  }
-  if osc.volume > LIMIT_OSC_VOLUME {
-    osc.volume = LIMIT_OSC_VOLUME;
-  }
-  if osc.volume <= 0.0 {
-    osc.volume = 0.0;
-  }
-  if osc.offset > LIMIT_OSC_OFFSET {
-    osc.offset = LIMIT_OSC_OFFSET;
-  }
-  if osc.offset <= 0.0 {
-    osc.offset = 0.0;
-  }
+  osc.freq = osc.freq.clamp(0.0, LIMIT_OSC_FREQUENCY);
+  osc.volume = osc.volume.clamp(0.0, LIMIT_OSC_VOLUME);
+  osc.offset = osc.offset.clamp(0.0, LIMIT_OSC_OFFSET);
 }
 
 fn read_oscillator<R: Read>(r: &mut R, osc: &mut NoiseOscillator) -> Result<(), PxtoneError> {

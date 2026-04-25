@@ -67,8 +67,8 @@ impl Master {
   }
 
   pub(crate) fn adjust_meas_num(&mut self, clock: u32) {
-    let b_num = (clock + self.beat_clock as u32 - 1) / self.beat_clock as u32;
-    let m_num = (b_num + self.beat_num as u32 - 1) / self.beat_num as u32;
+    let b_num = clock.div_ceil(self.beat_clock as u32);
+    let m_num = b_num.div_ceil(self.beat_num as u32);
     if self.meas_num <= m_num {
       self.meas_num = m_num;
     }
@@ -131,7 +131,7 @@ impl Master {
     }
 
     let mut beat_clock: i32 = EVENTDEFAULT_BEATCLOCK.into();
-    let mut beat_num: u8 = EVENTDEFAULT_BEATNUM.into();
+    let mut beat_num: u8 = EVENTDEFAULT_BEATNUM;
     let mut beat_tempo = EVENTDEFAULT_BEATTEMPO;
     let mut repeat_clock = 0i32;
     let mut last_clock = 0i32;
@@ -179,7 +179,7 @@ impl Master {
       }
     }
 
-    self.beat_num = beat_num as u8;
+    self.beat_num = beat_num;
     self.beat_tempo = beat_tempo;
     self.beat_clock = beat_clock as u16;
 

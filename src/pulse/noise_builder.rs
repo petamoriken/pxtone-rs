@@ -360,7 +360,7 @@ impl NoiseBuilder {
         let enves: Vec<(i32, f64)> = du
           .envelopes
           .iter()
-          .map(|e| (sps as i32 * e.x as i32 / 1000, e.y as f64 / 100.0))
+          .map(|e| (sps as i32 * e.x / 1000, e.y as f64 / 100.0))
           .collect();
 
         let mut enve_index = 0usize;
@@ -437,8 +437,8 @@ impl NoiseBuilder {
         // freq → fre
         let fre = {
           let po = &u.freq;
-          let raw = po.get_sample(&self.tables);
-          raw // already scaled by volume in get_sample
+
+          po.get_sample(&self.tables) // already scaled by volume in get_sample
         };
         let main_inc = u.main.increment * freq.get(fre as i32) as f64;
         u.main.increment(main_inc, rand_tbl);

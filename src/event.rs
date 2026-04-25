@@ -252,10 +252,12 @@ impl EventList {
       _ => (0, 0),
     };
     for e in &mut self.events {
-      if e.unit_no == unit_no && e.kind == kind && e.clock >= clock1 {
-        if clock2 == -1 || e.clock < clock2 {
-          e.value = (e.value + delta).clamp(min, max);
-        }
+      if e.unit_no == unit_no
+        && e.kind == kind
+        && e.clock >= clock1
+        && (clock2 == -1 || e.clock < clock2)
+      {
+        e.value = (e.value + delta).clamp(min, max);
       }
     }
   }

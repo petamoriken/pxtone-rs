@@ -12,11 +12,10 @@ impl<R: Read> ReadExt for R {
     let mut bytes = [0u8; 5];
     let mut count = 0usize;
 
-    for i in 0..5 {
-      let b = self.read_u8()?;
-      bytes[i] = b;
+    for (i, byte) in bytes.iter_mut().enumerate() {
+      *byte = self.read_u8()?;
       count = i + 1;
-      if b & 0x80 == 0 {
+      if *byte & 0x80 == 0 {
         break;
       }
     }

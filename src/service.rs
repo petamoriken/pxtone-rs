@@ -752,9 +752,9 @@ impl PxtoneService {
     // ---- 4. Per-channel group sum → effects → output ----
     let mut group_smps = vec![0i32; group_num];
 
-    for ch in 0..ch_num {
-      for g in 0..group_num {
-        group_smps[g] = 0;
+    for (ch, out_sample) in out.iter_mut().enumerate().take(ch_num) {
+      for smp in group_smps.iter_mut().take(group_num) {
+        *smp = 0;
       }
 
       for u in 0..unit_num {
@@ -779,7 +779,7 @@ impl PxtoneService {
 
       // Clip
       work = work.clamp(-self.moo_top, self.moo_top);
-      out[ch] = work as i16;
+      *out_sample = work as i16;
     }
 
     // ---- 5. Increment ----
@@ -896,20 +896,20 @@ impl PxtoneService {
             ((ev.value - (clock - ev.clock)) as f64 * clock_rate) as i32
           };
 
-          if life_count > 0 {
-            if let Some(tone) = self.units[u].tones.get_mut(v) {
-              tone.on_count = on_count as u32;
-              tone.smp_pos = 0.0;
-              tone.env_pos = 0;
-              if env_size > 0 {
-                tone.env_volume = 0;
-                tone.env_start = 0;
-              } else {
-                tone.env_volume = 128;
-                tone.env_start = 128;
-              }
-              tone.life_count = life_count as u32;
+          if life_count > 0
+            && let Some(tone) = self.units[u].tones.get_mut(v)
+          {
+            tone.on_count = on_count as u32;
+            tone.smp_pos = 0.0;
+            tone.env_pos = 0;
+            if env_size > 0 {
+              tone.env_volume = 0;
+              tone.env_start = 0;
+            } else {
+              tone.env_volume = 128;
+              tone.env_start = 128;
             }
+            tone.life_count = life_count as u32;
           }
         }
       }
@@ -945,7 +945,7 @@ impl PxtoneService {
     }
 
     let byte_per_smp = self.dst_ch_num as usize * 2;
-    if buf.len() % byte_per_smp != 0 {
+    if !buf.len().is_multiple_of(byte_per_smp) {
       return false;
     }
     let _smp_num = buf.len() / byte_per_smp;

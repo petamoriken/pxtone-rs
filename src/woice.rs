@@ -174,12 +174,14 @@ impl Woice {
     let mut pcm = Pcm::create(ch, sps, bps, sample_num)?;
     r.read_exact(&mut pcm.samples_mut()[..data_size as usize])?;
 
-    let mut unit = VoiceUnit::default();
-    unit.voice_type = VoiceType::Sampling;
-    unit.basic_key = basic_key;
-    unit.tuning = tuning;
-    unit.voice_flags = voice_flags;
-    unit.pcm = Some(pcm);
+    let unit = VoiceUnit {
+      voice_type: VoiceType::Sampling,
+      basic_key,
+      tuning,
+      voice_flags,
+      pcm: Some(pcm),
+      ..Default::default()
+    };
     self.x3x_basic_key = basic_key;
     self.x3x_tuning = 0.0;
     self.voices = vec![unit];
@@ -197,19 +199,21 @@ impl Woice {
     let tuning = r.read_f32::<LE>()?;
     let rrr = r.read_i32::<LE>()?;
 
-    if rrr > 1 || rrr < 0 {
+    if !(0..=1).contains(&rrr) {
       return Err(PxtoneError::UnknownFormat);
     }
 
     let mut noise = Noise::new();
     noise.read(r)?;
 
-    let mut unit = VoiceUnit::default();
-    unit.voice_type = VoiceType::Noise;
-    unit.voice_flags = voice_flags;
-    unit.basic_key = basic_key;
-    unit.tuning = tuning;
-    unit.noise = Some(noise);
+    let unit = VoiceUnit {
+      voice_type: VoiceType::Noise,
+      voice_flags,
+      basic_key,
+      tuning,
+      noise: Some(noise),
+      ..Default::default()
+    };
     self.x3x_basic_key = basic_key;
     self.x3x_tuning = 0.0;
     self.voices = vec![unit];
@@ -256,17 +260,19 @@ impl Woice {
     let mut data = vec![0u8; size as usize];
     r.read_exact(&mut data)?;
 
-    let mut unit = VoiceUnit::default();
-    unit.voice_type = VoiceType::OggVorbis;
-    unit.voice_flags = voice_flags;
-    unit.basic_key = basic_key;
-    unit.tuning = tuning;
-    unit.ogg_data = Some(OggData {
-      ch,
-      sps,
-      smp_num,
-      data,
-    });
+    let unit = VoiceUnit {
+      voice_type: VoiceType::OggVorbis,
+      voice_flags,
+      basic_key,
+      tuning,
+      ogg_data: Some(OggData {
+        ch,
+        sps,
+        smp_num,
+        data,
+      }),
+      ..Default::default()
+    };
     self.x3x_basic_key = basic_key;
     self.x3x_tuning = 0.0;
     self.voices = vec![unit];
@@ -300,14 +306,15 @@ impl Woice {
     self.voices.clear();
 
     for _ in 0..voice_num {
-      let mut unit = VoiceUnit::default();
-      unit.basic_key = r.read_var_int()?;
-      unit.volume = r.read_var_int()? as u32;
-      unit.pan = r.read_var_int()?;
-      let tuning_bits = r.read_var_int()? as u32;
-      unit.tuning = f32::from_bits(tuning_bits);
-      unit.voice_flags = r.read_var_int()? as u32;
-      unit.data_flags = r.read_var_int()? as u32;
+      let mut unit = VoiceUnit {
+        basic_key: r.read_var_int()?,
+        volume: r.read_var_int()? as u32,
+        pan: r.read_var_int()?,
+        tuning: f32::from_bits(r.read_var_int()? as u32),
+        voice_flags: r.read_var_int()? as u32,
+        data_flags: r.read_var_int()? as u32,
+        ..Default::default()
+      };
 
       if unit.voice_flags & VOICE_FLAG_UNCOVERED != 0 {
         return Err(PxtoneError::UnknownFormat);
@@ -372,7 +379,7 @@ impl Woice {
         }
         VoiceType::OggVorbis => {
           if let Some(ogg) = &unit.ogg_data {
-            let decoded = decode_ogg(&ogg.data).map_err(|e| PxtoneError::OggVorbis(e))?;
+            let decoded = decode_ogg(&ogg.data).map_err(PxtoneError::OggVorbis)?;
             let ogg_ch = ogg.ch;
             let ogg_sps = ogg.sps;
             let ogg_smp = ogg.smp_num;
@@ -552,8 +559,8 @@ fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch: u8, _sps: u32
       } else {
         osci.get_one_sample_coodinate(s)
       };
-      for c in 0..ch as usize {
-        let mut work = osc * pan_vol[c] as f64 / 64.0;
+      for (c, &pv) in pan_vol.iter().enumerate().take(ch as usize) {
+        let mut work = osc * pv as f64 / 64.0;
         if work > 1.0 {
           work = 1.0;
           inst.b_sine_over = true;
@@ -572,8 +579,8 @@ fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch: u8, _sps: u32
       } else {
         osci.get_one_sample_coodinate(s)
       };
-      for c in 0..ch as usize {
-        let mut work = osc * pan_vol[c] as f64 / 64.0;
+      for (c, &pv) in pan_vol.iter().enumerate().take(ch as usize) {
+        let mut work = osc * pv as f64 / 64.0;
         if work > 1.0 {
           work = 1.0;
           inst.b_sine_over = true;

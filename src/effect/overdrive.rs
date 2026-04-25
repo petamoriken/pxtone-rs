@@ -60,10 +60,10 @@ impl OverDrive {
     if yyy != 0.0 {
       return Err(PxtoneError::UnknownFormat);
     }
-    if cut < CUT_MIN || cut > CUT_MAX {
+    if !(CUT_MIN..=CUT_MAX).contains(&cut) {
       return Err(PxtoneError::UnknownFormat);
     }
-    if amp < AMP_MIN || amp > AMP_MAX {
+    if !(AMP_MIN..=AMP_MAX).contains(&amp) {
       return Err(PxtoneError::UnknownFormat);
     }
 
