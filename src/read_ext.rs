@@ -3,12 +3,18 @@ use byteorder::ReadBytesExt;
 use std::io::Read;
 
 pub(crate) trait ReadExt: Read {
-  /// Reads a pxtone variable-length integer (up to 5 bytes)
-  fn read_var_int(&mut self) -> Result<i32, PxtoneError>;
+  /// Reads a pxtone variable-length integer (up to 5 bytes) as i32
+  fn read_var_i32(&mut self) -> Result<i32, PxtoneError>;
+  /// Reads a pxtone variable-length integer (up to 5 bytes) as u32
+  fn read_var_u32(&mut self) -> Result<u32, PxtoneError>;
 }
 
 impl<R: Read> ReadExt for R {
-  fn read_var_int(&mut self) -> Result<i32, PxtoneError> {
+  fn read_var_i32(&mut self) -> Result<i32, PxtoneError> {
+    self.read_var_u32().map(|v| v as i32)
+  }
+
+  fn read_var_u32(&mut self) -> Result<u32, PxtoneError> {
     let mut bytes = [0u8; 5];
     let mut count = 0usize;
 
@@ -20,7 +26,7 @@ impl<R: Read> ReadExt for R {
       }
     }
 
-    Ok(v_to_int(&bytes[..count]) as i32)
+    Ok(v_to_int(&bytes[..count]))
   }
 }
 

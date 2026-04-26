@@ -140,10 +140,10 @@ impl Unit {
     self.portament_sample_pos = 0;
   }
 
-  pub(crate) fn tone_pan_volume(&mut self, ch: u32, pan: u32) {
+  pub(crate) fn tone_pan_volume(&mut self, ch_num: u32, pan: u32) {
     self.pan_vols[0] = 64;
     self.pan_vols[1] = 64;
-    if ch == 2 {
+    if ch_num == 2 {
       if pan >= 64 {
         self.pan_vols[0] = 128 - pan;
       } else {
@@ -152,10 +152,10 @@ impl Unit {
     }
   }
 
-  pub(crate) fn tone_pan_time(&mut self, ch: u32, pan: u32, sps: u32) {
+  pub(crate) fn tone_pan_time(&mut self, ch_num: u32, pan: u32, sps: u32) {
     self.pan_times[0] = 0;
     self.pan_times[1] = 0;
-    if ch == 2 {
+    if ch_num == 2 {
       if pan >= 64 {
         let v = (pan - 64).min(63);
         self.pan_times[0] = v * 44100 / sps;

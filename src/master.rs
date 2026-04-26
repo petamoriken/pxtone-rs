@@ -150,9 +150,9 @@ impl Master {
     let mut absolute = 0i32;
 
     for _ in 0..event_num {
-      let status = r.read_var_int()?;
-      let clock_delta = r.read_var_int()?;
-      let volume = r.read_var_int()?;
+      let status = r.read_var_u32()?;
+      let clock_delta = r.read_var_i32()?;
+      let volume = r.read_var_i32()?;
       absolute += clock_delta;
       let clock = absolute;
 

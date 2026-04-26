@@ -1,6 +1,3 @@
-// Noise builder (pxtnPulse_NoiseBuilder)
-// Initializes wave tables and generates PCM from a Noise design
-
 use crate::error::PxtoneError;
 use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::{Noise, NoiseOscillator, WAVETYPE_NUM, WaveType};
@@ -116,11 +113,11 @@ impl OscState {
 struct UnitState {
   enabled: bool,
   pan: [f64; 2],
-  enves: Vec<(i32, f64)>, // (smp, mag)
+  enves: Vec<(u32, f64)>, // (smp, mag)
   enve_index: usize,
   enve_mag_start: f64,
   enve_mag_margin: f64,
-  enve_count: i32,
+  enve_count: u32,
   main: OscState,
   freq: OscState,
   volu: OscState,
@@ -323,7 +320,7 @@ impl NoiseBuilder {
   pub(crate) fn build_noise(
     &mut self,
     noise: &mut Noise,
-    ch: u8,
+    ch_num: u8,
     sps: u32,
     bps: u8,
     freq: &FrequencyTable,
@@ -357,10 +354,10 @@ impl NoiseBuilder {
           [(100.0 - du.pan as f64) / 100.0, 1.0]
         };
 
-        let enves: Vec<(i32, f64)> = du
+        let enves: Vec<(u32, f64)> = du
           .envelopes
           .iter()
-          .map(|e| (sps as i32 * e.x / 1000, e.y as f64 / 100.0))
+          .map(|e| (sps * e.x / 1000, e.y as f64 / 100.0))
           .collect();
 
         let mut enve_index = 0usize;
@@ -390,12 +387,12 @@ impl NoiseBuilder {
       })
       .collect();
 
-    let mut pcm = Pcm::create(ch, sps, bps, smp_num)?;
+    let mut pcm = Pcm::create(ch_num, sps, bps, smp_num)?;
     let buf = pcm.samples_mut();
     let mut buf_pos = 0usize;
 
     for _ in 0..smp_num as usize {
-      for c in 0..ch as usize {
+      for c in 0..ch_num as usize {
         let store: f64 = units
           .iter()
           .filter(|u| u.enabled)

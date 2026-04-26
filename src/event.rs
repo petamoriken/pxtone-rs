@@ -31,7 +31,7 @@ pub const EVENTDEFAULT_PORTAMENT: u32 = 0;
 pub const EVENTDEFAULT_VOICENO: usize = 0;
 pub const EVENTDEFAULT_GROUPNO: usize = 0;
 pub const EVENTDEFAULT_KEY: i32 = 0x6000;
-pub const EVENTDEFAULT_BASICKEY: i32 = 0x4500;
+pub const EVENTDEFAULT_BASICKEY: u32 = 0x4500;
 pub const EVENTDEFAULT_TUNING: f32 = 1.0;
 
 pub const EVENTDEFAULT_BEATNUM: u8 = 4;
@@ -125,10 +125,10 @@ impl EventList {
     let mut absolute = 0i32;
 
     for _ in 0..eve_num {
-      let clock_delta = r.read_var_int()?;
+      let clock_delta = r.read_var_i32()?;
       let unit_no = r.read_u8()?;
       let kind = r.read_u8()?;
-      let value = r.read_var_int()?;
+      let value = r.read_var_i32()?;
       absolute += clock_delta;
       self.events.push(EventRecord {
         kind,
@@ -175,8 +175,8 @@ impl EventList {
     let mut absolute = 0i32;
 
     for _ in 0..event_num {
-      let clock_delta = r.read_var_int()?;
-      let value = r.read_var_int()?;
+      let clock_delta = r.read_var_i32()?;
+      let value = r.read_var_i32()?;
       absolute += clock_delta;
       let clock = absolute;
 

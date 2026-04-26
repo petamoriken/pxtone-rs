@@ -5,7 +5,7 @@ use crate::error::PxtoneError;
 
 #[derive(Debug)]
 pub(crate) struct Pcm {
-  pub(crate) ch: u8,
+  pub(crate) ch_num: u8,
   pub(crate) sps: u32,
   pub(crate) bps: u8,
   pub(crate) smp_head: u32,
@@ -15,14 +15,19 @@ pub(crate) struct Pcm {
 }
 
 impl Pcm {
-  pub(crate) fn create(ch: u8, sps: u32, bps: u8, sample_num: u32) -> Result<Self, PxtoneError> {
+  pub(crate) fn create(
+    ch_num: u8,
+    sps: u32,
+    bps: u8,
+    sample_num: u32,
+  ) -> Result<Self, PxtoneError> {
     if bps != 8 && bps != 16 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let size = (sample_num * bps as u32 * ch as u32 / 8) as usize;
+    let size = (sample_num * bps as u32 * ch_num as u32 / 8) as usize;
     let fill = if bps == 8 { 128u8 } else { 0u8 };
     Ok(Self {
-      ch,
+      ch_num,
       sps,
       bps,
       smp_head: 0,
@@ -58,11 +63,11 @@ impl Pcm {
   }
 
   fn convert_channel(&mut self, new_ch: u8) -> Result<(), PxtoneError> {
-    if self.ch == new_ch {
+    if self.ch_num == new_ch {
       return Ok(());
     }
     let total = self.total_samples() as usize;
-    let work = match (self.ch, new_ch) {
+    let work = match (self.ch_num, new_ch) {
       // mono → stereo
       (1, 2) => {
         let mut w = vec![0u8; total * self.bps as usize / 8 * 2];
@@ -114,7 +119,7 @@ impl Pcm {
       _ => return Err(PxtoneError::PcmConvert),
     };
     self.samples = work;
-    self.ch = new_ch;
+    self.ch_num = new_ch;
     Ok(())
   }
 
@@ -122,7 +127,7 @@ impl Pcm {
     if self.bps == new_bps {
       return Ok(());
     }
-    let total = (self.total_samples() * self.ch as u32) as usize;
+    let total = (self.total_samples() * self.ch_num as u32) as usize;
     let work = match (self.bps, new_bps) {
       // 16 → 8
       (16, 8) => {
@@ -155,7 +160,7 @@ impl Pcm {
     if self.sps == new_sps {
       return Ok(());
     }
-    let bytes_per_sample = self.ch as usize * self.bps as usize / 8;
+    let bytes_per_sample = self.ch_num as usize * self.bps as usize / 8;
     let old_total = self.total_samples() as usize;
     let new_head =
       ((self.smp_head as f64 * new_sps as f64 + self.sps as f64 - 1.0) / self.sps as f64) as usize;

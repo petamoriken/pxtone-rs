@@ -43,34 +43,61 @@ pub(crate) enum VoiceType {
 }
 
 // ---- Waveform / Envelope ----
+
+/// Oscillator waveform shape, used by `Coodinate` and `Overtone` voice types.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct VoiceWave {
+  /// Number of sample frames in one oscillation cycle (wave resolution).
   pub(crate) reso: u32,
-  pub(crate) points: Vec<(i32, i32)>, // (x, y)
+  /// Waveform points. In `Coodinate` mode each entry is `(position 0..reso, amplitude -128..127)`;
+  /// in `Overtone` mode each entry is `(harmonic number, amplitude)`.
+  pub(crate) points: Vec<(i32, i32)>,
 }
 
+/// Amplitude envelope definition attached to a voice layer.
 #[derive(Clone, Debug, Default)]
 pub(crate) struct VoiceEnvelope {
+  /// Frames per second of the envelope timeline.
   pub(crate) fps: u32,
+  /// Number of points in the attack (head) phase.
   pub(crate) head_num: u32,
+  /// Number of points in the sustain (body) phase. Always `0` in the current format.
   pub(crate) body_num: u32,
+  /// Number of points in the release (tail) phase. Always `1` in the current format.
   pub(crate) tail_num: u32,
+  /// Envelope points ordered head → body → tail.
+  /// Each entry is `(duration in frames, volume 0–100)`.
   pub(crate) points: Vec<(i32, i32)>,
 }
 
 // ---- Unit (design data) ----
+
+/// Design parameters for one voice layer within an instrument.
 pub(crate) struct VoiceUnit {
-  pub(crate) basic_key: i32,
+  /// Base pitch in raw pxtone key units. Event KEY values are relative to this.
+  /// The default `EVENTDEFAULT_BASICKEY` (`0x4500`) is the reference concert pitch.
+  pub(crate) basic_key: u32,
+  /// Base volume (0–128).
   pub(crate) volume: u32,
-  pub(crate) pan: i32,
+  /// Stereo pan position: `0` = full left, `64` = center, `128` = full right.
+  pub(crate) pan: u32,
+  /// Pitch fine-tuning multiplier applied on top of `basic_key`.
   pub(crate) tuning: f32,
+  /// Combination of `VOICE_FLAG_*` constants (loop, smooth, beat-fit, etc.).
   pub(crate) voice_flags: u32,
+  /// Combination of `DATA_FLAG_*` constants indicating which embedded data fields are present.
   pub(crate) data_flags: u32,
+  /// Synthesis algorithm used for this voice layer.
   pub(crate) voice_type: VoiceType,
+  /// Raw PCM material; present for `Sampling` and `Pcm` voice types.
   pub(crate) pcm: Option<Pcm>,
+  /// Noise generator design; present for the `Noise` (PTN) voice type.
   pub(crate) noise: Option<Noise>,
+  /// OGG Vorbis bitstream with its decoded metadata; present for the `OggVorbis` voice type.
   pub(crate) ogg_data: Option<OggData>,
+  /// Waveform shape; used by `Coodinate` and `Overtone` voice types.
   pub(crate) wave: VoiceWave,
+  /// Amplitude envelope applied during playback.
   pub(crate) envelope: VoiceEnvelope,
 }
 
@@ -94,23 +121,40 @@ impl Default for VoiceUnit {
 }
 
 // ---- OGG data ----
+
+/// Raw OGG Vorbis data bundled with its decoded stream metadata.
 pub(crate) struct OggData {
-  pub(crate) ch: u8,
+  /// Number of audio channels (`1` = mono, `2` = stereo).
+  pub(crate) ch_num: u8,
+  /// Sample rate in Hz.
   pub(crate) sps: u32,
+  /// Total number of sample frames in the decoded stream.
   pub(crate) smp_num: u32,
+  /// Raw OGG Vorbis bitstream bytes.
   pub(crate) data: Vec<u8>,
 }
 
 // ---- Instance (synthesis buffer) ----
+
+/// Pre-rendered synthesis buffer for one voice layer, rebuilt at playback start.
+/// All sample counts and the `samples_w` buffer are normalized to 44100 Hz stereo 16-bit PCM.
 #[derive(Default)]
 pub(crate) struct VoiceInstance {
+  /// Sample frames in the attack (pre-loop) section.
   pub(crate) smp_head_w: u32,
+  /// Sample frames in the loop body.
   pub(crate) smp_body_w: u32,
+  /// Sample frames in the release (post-loop) section.
   pub(crate) smp_tail_w: u32,
-  pub(crate) samples_w: Vec<u8>, // stereo 16-bit interleaved
+  /// Rendered waveform as stereo 16-bit little-endian interleaved PCM at 44100 Hz.
+  pub(crate) samples_w: Vec<u8>,
+  /// Amplitude envelope table; one byte per frame, range 0–128.
   pub(crate) env: Vec<u8>,
+  /// Number of valid frames in `env`.
   pub(crate) env_size: u32,
+  /// Release duration in sample frames.
   pub(crate) env_release: u32,
+  /// Set to `true` if the waveform clipped during synthesis.
   pub(crate) b_sine_over: bool,
 }
 
@@ -128,12 +172,20 @@ impl VoiceInstance {
 }
 
 // ---- Woice ----
+
+/// An instrument in a pxtone song, comprising one or more voice layers.
 pub(crate) struct Woice {
+  /// Instrument name.
   pub(crate) name: String,
+  /// Source material type (PCM, PTV, PTN, OGG Vorbis, etc.).
   pub(crate) woice_type: WoiceType,
+  /// Extra pitch tuning from legacy x3x-format data. `0.0` means no additional tuning.
   pub(crate) x3x_tuning: f32,
-  pub(crate) x3x_basic_key: i32,
+  /// Base pitch key from legacy x3x-format data.
+  pub(crate) x3x_basic_key: u32,
+  /// Voice layer design data (one entry per layer).
   pub(crate) voices: Vec<VoiceUnit>,
+  /// Pre-rendered synthesis buffers, one per voice layer. Rebuilt by `tones_ready`.
   pub(crate) instances: Vec<VoiceInstance>,
 }
 
@@ -160,9 +212,9 @@ impl Woice {
     let _size = r.read_i32::<LE>()?;
     // _MATERIALSTRUCT_PCM (24 bytes)
     let _x3x_unit_no = r.read_u16::<LE>()?;
-    let basic_key = r.read_u16::<LE>()? as i32;
+    let basic_key = r.read_u16::<LE>()? as u32;
     let voice_flags = r.read_u32::<LE>()?;
-    let ch = r.read_u16::<LE>()? as u8;
+    let ch_num = r.read_u16::<LE>()? as u8;
     let bps = r.read_u16::<LE>()? as u8;
     let sps = r.read_u32::<LE>()?;
     let tuning = r.read_f32::<LE>()?;
@@ -172,8 +224,8 @@ impl Woice {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let sample_num = data_size * 8 / bps as u32 / ch as u32;
-    let mut pcm = Pcm::create(ch, sps, bps, sample_num)?;
+    let sample_num = data_size * 8 / bps as u32 / ch_num as u32;
+    let mut pcm = Pcm::create(ch_num, sps, bps, sample_num)?;
     r.read_exact(&mut pcm.samples_mut()[..data_size as usize])?;
 
     let unit = VoiceUnit {
@@ -196,7 +248,7 @@ impl Woice {
     let _size = r.read_i32::<LE>()?;
     // _MATERIALSTRUCT_PTN (16 bytes)
     let _x3x_unit_no = r.read_u16::<LE>()?;
-    let basic_key = r.read_u16::<LE>()? as i32;
+    let basic_key = r.read_u16::<LE>()? as u32;
     let voice_flags = r.read_u32::<LE>()?;
     let tuning = r.read_f32::<LE>()?;
     let rrr = r.read_i32::<LE>()?;
@@ -246,7 +298,7 @@ impl Woice {
     let _size = r.read_i32::<LE>()?;
     // _MATERIALSTRUCT_OGGV (12 bytes)
     let _xxx = r.read_u16::<LE>()?;
-    let basic_key = r.read_u16::<LE>()? as i32;
+    let basic_key = r.read_u16::<LE>()? as u32;
     let voice_flags = r.read_u32::<LE>()?;
     let tuning = r.read_f32::<LE>()?;
 
@@ -255,7 +307,7 @@ impl Woice {
     }
 
     // pxtn_read: ch, sps, smp_num, size, data
-    let ch = r.read_u32::<LE>()? as u8;
+    let ch_num = r.read_u32::<LE>()? as u8;
     let sps = r.read_u32::<LE>()?;
     let smp_num = r.read_u32::<LE>()?;
     let size = r.read_i32::<LE>()?;
@@ -268,7 +320,7 @@ impl Woice {
       basic_key,
       tuning,
       ogg_data: Some(OggData {
-        ch,
+        ch_num,
         sps,
         smp_num,
         data,
@@ -296,25 +348,25 @@ impl Woice {
       return Err(PxtoneError::NewFormat);
     }
 
-    let x3x_basic_key = r.read_var_int()?;
-    let work1 = r.read_var_int()?;
-    let work2 = r.read_var_int()?;
+    let x3x_basic_key = r.read_var_u32()?;
+    let work1 = r.read_var_u32()?;
+    let work2 = r.read_var_u32()?;
     if work1 != 0 || work2 != 0 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let voice_num = r.read_var_int()?;
+    let voice_num = r.read_var_u32()?;
 
     self.x3x_basic_key = x3x_basic_key;
     self.voices.clear();
 
     for _ in 0..voice_num {
       let mut unit = VoiceUnit {
-        basic_key: r.read_var_int()?,
-        volume: r.read_var_int()? as u32,
-        pan: r.read_var_int()?,
-        tuning: f32::from_bits(r.read_var_int()? as u32),
-        voice_flags: r.read_var_int()? as u32,
-        data_flags: r.read_var_int()? as u32,
+        basic_key: r.read_var_u32()?,
+        volume: r.read_var_u32()?,
+        pan: r.read_var_u32()?,
+        tuning: f32::from_bits(r.read_var_u32()?),
+        voice_flags: r.read_var_u32()?,
+        data_flags: r.read_var_u32()?,
         ..Default::default()
       };
 
@@ -344,7 +396,7 @@ impl Woice {
     noise_builder: &mut NoiseBuilder,
     freq: &FrequencyTable,
   ) -> Result<(), PxtoneError> {
-    let ch = 2u8;
+    let ch_num = 2u8;
     let sps = 44100u32;
     let bps = 16u8;
 
@@ -354,11 +406,11 @@ impl Woice {
       match unit.voice_type {
         VoiceType::Sampling => {
           if let Some(pcm) = &unit.pcm {
-            let mut work = Pcm::create(pcm.ch, pcm.sps, pcm.bps, pcm.smp_body)?;
+            let mut work = Pcm::create(pcm.ch_num, pcm.sps, pcm.bps, pcm.smp_body)?;
             let src = pcm.samples();
             let copy_len = src.len().min(work.samples().len());
             work.samples_mut()[..copy_len].copy_from_slice(&src[..copy_len]);
-            work.convert(ch, sps, bps)?;
+            work.convert(ch_num, sps, bps)?;
             inst.smp_head_w = work.smp_head;
             inst.smp_body_w = work.smp_body;
             inst.smp_tail_w = work.smp_tail;
@@ -367,14 +419,14 @@ impl Woice {
         }
         VoiceType::Overtone | VoiceType::Coodinate => {
           let smp_body = 400u32;
-          let size = (smp_body * ch as u32 * bps as u32 / 8) as usize;
+          let size = (smp_body * ch_num as u32 * bps as u32 / 8) as usize;
           inst.smp_body_w = smp_body;
           inst.samples_w = vec![0u8; size];
-          update_wave_ptv(unit, &mut inst, ch, sps, bps);
+          update_wave_ptv(unit, &mut inst, ch_num, sps, bps);
         }
         VoiceType::Noise => {
           if let Some(noise) = &mut unit.noise {
-            let pcm = noise_builder.build_noise(noise, ch, sps, bps, freq)?;
+            let pcm = noise_builder.build_noise(noise, ch_num, sps, bps, freq)?;
             inst.smp_body_w = noise.smp_num_44k;
             inst.samples_w = pcm.samples().to_vec();
           }
@@ -382,13 +434,13 @@ impl Woice {
         VoiceType::OggVorbis => {
           if let Some(ogg) = &unit.ogg_data {
             let decoded = decode_ogg(&ogg.data).map_err(PxtoneError::OggVorbis)?;
-            let ogg_ch = ogg.ch;
+            let ogg_ch_num = ogg.ch_num;
             let ogg_sps = ogg.sps;
             let ogg_smp = ogg.smp_num;
-            let mut work = Pcm::create(ogg_ch, ogg_sps, 16, ogg_smp)?;
+            let mut work = Pcm::create(ogg_ch_num, ogg_sps, 16, ogg_smp)?;
             let src = &decoded[..decoded.len().min(work.samples().len())];
             work.samples_mut()[..src.len()].copy_from_slice(src);
-            let _ = work.convert(ch, sps, bps);
+            let _ = work.convert(ch_num, sps, bps);
             inst.smp_head_w = work.smp_head;
             inst.smp_body_w = work.smp_body;
             inst.smp_tail_w = work.smp_tail;
@@ -473,7 +525,7 @@ impl Woice {
 
 // ---- PTV wave-reading helpers ----
 fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneError> {
-  let vtype = r.read_var_int()?;
+  let vtype = r.read_var_u32()?;
   unit.voice_type = match vtype {
     0 => VoiceType::Coodinate,
     1 => VoiceType::Overtone,
@@ -481,9 +533,9 @@ fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneE
   };
   match unit.voice_type {
     VoiceType::Coodinate => {
-      let num = r.read_var_int()?;
-      let reso = r.read_var_int()?;
-      unit.wave.reso = reso as u32;
+      let num = r.read_var_u32()?;
+      let reso = r.read_var_u32()?;
+      unit.wave.reso = reso;
       for _ in 0..num {
         let x = r.read_u8()? as i32;
         let y = r.read_i8()? as i32;
@@ -491,10 +543,10 @@ fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneE
       }
     }
     VoiceType::Overtone => {
-      let num = r.read_var_int()?;
+      let num = r.read_var_u32()?;
       for _ in 0..num {
-        let x = r.read_var_int()?;
-        let y = r.read_var_int()?;
+        let x = r.read_var_i32()?;
+        let y = r.read_var_i32()?;
         unit.wave.points.push((x, y));
       }
     }
@@ -504,10 +556,10 @@ fn ptv_read_wave<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneE
 }
 
 fn ptv_read_envelope<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), PxtoneError> {
-  let fps = r.read_var_int()?;
-  let head_num = r.read_var_int()?;
-  let body_num = r.read_var_int()?;
-  let tail_num = r.read_var_int()?;
+  let fps = r.read_var_u32()?;
+  let head_num = r.read_var_u32()?;
+  let body_num = r.read_var_u32()?;
+  let tail_num = r.read_var_u32()?;
   if body_num != 0 {
     return Err(PxtoneError::UnknownFormat);
   }
@@ -515,25 +567,25 @@ fn ptv_read_envelope<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), Pxt
     return Err(PxtoneError::UnknownFormat);
   }
 
-  unit.envelope.fps = fps as u32;
-  unit.envelope.head_num = head_num as u32;
-  unit.envelope.body_num = body_num as u32;
-  unit.envelope.tail_num = tail_num as u32;
+  unit.envelope.fps = fps;
+  unit.envelope.head_num = head_num;
+  unit.envelope.body_num = body_num;
+  unit.envelope.tail_num = tail_num;
 
   let total = head_num + body_num + tail_num;
   for _ in 0..total {
-    let x = r.read_var_int()?;
-    let y = r.read_var_int()?;
+    let x = r.read_var_i32()?;
+    let y = r.read_var_i32()?;
     unit.envelope.points.push((x, y));
   }
   Ok(())
 }
 
 // ---- PTV wave buffer update ----
-fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch: u8, _sps: u32, bps: u8) {
-  let pan_vol: [i32; 2] = match (ch, unit.pan) {
-    (2, p) if p > 64 => [128 - p, 64],
-    (2, p) if p < 64 => [64, p],
+fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch_num: u8, _sps: u32, bps: u8) {
+  let pan_vol: [i32; 2] = match (ch_num, unit.pan) {
+    (2, p) if p > 64 => [128 - p as i32, 64],
+    (2, p) if p < 64 => [64, p as i32],
     _ => [64, 64],
   };
 
@@ -555,17 +607,17 @@ fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch: u8, _sps: u32
     } else {
       osci.get_one_sample_coodinate(s)
     };
-    for (c, &pv) in pan_vol.iter().enumerate().take(ch as usize) {
+    for (c, &pv) in pan_vol.iter().enumerate().take(ch_num as usize) {
       let raw = osc * pv as f64 / 64.0;
       if raw.abs() > 1.0 {
         inst.b_sine_over = true;
       }
       let work = raw.clamp(-1.0, 1.0);
       if bps == 8 {
-        inst.samples_w[s as usize * ch as usize + c] = ((work * 127.0) as i32 + 128) as u8;
+        inst.samples_w[s as usize * ch_num as usize + c] = ((work * 127.0) as i32 + 128) as u8;
       } else {
         let bytes = ((work * 32767.0) as i16).to_le_bytes();
-        inst.samples_w[(s as usize * ch as usize + c) * 2..][..2].copy_from_slice(&bytes);
+        inst.samples_w[(s as usize * ch_num as usize + c) * 2..][..2].copy_from_slice(&bytes);
       }
     }
   }

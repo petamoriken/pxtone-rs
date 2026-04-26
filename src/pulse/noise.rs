@@ -70,15 +70,15 @@ pub(crate) struct NoiseOscillator {
 
 #[derive(Clone, Debug)]
 pub(crate) struct NoisePoint {
-  pub(crate) x: i32,
-  pub(crate) y: i32,
+  pub(crate) x: u32,
+  pub(crate) y: u32,
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct NoiseUnit {
   pub(crate) enabled: bool,
   pub(crate) envelopes: Vec<NoisePoint>,
-  pub(crate) pan: i32,
+  pub(crate) pan: i8,
   pub(crate) main: NoiseOscillator,
   pub(crate) freq: NoiseOscillator,
   pub(crate) volu: NoiseOscillator,
@@ -103,8 +103,8 @@ const LIMIT_SMP_NUM: u32 = 48000 * 10;
 const LIMIT_OSC_FREQUENCY: f32 = 44100.0;
 const LIMIT_OSC_VOLUME: f32 = 200.0;
 const LIMIT_OSC_OFFSET: f32 = 100.0;
-const LIMIT_ENVE_X: i32 = 1000 * 10;
-const LIMIT_ENVE_Y: i32 = 100;
+const LIMIT_ENVE_X: u32 = 1000 * 10;
+const LIMIT_ENVE_Y: u32 = 100;
 
 // ---- Noise ----
 
@@ -127,8 +127,8 @@ impl Noise {
     for unit in &mut self.units {
       if unit.enabled {
         for env in &mut unit.envelopes {
-          env.x = env.x.clamp(0, LIMIT_ENVE_X);
-          env.y = env.y.clamp(0, LIMIT_ENVE_Y);
+          env.x = env.x.min(LIMIT_ENVE_X);
+          env.y = env.y.min(LIMIT_ENVE_Y);
         }
         unit.pan = unit.pan.clamp(-100, 100);
         fix_osc(&mut unit.main);
@@ -153,15 +153,12 @@ impl Noise {
       return Err(PxtoneError::NewFormat);
     }
 
-    self.smp_num_44k = r.read_var_int()? as u32;
+    self.smp_num_44k = r.read_var_u32()?;
 
     let mut unit_num_byte = [0u8; 1];
     r.read_exact(&mut unit_num_byte)?;
-    let unit_num = unit_num_byte[0] as i32;
-    if unit_num < 0 {
-      return Err(PxtoneError::InvalidData);
-    }
-    if unit_num as usize > MAX_UNIT_NUM {
+    let unit_num = unit_num_byte[0] as usize;
+    if unit_num > MAX_UNIT_NUM {
       return Err(PxtoneError::UnknownFormat);
     }
 
@@ -172,26 +169,26 @@ impl Noise {
         ..Default::default()
       };
 
-      let flags = r.read_var_int()? as u32;
+      let flags = r.read_var_u32()?;
       if flags & FLAG_UNCOVERED != 0 {
         return Err(PxtoneError::UnknownFormat);
       }
 
       if flags & FLAG_ENVELOPE != 0 {
-        let enve_num = r.read_var_int()?;
+        let enve_num = r.read_var_u32()?;
         if enve_num as usize > MAX_ENVELOPE_NUM {
           return Err(PxtoneError::UnknownFormat);
         }
         for _ in 0..enve_num {
-          let x = r.read_var_int()?;
-          let y = r.read_var_int()?;
+          let x = r.read_var_u32()?;
+          let y = r.read_var_u32()?;
           unit.envelopes.push(NoisePoint { x, y });
         }
       }
       if flags & FLAG_PAN != 0 {
         let mut b = [0u8; 1];
         r.read_exact(&mut b)?;
-        unit.pan = b[0] as i8 as i32;
+        unit.pan = b[0] as i8;
       }
       if flags & FLAG_OSC_MAIN != 0 {
         read_oscillator(r, &mut unit.main)?;
@@ -216,15 +213,15 @@ fn fix_osc(osc: &mut NoiseOscillator) {
 }
 
 fn read_oscillator<R: Read>(r: &mut R, osc: &mut NoiseOscillator) -> Result<(), PxtoneError> {
-  let type_val = r.read_var_int()?;
+  let type_val = r.read_var_i32()?;
   osc.wave_type = WaveType::try_from(type_val).map_err(|_| PxtoneError::UnknownFormat)?;
-  let b_rev = r.read_var_int()?;
+  let b_rev = r.read_var_u32()?;
   osc.b_rev = b_rev != 0;
-  let freq = r.read_var_int()?;
+  let freq = r.read_var_u32()?;
   osc.freq = freq as f32 / 10.0;
-  let volume = r.read_var_int()?;
+  let volume = r.read_var_u32()?;
   osc.volume = volume as f32 / 10.0;
-  let offset = r.read_var_int()?;
+  let offset = r.read_var_u32()?;
   osc.offset = offset as f32 / 10.0;
   Ok(())
 }

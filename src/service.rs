@@ -53,7 +53,9 @@ enum FmtVer {
 /// Output audio quality (channel count and sample rate) used for playback and rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DestinationQuality {
+  /// Number of output channels. `1` = mono, `2` = stereo.
   pub ch_num: u8,
+  /// Sample rate in Hz (samples per second).
   pub sps: u32,
 }
 
@@ -67,9 +69,13 @@ impl Default for DestinationQuality {
 }
 
 /// Rendered audio returned by [`PxtoneService::render_noise`].
+#[derive(Debug, Clone)]
 pub struct NoiseWave {
+  /// Raw PCM audio data in 16-bit little-endian signed format.
   pub samples: Vec<u8>,
+  /// Number of channels. `1` = mono, `2` = stereo.
   pub ch_num: u8,
+  /// Sample rate in Hz (samples per second).
   pub sps: u32,
 }
 
@@ -77,20 +83,31 @@ pub struct NoiseWave {
 pub struct VomitPrepFlags;
 
 impl VomitPrepFlags {
+  /// Mute units whose [`Unit::played`](crate::unit::Unit::played) flag is `false`.
   pub const UNIT_MUTE: u8 = 0x1;
+  /// Loop playback from [`VomitPreparation::meas_repeat`] when the end is reached.
   pub const LOOP: u8 = 0x2;
 }
 
 /// Playback settings passed to [`PxtoneService::moo_preparation`].
 #[derive(Clone)]
 pub struct VomitPreparation {
+  /// Combination of [`VomitPrepFlags`] constants.
   pub flags: u8,
-  pub start_pos_meas: i32,
-  pub start_pos_sample: i32,
+  /// Start position in measures. Ignored when `start_pos_float` or `start_pos_sample` is nonzero.
+  pub start_pos_meas: u32,
+  /// Start position in samples. Overrides `start_pos_meas`; ignored when `start_pos_float` is nonzero.
+  pub start_pos_sample: u32,
+  /// Start position as a fraction of the total song length (`0.0`–`1.0`).
+  /// When nonzero, takes priority over `start_pos_sample` and `start_pos_meas`.
   pub start_pos_float: f32,
-  pub meas_end: Option<i32>,
-  pub meas_repeat: Option<i32>,
+  /// Measure at which playback ends. `None` uses the song's natural end.
+  pub meas_end: Option<u32>,
+  /// Measure to loop back to when the end is reached. `None` uses the song's repeat point.
+  pub meas_repeat: Option<u32>,
+  /// Fade-in duration in seconds. `0.0` means no fade-in.
   pub fadein_sec: f32,
+  /// Master volume scale factor. `1.0` is full volume.
   pub master_volume: f32,
 }
 
@@ -551,7 +568,7 @@ impl PxtoneService {
     use crate::event::EVENTKIND_KEY;
     let unit_num = self.units.len().min(self.woices.len());
     for u in 0..unit_num {
-      let change = self.woices[u].x3x_basic_key - EVENTDEFAULT_BASICKEY;
+      let change = self.woices[u].x3x_basic_key as i32 - EVENTDEFAULT_BASICKEY as i32;
       let has_key = self
         .events
         .records()
@@ -627,10 +644,8 @@ impl PxtoneService {
     let start_meas = prep.start_pos_meas;
     let start_sample = prep.start_pos_sample;
     let start_float = prep.start_pos_float;
-    let meas_end = prep
-      .meas_end
-      .unwrap_or_else(|| self.master.get_play_meas() as i32);
-    let meas_repeat = prep.meas_repeat.unwrap_or(self.master.repeat_meas as i32);
+    let meas_end = prep.meas_end.unwrap_or_else(|| self.master.get_play_meas());
+    let meas_repeat = prep.meas_repeat.unwrap_or(self.master.repeat_meas);
     let fadein_sec = prep.fadein_sec;
     self.moo_b_mute_by_unit = prep.flags & VomitPrepFlags::UNIT_MUTE != 0;
     self.moo_b_loop = prep.flags & VomitPrepFlags::LOOP != 0;
@@ -653,7 +668,7 @@ impl PxtoneService {
       let total = self.calc_total_sample();
       (total as f32 * start_float) as u32
     } else if start_sample != 0 {
-      start_sample.max(0) as u32
+      start_sample
     } else {
       (start_meas as f64 * bt) as u32
     };
@@ -742,7 +757,10 @@ impl PxtoneService {
           0.0
         }
       } else {
-        self.freq.get(EVENTDEFAULT_BASICKEY - basic_key) * tuning
+        self
+          .freq
+          .get(EVENTDEFAULT_BASICKEY as i32 - basic_key as i32)
+          * tuning
       };
 
       let env_rls_clock = if clock_rate > 0.0 {
@@ -1051,9 +1069,9 @@ impl PxtoneService {
 
   /// Returns the current playback position in ticks.
   #[inline]
-  pub fn moo_get_now_clock(&self) -> i32 {
+  pub fn moo_get_now_clock(&self) -> u32 {
     if self.moo_clock_rate > 0.0 {
-      (self.moo_smp_count as f64 / self.moo_clock_rate) as i32
+      (self.moo_smp_count as f64 / self.moo_clock_rate) as u32
     } else {
       0
     }
@@ -1061,9 +1079,9 @@ impl PxtoneService {
 
   /// Returns the tick position at which playback will end.
   #[inline]
-  pub fn moo_get_end_clock(&self) -> i32 {
+  pub fn moo_get_end_clock(&self) -> u32 {
     if self.moo_clock_rate > 0.0 {
-      (self.moo_smp_end as f64 / self.moo_clock_rate) as i32
+      (self.moo_smp_end as f64 / self.moo_clock_rate) as u32
     } else {
       0
     }
