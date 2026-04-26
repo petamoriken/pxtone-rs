@@ -323,7 +323,7 @@ impl NoiseBuilder {
   pub(crate) fn build_noise(
     &mut self,
     noise: &mut Noise,
-    ch: usize,
+    ch: u8,
     sps: u32,
     bps: u8,
     freq: &FrequencyTable,
@@ -342,7 +342,7 @@ impl NoiseBuilder {
     let rand_tbl = self.tables[WaveType::Random as usize]
       .as_deref()
       .unwrap_or(&[]);
-    let smp_num = (noise.smp_num_44k as f64 / (44100.0 / sps as f64)) as usize;
+    let smp_num = (noise.smp_num_44k as f64 / (44100.0 / sps as f64)) as u32;
 
     // Build unit states
     let mut units: Vec<UnitState> = noise
@@ -390,33 +390,32 @@ impl NoiseBuilder {
       })
       .collect();
 
-    let mut pcm = Pcm::create(ch as u8, sps, bps, smp_num as u32)?;
+    let mut pcm = Pcm::create(ch, sps, bps, smp_num)?;
     let buf = pcm.samples_mut();
     let mut buf_pos = 0usize;
 
-    for _ in 0..smp_num {
-      for c in 0..ch {
-        let mut store = 0.0f64;
-        for u in units.iter() {
-          if !u.enabled {
-            continue;
-          }
-          let work = u.main.get_sample(&self.tables);
-          let vol = u.volu.get_sample(&self.tables);
-          let mut work = work * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0);
-          work *= u.pan[c];
-          if u.enve_index < u.enves.len() {
-            let smp = u.enves[u.enve_index].0;
-            if smp > 0 {
-              work *= u.enve_mag_start + u.enve_mag_margin * u.enve_count as f64 / smp as f64;
+    for _ in 0..smp_num as usize {
+      for c in 0..ch as usize {
+        let store: f64 = units
+          .iter()
+          .filter(|u| u.enabled)
+          .map(|u| {
+            let main = u.main.get_sample(&self.tables);
+            let vol = u.volu.get_sample(&self.tables);
+            let work = main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0) * u.pan[c];
+            let envelope = if u.enve_index < u.enves.len() {
+              let smp = u.enves[u.enve_index].0;
+              if smp > 0 {
+                u.enve_mag_start + u.enve_mag_margin * u.enve_count as f64 / smp as f64
+              } else {
+                u.enve_mag_start
+              }
             } else {
-              work *= u.enve_mag_start;
-            }
-          } else {
-            work *= u.enve_mag_start;
-          }
-          store += work;
-        }
+              u.enve_mag_start
+            };
+            work * envelope
+          })
+          .sum();
         let byte4 = (store as i32).clamp(-SAMPLING_TOP as i32, SAMPLING_TOP as i32);
         if bps == 8 {
           buf[buf_pos] = ((byte4 >> 8) + 128) as u8;

@@ -119,10 +119,11 @@ impl VoiceInstance {
   #[inline]
   pub(crate) fn get_sample_i16(&self, frame: usize, ch: usize) -> i16 {
     let offset = frame * 4 + ch * 2;
-    if offset + 1 >= self.samples_w.len() {
-      return 0;
-    }
-    i16::from_le_bytes([self.samples_w[offset], self.samples_w[offset + 1]])
+    self
+      .samples_w
+      .get(offset..offset + 2)
+      .map(|b| i16::from_le_bytes([b[0], b[1]]))
+      .unwrap_or(0)
   }
 }
 
@@ -373,7 +374,7 @@ impl Woice {
         }
         VoiceType::Noise => {
           if let Some(noise) = &mut unit.noise {
-            let pcm = noise_builder.build_noise(noise, ch as usize, sps, bps, freq)?;
+            let pcm = noise_builder.build_noise(noise, ch, sps, bps, freq)?;
             inst.smp_body_w = noise.smp_num_44k;
             inst.samples_w = pcm.samples().to_vec();
           }
@@ -409,10 +410,10 @@ impl Woice {
       inst.env_release = 0;
 
       if env.head_num > 0 {
-        let mut size = 0i32;
-        for e in 0..env.head_num as usize {
-          size += env.points[e].0;
-        }
+        let size: i32 = env.points[..env.head_num as usize]
+          .iter()
+          .map(|p| p.0)
+          .sum();
         inst.env_size = (size as f64 * sps as f64 / env.fps as f64) as u32;
         if inst.env_size == 0 {
           inst.env_size = 1;
@@ -421,14 +422,15 @@ impl Woice {
         inst.env = vec![0u8; inst.env_size as usize];
 
         // Convert points to sps scale
-        let mut pts: Vec<(i32, i32)> = Vec::new();
-        let mut offset = 0i32;
-        for e in 0..env.head_num as usize {
-          if e == 0 || env.points[e].0 != 0 || env.points[e].1 != 0 {
-            offset += (env.points[e].0 as f64 * sps as f64 / env.fps as f64) as i32;
-            pts.push((offset, env.points[e].1));
-          }
-        }
+        let pts: Vec<(i32, i32)> = env.points[..env.head_num as usize]
+          .iter()
+          .enumerate()
+          .filter(|&(e, p)| e == 0 || p.0 != 0 || p.1 != 0)
+          .scan(0i32, |offset, (_, p)| {
+            *offset += (p.0 as f64 * sps as f64 / env.fps as f64) as i32;
+            Some((*offset, p.1))
+          })
+          .collect();
 
         // Fill the envelope table with linear interpolation
         let mut e = 0usize;
@@ -529,16 +531,10 @@ fn ptv_read_envelope<R: Read>(r: &mut R, unit: &mut VoiceUnit) -> Result<(), Pxt
 
 // ---- PTV wave buffer update ----
 fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch: u8, _sps: u32, bps: u8) {
-  let pan_vol: [i32; 2] = if ch == 2 {
-    if unit.pan > 64 {
-      [128 - unit.pan, 64]
-    } else if unit.pan < 64 {
-      [64, unit.pan]
-    } else {
-      [64, 64]
-    }
-  } else {
-    [64, 64]
+  let pan_vol: [i32; 2] = match (ch, unit.pan) {
+    (2, p) if p > 64 => [128 - p, 64],
+    (2, p) if p < 64 => [64, p],
+    _ => [64, 64],
   };
 
   let pts: Vec<Point> = unit
@@ -553,48 +549,23 @@ fn update_wave_ptv(unit: &VoiceUnit, inst: &mut VoiceInstance, ch: u8, _sps: u32
   let b_ovt = unit.voice_type == VoiceType::Overtone;
 
   inst.b_sine_over = false;
-  if bps == 8 {
-    for s in 0..inst.smp_body_w {
-      let osc = if b_ovt {
-        osci.get_one_sample_overtone(s)
-      } else {
-        osci.get_one_sample_coodinate(s)
-      };
-      for (c, &pv) in pan_vol.iter().enumerate().take(ch as usize) {
-        let mut work = osc * pv as f64 / 64.0;
-        if work > 1.0 {
-          work = 1.0;
-          inst.b_sine_over = true;
-        }
-        if work < -1.0 {
-          work = -1.0;
-          inst.b_sine_over = true;
-        }
-        inst.samples_w[s as usize * ch as usize + c] = ((work * 127.0) as i32 + 128) as u8;
+  for s in 0..inst.smp_body_w {
+    let osc = if b_ovt {
+      osci.get_one_sample_overtone(s)
+    } else {
+      osci.get_one_sample_coodinate(s)
+    };
+    for (c, &pv) in pan_vol.iter().enumerate().take(ch as usize) {
+      let raw = osc * pv as f64 / 64.0;
+      if raw.abs() > 1.0 {
+        inst.b_sine_over = true;
       }
-    }
-  } else {
-    for s in 0..inst.smp_body_w {
-      let osc = if b_ovt {
-        osci.get_one_sample_overtone(s)
+      let work = raw.clamp(-1.0, 1.0);
+      if bps == 8 {
+        inst.samples_w[s as usize * ch as usize + c] = ((work * 127.0) as i32 + 128) as u8;
       } else {
-        osci.get_one_sample_coodinate(s)
-      };
-      for (c, &pv) in pan_vol.iter().enumerate().take(ch as usize) {
-        let mut work = osc * pv as f64 / 64.0;
-        if work > 1.0 {
-          work = 1.0;
-          inst.b_sine_over = true;
-        }
-        if work < -1.0 {
-          work = -1.0;
-          inst.b_sine_over = true;
-        }
-        let v = (work * 32767.0) as i16;
-        let bytes = v.to_le_bytes();
-        let idx = (s as usize * ch as usize + c) * 2;
-        inst.samples_w[idx] = bytes[0];
-        inst.samples_w[idx + 1] = bytes[1];
+        let bytes = ((work * 32767.0) as i16).to_le_bytes();
+        inst.samples_w[(s as usize * ch as usize + c) * 2..][..2].copy_from_slice(&bytes);
       }
     }
   }
@@ -617,11 +588,6 @@ fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, String> {
   }
 
   // i16 → u8 LE byte sequence
-  let mut out = vec![0u8; pcm_i16.len() * 2];
-  for (i, &s) in pcm_i16.iter().enumerate() {
-    let bytes = s.to_le_bytes();
-    out[i * 2] = bytes[0];
-    out[i * 2 + 1] = bytes[1];
-  }
+  let out: Vec<u8> = pcm_i16.iter().flat_map(|&s| s.to_le_bytes()).collect();
   Ok(out)
 }

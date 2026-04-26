@@ -107,9 +107,7 @@ impl Delay {
 
   pub(crate) fn tone_clear(&mut self) {
     for buf in &mut self.bufs {
-      for v in buf.iter_mut() {
-        *v = 0;
-      }
+      buf.fill(0);
     }
   }
 

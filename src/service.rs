@@ -246,13 +246,10 @@ impl PxtoneService {
   pub fn render_noise<R: Read>(&mut self, r: &mut R) -> Result<NoiseWave, PxtoneError> {
     let mut noise = Noise::new();
     noise.read(r)?;
-    let pcm = self.noise_builder.build_noise(
-      &mut noise,
-      self.dst_ch_num as usize,
-      self.dst_sps,
-      16,
-      &self.freq,
-    )?;
+    let pcm =
+      self
+        .noise_builder
+        .build_noise(&mut noise, self.dst_ch_num, self.dst_sps, 16, &self.freq)?;
     Ok(NoiseWave {
       samples: pcm.samples().to_vec(),
       ch_num: self.dst_ch_num,
@@ -759,8 +756,7 @@ impl PxtoneService {
   }
 
   fn moo_init_unit_tone(&mut self) {
-    let unit_num = self.units.len();
-    for u in 0..unit_num {
+    for u in 0..self.units.len() {
       self.units[u].tone_init();
       self.moo_reset_voice_on(u, EVENTDEFAULT_VOICENO);
     }
@@ -810,7 +806,7 @@ impl PxtoneService {
         continue;
       }
 
-      self.process_event(&ev, u, clock, smp_end, clock_rate, event_count);
+      self.process_event(&ev, u, clock, smp_end, clock_rate);
     }
 
     // ---- 3. Tone_Sample ----
@@ -827,9 +823,7 @@ impl PxtoneService {
     let mut group_smps = vec![0i32; group_num];
 
     for (ch, out_sample) in out.iter_mut().enumerate().take(ch_num) {
-      for smp in group_smps.iter_mut().take(group_num) {
-        *smp = 0;
-      }
+      group_smps.fill(0);
 
       for u in 0..unit_num {
         self.units[u].tone_supple(&mut group_smps, ch, time_pan_idx);
@@ -911,7 +905,6 @@ impl PxtoneService {
     clock: i32,
     smp_end: u32,
     clock_rate: f64,
-    event_count: usize,
   ) {
     match ev.kind {
       EVENTKIND_ON => {
@@ -953,17 +946,12 @@ impl PxtoneService {
             let c_limit = ev.clock + ev.value + tone_rls_clock;
             let mut max_life2 = smp_end as i32 - (clock as f64 * clock_rate) as i32;
 
-            for ne_idx in self.moo_eve_idx..event_count {
-              let ne_clock = self.events.records()[ne_idx].clock;
-              let ne_unit = self.events.records()[ne_idx].unit_no;
-              let ne_kind = self.events.records()[ne_idx].kind;
-              if ne_clock > c_limit {
-                break;
-              }
-              if ne_unit == ev.unit_no && ne_kind == EVENTKIND_ON {
-                max_life2 = ((ne_clock - clock) as f64 * clock_rate) as i32;
-                break;
-              }
+            if let Some(ne) = self.events.records()[self.moo_eve_idx..]
+              .iter()
+              .take_while(|e| e.clock <= c_limit)
+              .find(|e| e.unit_no == ev.unit_no && e.kind == EVENTKIND_ON)
+            {
+              max_life2 = ((ne.clock - clock) as f64 * clock_rate) as i32;
             }
             max_life1.min(max_life2)
           } else {
@@ -1024,7 +1012,6 @@ impl PxtoneService {
       return false;
     }
     let _smp_num = buf.len() / byte_per_smp;
-    let ch_num = self.dst_ch_num as usize;
 
     let mut smp_written = 0usize;
     for chunk in buf.chunks_exact_mut(byte_per_smp) {
@@ -1033,10 +1020,8 @@ impl PxtoneService {
         self.b_end_vomit = true;
         break;
       }
-      for ch in 0..ch_num {
-        let bytes = sample[ch].to_le_bytes();
-        chunk[ch * 2] = bytes[0];
-        chunk[ch * 2 + 1] = bytes[1];
+      for (ch_bytes, &s) in chunk.chunks_exact_mut(2).zip(sample.iter()) {
+        ch_bytes.copy_from_slice(&s.to_le_bytes());
       }
       smp_written += 1;
     }

@@ -86,17 +86,13 @@ impl Unit {
     self.v_tuning = EVENTDEFAULT_TUNING;
     self.portament_sample_num = 0;
     self.portament_sample_pos = 0;
-    for i in 0..MAX_CHANNEL {
-      self.pan_vols[i] = 64;
-      self.pan_times[i] = 0;
-    }
+    self.pan_vols.fill(64);
+    self.pan_times.fill(0);
   }
 
   pub(crate) fn tone_clear(&mut self) {
-    for ch in 0..MAX_CHANNEL {
-      for v in &mut self.pan_time_bufs[ch] {
-        *v = 0;
-      }
+    for buf in &mut self.pan_time_bufs {
+      buf.fill(0);
     }
   }
 
@@ -125,8 +121,8 @@ impl Unit {
 
   #[inline]
   pub(crate) fn tone_zero_lives(&mut self) {
-    for i in 0..MAX_UNIT_CONTROL_VOICE {
-      self.tones[i].life_count = 0;
+    for t in &mut self.tones {
+      t.life_count = 0;
     }
   }
 

@@ -66,16 +66,8 @@ const PRIORITY_TABLE: [u8; EVENTKIND_NUM] = [
 
 #[inline]
 fn compare_priority(kind1: u8, kind2: u8) -> i16 {
-  let p1 = if (kind1 as usize) < EVENTKIND_NUM {
-    PRIORITY_TABLE[kind1 as usize] as i16
-  } else {
-    0
-  };
-  let p2 = if (kind2 as usize) < EVENTKIND_NUM {
-    PRIORITY_TABLE[kind2 as usize] as i16
-  } else {
-    0
-  };
+  let p1 = PRIORITY_TABLE.get(kind1 as usize).copied().unwrap_or(0) as i16;
+  let p2 = PRIORITY_TABLE.get(kind2 as usize).copied().unwrap_or(0) as i16;
   p1 - p2
 }
 

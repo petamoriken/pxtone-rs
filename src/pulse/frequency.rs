@@ -67,14 +67,14 @@ impl FrequencyTable {
     let step = get_divide_octave_rate(KEY_PER_OCTAVE * FREQUENCY_PER_KEY);
 
     let mut table = Box::new([0.0f32; TABLE_SIZE]);
-    for f in 0..TABLE_SIZE {
+    for (f, entry) in table.iter_mut().enumerate() {
       let oct_idx = f / (KEY_PER_OCTAVE * FREQUENCY_PER_KEY);
       let sub_idx = f % (KEY_PER_OCTAVE * FREQUENCY_PER_KEY);
       let mut work = oct_table[oct_idx];
       for _ in 0..sub_idx {
         work *= step;
       }
-      table[f] = work as f32;
+      *entry = work as f32;
     }
 
     Self { table }
