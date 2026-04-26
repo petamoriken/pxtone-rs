@@ -1,40 +1,41 @@
 use std::io;
 
+/// Error type returned by pxtone operations.
 #[derive(Debug)]
 pub enum PxtoneError {
-  /// I/O error
+  /// An I/O error occurred while reading the file.
   Io(io::Error),
-  /// Unknown file format
+  /// The file is not a recognized pxtone format.
   UnknownFormat,
-  /// File format version is too new
+  /// The file was created by a newer version and cannot be decoded.
   NewFormat,
-  /// File is corrupted
+  /// The file is corrupted or truncated.
   BrokenFile,
-  /// Unsupported format
+  /// The format is valid but not supported by this decoder.
   Unsupported(&'static str),
-  /// Ogg Vorbis decode error
+  /// The embedded Ogg Vorbis audio could not be decoded.
   OggVorbis(String),
-  /// PCM conversion error
+  /// Audio format conversion failed.
   PcmConvert,
-  /// Invalid code
+  /// A required chunk header was not found.
   InvalidCode,
-  /// Invalid data
+  /// A field value is out of the expected range.
   InvalidData,
-  /// Anti-operation (editing forbidden)
+  /// The requested operation is not permitted for this file.
   AntiOperation,
-  /// Beat clock denied
+  /// The beat clock value is not accepted.
   DenyBeatClock,
-  /// Woice table is full
+  /// The instrument table is full; no more instruments can be added.
   WoiceFull,
-  /// Too many events
+  /// The event list has reached its maximum capacity.
   TooMuchEvent,
-  /// x3x tuning error
+  /// The tuning data is incompatible with this format version.
   X3xTuning,
-  /// x1x format is ignored
+  /// This file uses a legacy format (version 1.x) that is not supported.
   X1xIgnore,
-  /// Initialization error
+  /// The service was not properly initialized before use.
   Init,
-  /// General error
+  /// An unspecified error occurred.
   Other(&'static str),
 }
 

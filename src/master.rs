@@ -7,6 +7,7 @@ use crate::read_ext::ReadExt;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
+/// Song-level timing parameters loaded from the file.
 #[derive(Debug)]
 pub struct Master {
   pub(crate) beat_num: u8,
@@ -35,21 +36,32 @@ impl Master {
     Self::default()
   }
 
+  /// Returns the number of ticks per beat.
   pub fn beat_clock(&self) -> u16 {
     self.beat_clock
   }
+
+  /// Returns the number of beats per measure.
   pub fn beat_num(&self) -> u8 {
     self.beat_num
   }
+
+  /// Returns the tempo in beats per minute.
   pub fn beat_tempo(&self) -> f32 {
     self.beat_tempo
   }
+
+  /// Returns the total length of the song in measures.
   pub fn meas_num(&self) -> u32 {
     self.meas_num
   }
+
+  /// Returns the loop start position in measures. `0` means no loop point is set.
   pub fn repeat_meas(&self) -> u32 {
     self.repeat_meas
   }
+
+  /// Returns the loop end position in measures. `0` means use the full song length.
   pub fn last_meas(&self) -> u32 {
     self.last_meas
   }
@@ -88,9 +100,9 @@ impl Master {
     self.last_meas = meas;
   }
 
-  /// Reads a v5-format Master block
-  /// Block: u32 size(=15), i16 beat_clock, u8 beat_num, f32 beat_tempo,
-  ///        i32 clock_repeat, i32 clock_last
+  // Reads a v5-format Master block.
+  // Block: u32 size(=15), i16 beat_clock, u8 beat_num, f32 beat_tempo,
+  //        i32 clock_repeat, i32 clock_last
   pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let size = r.read_u32::<LE>()?;
     if size != 15 {
@@ -116,7 +128,7 @@ impl Master {
     Ok(())
   }
 
-  /// Reads an x4x-format Master block
+  // Reads an x4x-format Master block.
   pub(crate) fn read_x4x<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let data_num = r.read_u16::<LE>()?;

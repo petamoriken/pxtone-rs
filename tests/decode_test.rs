@@ -3,7 +3,7 @@ use pxtone::{PxtoneService, VomitPreparation};
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::Path;
-use toml::Table;
+use toml::{Table, Value};
 
 fn decode_shift_jis(raw: &[u8]) -> String {
   SHIFT_JIS.decode(raw).0.into_owned()
@@ -20,14 +20,34 @@ fn load_service(service: &mut PxtoneService, path: &Path) {
     .unwrap_or_else(|e| panic!("{}: tones_ready failed: {:?}", path.display(), e));
 }
 
-fn decode_to_wav(service: &mut PxtoneService) -> Vec<u8> {
+fn pcm_to_wav(samples: &[u8], ch_num: u8, sps: u32) -> Vec<u8> {
+  let data_len = samples.len() as u32;
+  let byte_rate = sps * ch_num as u32 * 2;
+  let mut wav = Vec::with_capacity(44 + samples.len());
+  wav.extend_from_slice(b"RIFF");
+  wav.extend_from_slice(&(36u32 + data_len).to_le_bytes());
+  wav.extend_from_slice(b"WAVE");
+  wav.extend_from_slice(b"fmt ");
+  wav.extend_from_slice(&16u32.to_le_bytes());
+  wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+  wav.extend_from_slice(&(ch_num as u16).to_le_bytes());
+  wav.extend_from_slice(&sps.to_le_bytes());
+  wav.extend_from_slice(&byte_rate.to_le_bytes());
+  wav.extend_from_slice(&(ch_num as u16 * 2).to_le_bytes());
+  wav.extend_from_slice(&16u16.to_le_bytes());
+  wav.extend_from_slice(b"data");
+  wav.extend_from_slice(&data_len.to_le_bytes());
+  wav.extend_from_slice(samples);
+  wav
+}
+
+fn decode_ptcop_to_wav(service: &mut PxtoneService) -> Vec<u8> {
   service
     .moo_preparation(VomitPreparation::default())
     .expect("moo_preparation failed");
 
   let q = service.get_destination_quality();
-  let (ch, sps) = (q.ch_num, q.sps);
-  let bytes_per_frame = (ch * 2) as usize;
+  let bytes_per_frame = (q.ch_num * 2) as usize;
   let mut chunk = vec![0u8; bytes_per_frame * 4096];
   let mut pcm = Vec::new();
 
@@ -38,28 +58,10 @@ fn decode_to_wav(service: &mut PxtoneService) -> Vec<u8> {
     pcm.extend_from_slice(&chunk);
   }
 
-  let data_len = pcm.len() as u32;
-  let byte_rate = sps as u32 * ch as u32 * 2;
-  let mut wav = Vec::with_capacity(44 + pcm.len());
-  wav.extend_from_slice(b"RIFF");
-  wav.extend_from_slice(&(36u32 + data_len).to_le_bytes());
-  wav.extend_from_slice(b"WAVE");
-  wav.extend_from_slice(b"fmt ");
-  wav.extend_from_slice(&16u32.to_le_bytes());
-  wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
-  wav.extend_from_slice(&(ch as u16).to_le_bytes());
-  wav.extend_from_slice(&(sps as u32).to_le_bytes());
-  wav.extend_from_slice(&byte_rate.to_le_bytes());
-  wav.extend_from_slice(&(ch as u16 * 2).to_le_bytes());
-  wav.extend_from_slice(&16u16.to_le_bytes());
-  wav.extend_from_slice(b"data");
-  wav.extend_from_slice(&data_len.to_le_bytes());
-  wav.extend_from_slice(&pcm);
-  wav
+  pcm_to_wav(&pcm, q.ch_num, q.sps)
 }
 
 fn decode_to_metadata(service: &PxtoneService) -> String {
-  use toml::Value;
   let m = &service.master;
   let t = &service.text;
   let mut table = Table::new();
@@ -81,13 +83,13 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
 }
 
 #[test]
-fn decoded_wav_matches_reference() {
+fn decoded_ptcop_matches_reference() {
   let update = std::env::var("UPDATE_SNAPSHOTS").is_ok();
-  let sample_dir = Path::new("tests/sample");
-  let snapshot_dir = Path::new("tests/snapshots");
+  let sample_dir = Path::new("tests/sample/ptcop");
+  let snapshot_dir = Path::new("tests/snapshots/ptcop");
 
   let mut entries: Vec<_> = fs::read_dir(sample_dir)
-    .expect("tests/sample directory not found")
+    .expect("tests/sample/ptcop directory not found")
     .filter_map(|e| e.ok())
     .filter(|e| e.path().extension().map_or(false, |ext| ext == "ptcop"))
     .collect();
@@ -95,7 +97,7 @@ fn decoded_wav_matches_reference() {
 
   assert!(
     !entries.is_empty(),
-    "no .ptcop files found in tests/sample/"
+    "no .ptcop files found in tests/sample/ptcop/"
   );
 
   let mut service = PxtoneService::new();
@@ -108,7 +110,7 @@ fn decoded_wav_matches_reference() {
     let toml_path = snapshot_dir.join(format!("{}.toml", stem));
 
     load_service(&mut service, &ptcop_path);
-    let wav = decode_to_wav(&mut service);
+    let wav = decode_ptcop_to_wav(&mut service);
     let metadata = decode_to_metadata(&service);
 
     if update {
@@ -119,14 +121,88 @@ fn decoded_wav_matches_reference() {
       continue;
     }
 
-    // WAV comparison
     let expected_wav = fs::read(&wav_path)
       .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", wav_path.display(), e));
     if wav != expected_wav {
       failures.push(wav_path.display().to_string());
     }
 
-    // Metadata comparison (via TOML parse to ignore formatting differences)
+    let expected_txt = fs::read_to_string(&toml_path)
+      .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", toml_path.display(), e));
+    let actual_toml: Table = metadata
+      .parse()
+      .expect("generated metadata is not valid TOML");
+    let expected_toml: Table = expected_txt
+      .parse()
+      .unwrap_or_else(|e| panic!("{}: invalid TOML: {}", toml_path.display(), e));
+    if actual_toml != expected_toml {
+      failures.push(toml_path.display().to_string());
+    }
+  }
+
+  assert!(
+    failures.is_empty(),
+    "Decoded output does not match reference ({} file(s)):\n{}",
+    failures.len(),
+    failures.join("\n")
+  );
+}
+
+#[test]
+fn decoded_ptnoise_matches_reference() {
+  let update = std::env::var("UPDATE_SNAPSHOTS").is_ok();
+  let sample_dir = Path::new("tests/sample/ptnoise");
+  let snapshot_dir = Path::new("tests/snapshots/ptnoise");
+
+  let mut entries: Vec<_> = fs::read_dir(sample_dir)
+    .expect("tests/sample/ptnoise directory not found")
+    .filter_map(|e| e.ok())
+    .filter(|e| e.path().extension().map_or(false, |ext| ext == "ptnoise"))
+    .collect();
+  entries.sort_by_key(|e| e.file_name());
+
+  assert!(
+    !entries.is_empty(),
+    "no .ptnoise files found in tests/sample/ptnoise/"
+  );
+
+  let mut service = PxtoneService::new();
+  let mut failures = Vec::new();
+
+  for entry in &entries {
+    let ptnoise_path = entry.path();
+    let stem = ptnoise_path.file_stem().unwrap().to_string_lossy();
+    let wav_path = snapshot_dir.join(format!("{}.wav", stem));
+    let toml_path = snapshot_dir.join(format!("{}.toml", stem));
+
+    let file =
+      File::open(&ptnoise_path).unwrap_or_else(|e| panic!("{}: {}", ptnoise_path.display(), e));
+    let mut reader = BufReader::new(file);
+    let noise_wave = service
+      .render_noise(&mut reader)
+      .unwrap_or_else(|e| panic!("{}: render_noise failed: {:?}", ptnoise_path.display(), e));
+
+    let wav = pcm_to_wav(&noise_wave.samples, noise_wave.ch_num, noise_wave.sps);
+
+    let mut table = Table::new();
+    table.insert("ch".into(), Value::Integer(noise_wave.ch_num as i64));
+    table.insert("sps".into(), Value::Integer(noise_wave.sps as i64));
+    let metadata = toml::to_string(&table).unwrap();
+
+    if update {
+      fs::write(&wav_path, &wav)
+        .unwrap_or_else(|e| panic!("{}: failed to write snapshot: {}", wav_path.display(), e));
+      fs::write(&toml_path, &metadata)
+        .unwrap_or_else(|e| panic!("{}: failed to write snapshot: {}", toml_path.display(), e));
+      continue;
+    }
+
+    let expected_wav = fs::read(&wav_path)
+      .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", wav_path.display(), e));
+    if wav != expected_wav {
+      failures.push(wav_path.display().to_string());
+    }
+
     let expected_txt = fs::read_to_string(&toml_path)
       .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", toml_path.display(), e));
     let actual_toml: Table = metadata

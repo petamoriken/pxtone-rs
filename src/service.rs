@@ -8,6 +8,7 @@ use crate::event::{
 };
 use crate::master::Master;
 use crate::pulse::frequency::FrequencyTable;
+use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
 use crate::text::Text;
 use crate::unit::Unit;
@@ -49,6 +50,7 @@ enum FmtVer {
 
 // ---- Public API ----
 
+/// Output audio quality (channel count and sample rate) used for playback and rendering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DestinationQuality {
   pub ch_num: u8,
@@ -57,10 +59,21 @@ pub struct DestinationQuality {
 
 impl Default for DestinationQuality {
   fn default() -> Self {
-    Self { ch_num: 2, sps: 44100 }
+    Self {
+      ch_num: 2,
+      sps: 44100,
+    }
   }
 }
 
+/// Rendered audio returned by [`PxtoneService::render_noise`].
+pub struct NoiseWave {
+  pub samples: Vec<u8>,
+  pub ch_num: u8,
+  pub sps: u32,
+}
+
+/// Flag constants for [`VomitPreparation::flags`].
 pub struct VomitPrepFlags;
 
 impl VomitPrepFlags {
@@ -68,6 +81,7 @@ impl VomitPrepFlags {
   pub const LOOP: u8 = 0x2;
 }
 
+/// Playback settings passed to [`PxtoneService::moo_preparation`].
 #[derive(Clone)]
 pub struct VomitPreparation {
   pub flags: u8,
@@ -97,6 +111,28 @@ impl Default for VomitPreparation {
 
 // ---- PxtoneService ----
 
+/// Decoder and playback engine for pxtone music files (`.ptcop`).
+///
+/// # Typical usage
+///
+/// ```no_run
+/// use pxtone::{PxtoneService, VomitPreparation};
+/// use std::fs::File;
+/// use std::io::BufReader;
+///
+/// let mut service = PxtoneService::new();
+/// let mut reader = BufReader::new(File::open("song.ptcop").unwrap());
+/// service.read(&mut reader).unwrap();
+/// service.tones_ready().unwrap();
+/// service.moo_preparation(VomitPreparation::default()).unwrap();
+///
+/// let q = service.get_destination_quality();
+/// let mut buf = vec![0u8; q.ch_num as usize * 2 * 4096];
+/// while !service.is_end_vomit() {
+///     service.moo(&mut buf);
+///     // process buf as 16-bit LE PCM...
+/// }
+/// ```
 pub struct PxtoneService {
   pub text: Text,
   pub master: Master,
@@ -186,20 +222,49 @@ impl PxtoneService {
     }
   }
 
+  /// Sets the output audio quality. The default is stereo (2 ch) at 44100 Hz.
+  ///
+  /// Call this before [`tones_ready`](Self::tones_ready).
   #[inline]
   pub fn set_destination_quality(&mut self, quality: DestinationQuality) {
     self.dst_ch_num = quality.ch_num;
     self.dst_sps = quality.sps;
   }
 
+  /// Returns the current output audio quality.
   #[inline]
   pub fn get_destination_quality(&self) -> DestinationQuality {
-    DestinationQuality { ch_num: self.dst_ch_num, sps: self.dst_sps }
+    DestinationQuality {
+      ch_num: self.dst_ch_num,
+      sps: self.dst_sps,
+    }
+  }
+
+  /// Loads a `.ptnoise` file and returns the rendered audio.
+  ///
+  /// The output format matches the current destination quality.
+  pub fn render_noise<R: Read>(&mut self, r: &mut R) -> Result<NoiseWave, PxtoneError> {
+    let mut noise = Noise::new();
+    noise.read(r)?;
+    let pcm = self.noise_builder.build_noise(
+      &mut noise,
+      self.dst_ch_num as usize,
+      self.dst_sps,
+      16,
+      &self.freq,
+    )?;
+    Ok(NoiseWave {
+      samples: pcm.samples().to_vec(),
+      ch_num: self.dst_ch_num,
+      sps: self.dst_sps,
+    })
   }
 
   // ---- File loading ----
 
-  /// Reads a pxtone file
+  /// Loads a `.ptcop` or `.pttune` file. Clears any previously loaded data.
+  ///
+  /// Call [`tones_ready`](Self::tones_ready) after loading.
   pub fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     self.clear();
 
@@ -523,7 +588,9 @@ impl PxtoneService {
 
   // ---- tone_ready / tone_clear ----
 
-  /// Prepares tones for all Woice/Delay/OverDrive objects (call before playback)
+  /// Prepares all instruments for playback.
+  ///
+  /// Must be called after [`read`](Self::read) and before [`moo_preparation`](Self::moo_preparation).
   pub fn tones_ready(&mut self) -> Result<(), PxtoneError> {
     let sps = self.dst_sps;
 
@@ -553,7 +620,7 @@ impl PxtoneService {
 
   // ---- moo synthesis engine ----
 
-  /// Prepares synthesis (call before starting playback)
+  /// Configures a playback session. Must be called before the first [`moo`](Self::moo) call.
   pub fn moo_preparation(&mut self, prep: VomitPreparation) -> Result<(), PxtoneError> {
     if !self.b_valid_data || self.dst_ch_num == 0 || self.dst_sps == 0 {
       self.b_end_vomit = true;
@@ -563,7 +630,9 @@ impl PxtoneService {
     let start_meas = prep.start_pos_meas;
     let start_sample = prep.start_pos_sample;
     let start_float = prep.start_pos_float;
-    let meas_end = prep.meas_end.unwrap_or_else(|| self.master.get_play_meas() as i32);
+    let meas_end = prep
+      .meas_end
+      .unwrap_or_else(|| self.master.get_play_meas() as i32);
     let meas_repeat = prep.meas_repeat.unwrap_or(self.master.repeat_meas as i32);
     let fadein_sec = prep.fadein_sec;
     self.moo_b_mute_by_unit = prep.flags & VomitPrepFlags::UNIT_MUTE != 0;
@@ -938,9 +1007,10 @@ impl PxtoneService {
     }
   }
 
-  /// Writes PCM data into buf.
-  /// The size of buf must be a multiple of `dst_ch_num * 2` bytes.
-  /// Returns `true` if data was written successfully.
+  /// Fills `buf` with the next chunk of 16-bit interleaved PCM audio.
+  ///
+  /// `buf` must be a multiple of `ch_num * 2` bytes.
+  /// Returns `true` while audio is available, `false` after playback ends.
   pub fn moo(&mut self, buf: &mut [u8]) -> bool {
     if !self.b_valid_data {
       return false;
@@ -982,15 +1052,19 @@ impl PxtoneService {
 
   // ---- Getters ----
 
+  /// Returns `true` when playback has reached the end.
   #[inline]
   pub fn is_end_vomit(&self) -> bool {
     self.b_end_vomit
   }
+
+  /// Returns `true` if a file has been successfully loaded.
   #[inline]
   pub fn is_valid_data(&self) -> bool {
     self.b_valid_data
   }
 
+  /// Returns the current playback position in ticks.
   #[inline]
   pub fn moo_get_now_clock(&self) -> i32 {
     if self.moo_clock_rate > 0.0 {
@@ -1000,6 +1074,7 @@ impl PxtoneService {
     }
   }
 
+  /// Returns the tick position at which playback will end.
   #[inline]
   pub fn moo_get_end_clock(&self) -> i32 {
     if self.moo_clock_rate > 0.0 {
@@ -1009,6 +1084,7 @@ impl PxtoneService {
     }
   }
 
+  /// Returns the current playback position as a sample offset.
   #[inline]
   pub fn moo_get_sampling_offset(&self) -> u32 {
     if self.b_end_vomit {
@@ -1018,6 +1094,7 @@ impl PxtoneService {
     }
   }
 
+  /// Returns the sample position at which playback will end.
   #[inline]
   pub fn moo_get_sampling_end(&self) -> u32 {
     if self.b_end_vomit {
@@ -1027,6 +1104,7 @@ impl PxtoneService {
     }
   }
 
+  /// Returns the total number of samples in the current playback session.
   #[inline]
   pub fn moo_get_total_sample(&self) -> u32 {
     self.calc_total_sample()

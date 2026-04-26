@@ -38,13 +38,13 @@ pub const EVENTDEFAULT_BEATNUM: u8 = 4;
 pub const EVENTDEFAULT_BEATTEMPO: f32 = 120.0;
 pub const EVENTDEFAULT_BEATCLOCK: u16 = 480;
 
-/// Returns whether an event is a "tail" event (ON and PORTAMENT)
+// Returns whether an event is a "tail" event (ON and PORTAMENT)
 #[inline]
 pub(crate) fn event_kind_is_tail(kind: u8) -> bool {
   kind == EVENTKIND_ON || kind == EVENTKIND_PORTAMENT
 }
 
-/// Event priority table
+// Event priority table
 const PRIORITY_TABLE: [u8; EVENTKIND_NUM] = [
   0,   // NULL
   50,  // ON
@@ -79,7 +79,7 @@ fn compare_priority(kind1: u8, kind2: u8) -> i16 {
   p1 - p2
 }
 
-/// Event record
+/// A single automation event in a pxtone song.
 #[derive(Clone, Debug, Default)]
 pub struct EventRecord {
   pub(crate) kind: u8,
@@ -88,7 +88,7 @@ pub struct EventRecord {
   pub(crate) clock: i32,
 }
 
-/// Event list (uses Vec as a substitute for a sorted doubly-linked list)
+/// The chronologically ordered list of automation events for a song.
 #[derive(Debug, Default)]
 pub struct EventList {
   events: Vec<EventRecord>,
@@ -103,11 +103,13 @@ impl EventList {
     self.events.clear();
   }
 
+  /// Returns all events in chronological order.
   #[inline]
   pub fn records(&self) -> &[EventRecord] {
     &self.events
   }
 
+  /// Returns the tick position of the last event, including note durations.
   pub fn get_max_clock(&self) -> i32 {
     self
       .events
@@ -123,7 +125,7 @@ impl EventList {
       .unwrap_or(0)
   }
 
-  /// Reads a v5-format event list (equivalent to Linear_Start / Linear_Add / Linear_End)
+  // Reads a v5-format event list (equivalent to Linear_Start / Linear_Add / Linear_End)
   pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
     let eve_num = r.read_u32::<LE>()?;
@@ -154,7 +156,7 @@ impl EventList {
     Ok(())
   }
 
-  /// Reads an x4x-format event block
+  // Reads an x4x-format event block
   pub(crate) fn read_x4x_block<R: Read + Seek>(
     &mut self,
     r: &mut R,
@@ -196,7 +198,7 @@ impl EventList {
     Ok(())
   }
 
-  /// Inserts an event in x4x format in priority order
+  // Inserts an event in x4x format in priority order
   fn insert_x4x(&mut self, clock: i32, unit_no: u8, kind: u8, value: i32) {
     let rec = EventRecord {
       kind,
@@ -239,10 +241,13 @@ impl EventList {
     self.insert_x4x(clock, unit_no, kind, value);
   }
 
+  /// Adds a floating-point event at the given tick clock.
   pub fn add_f(&mut self, clock: i32, unit_no: u8, kind: u8, value_f: f32) {
     self.add_i(clock, unit_no, kind, value_f.to_bits() as i32);
   }
 
+  /// Shifts the value of all matching events in `[clock1, clock2)` by `delta`.
+  /// Pass `clock2 = -1` to apply through the end of the song.
   pub fn value_change(&mut self, clock1: i32, clock2: i32, unit_no: u8, kind: u8, delta: i32) {
     let (max, min) = match kind {
       EVENTKIND_NULL => (0, 0),

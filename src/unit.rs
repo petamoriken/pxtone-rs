@@ -7,7 +7,7 @@ use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, Voic
 pub const MAX_CHANNEL: usize = 2;
 pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
 
-/// Per-unit voice tone state
+/// Runtime playback state for a single voice layer within a unit.
 #[derive(Clone, Default)]
 pub struct VoiceTone {
   pub(crate) smp_pos: f64,
@@ -21,7 +21,7 @@ pub struct VoiceTone {
   pub(crate) smooth_volume: u32,
 }
 
-/// Unit (playback state)
+/// A single track (channel) in the song, with its current playback state.
 pub struct Unit {
   pub(crate) played: bool,
   pub(crate) name: String,
@@ -210,7 +210,7 @@ impl Unit {
     }
   }
 
-  /// Generates samples and writes them into pan_time_bufs
+  // Generates samples and writes them into pan_time_bufs
   pub(crate) fn tone_sample(
     &mut self,
     b_mute_by_unit: bool,
@@ -260,7 +260,7 @@ impl Unit {
     }
   }
 
-  /// Adds pan_time_bufs values to group samples
+  // Adds pan_time_bufs values to group samples
   #[inline]
   pub(crate) fn tone_supple(&self, group_smps: &mut [i32], ch: usize, time_pan_index: usize) {
     let idx =
@@ -270,7 +270,7 @@ impl Unit {
     }
   }
 
-  /// Applies portamento processing and returns the current key
+  // Applies portamento processing and returns the current key
   #[inline]
   pub(crate) fn tone_increment_key(&mut self) -> i32 {
     if self.portament_sample_num != 0 && self.key_margin != 0 {
@@ -290,7 +290,7 @@ impl Unit {
     self.key_now
   }
 
-  /// Advances the sample position
+  // Advances the sample position
   pub(crate) fn tone_increment_sample(&mut self, freq: f32, instances: &[VoiceInstance]) {
     for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
       let vt = &mut self.tones[v];

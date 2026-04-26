@@ -2,6 +2,10 @@ use crate::error::PxtoneError;
 use byteorder::{LE, ReadBytesExt};
 use std::io::Read;
 
+/// Song title and comment text loaded from the file.
+///
+/// Both fields are stored as raw Shift-JIS bytes as written in the file.
+/// Use an encoding library such as `encoding_rs` to convert them to UTF-8.
 #[derive(Debug, Default)]
 pub struct Text {
   name: Option<Vec<u8>>,
@@ -28,10 +32,12 @@ impl Text {
     self.name = Some(raw[..end].to_vec());
   }
 
+  /// Returns the song title as raw Shift-JIS bytes, or `None` if not set.
   pub fn name(&self) -> Option<&[u8]> {
     self.name.as_deref()
   }
 
+  /// Returns the song comment as raw Shift-JIS bytes, or `None` if not set.
   pub fn comment(&self) -> Option<&[u8]> {
     self.comment.as_deref()
   }
