@@ -4,11 +4,11 @@ use crate::pulse::noise::{Noise, NoiseOscillator, WAVETYPE_NUM, WaveType};
 use crate::pulse::oscillator::{Oscillator, Point};
 use crate::pulse::pcm::Pcm;
 
-const BASIC_SPS: f64 = 44100.0;
+const BASIC_SAMPLE_RATE: f64 = 44100.0;
 const BASIC_FREQUENCY: f64 = 100.0;
 const SAMPLING_TOP: i16 = 32767;
 const SMP_NUM_RAND: usize = 44100;
-const SMP_NUM: usize = (BASIC_SPS / BASIC_FREQUENCY) as usize; // 441
+const SMP_NUM: usize = (BASIC_SAMPLE_RATE / BASIC_FREQUENCY) as usize; // 441
 
 // ---- PRNG ----
 struct Rand {
@@ -37,16 +37,17 @@ struct OscState {
   offset: f64,
   volume: f64,
   wave_type: WaveType,
-  b_reverse: bool,
+  reversed: bool,
   rdm_start: i16,
   rdm_margin: i32,
   rdm_index: usize,
 }
 
 impl OscState {
-  fn from_design(osc: &NoiseOscillator, sps: u32, rand_tbl: &[i16]) -> Self {
+  fn from_design(osc: &NoiseOscillator, sample_rate: u32, rand_tbl: &[i16]) -> Self {
     let ran = matches!(osc.wave_type, WaveType::Random | WaveType::Random2);
-    let increment = (BASIC_SPS / sps as f64) * (osc.freq as f64 / BASIC_FREQUENCY);
+    let increment =
+      (BASIC_SAMPLE_RATE / sample_rate as f64) * (osc.frequency as f64 / BASIC_FREQUENCY);
     let offset = if ran {
       0.0
     } else {
@@ -66,7 +67,7 @@ impl OscState {
       offset,
       volume,
       wave_type: osc.wave_type,
-      b_reverse: osc.b_rev,
+      reversed: osc.reversed,
       rdm_start,
       rdm_margin,
       rdm_index,
@@ -89,7 +90,7 @@ impl OscState {
         tbl[idx] as f64
       }
     };
-    let work = if self.b_reverse { -work } else { work };
+    let work = if self.reversed { -work } else { work };
     work * self.volume
   }
 
@@ -119,8 +120,8 @@ struct UnitState {
   enve_mag_margin: f64,
   enve_count: u32,
   main: OscState,
-  freq: OscState,
-  volu: OscState,
+  frequency: OscState,
+  volume: OscState,
 }
 
 // ---- NoiseBuilder ----
@@ -223,7 +224,9 @@ impl NoiseBuilder {
           SMP_NUM as u32,
         );
         (0..SMP_NUM as u32)
-          .map(|s| (osci.get_one_sample_coodinate(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
+          .map(|s| {
+            (osci.get_one_sample_coordinate(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
+          })
           .collect()
       }
       WaveType::Rect3 => {
@@ -320,10 +323,10 @@ impl NoiseBuilder {
   pub(crate) fn build_noise(
     &mut self,
     noise: &mut Noise,
-    ch_num: u8,
-    sps: u32,
-    bps: u8,
-    freq: &FrequencyTable,
+    channels: u8,
+    sample_rate: u32,
+    bits_per_sample: u8,
+    frequency: &FrequencyTable,
   ) -> Result<Pcm, PxtoneError> {
     noise.fix();
 
@@ -331,15 +334,15 @@ impl NoiseBuilder {
     for unit in &noise.units {
       if unit.enabled {
         self.build_table(unit.main.wave_type);
-        self.build_table(unit.freq.wave_type);
-        self.build_table(unit.volu.wave_type);
+        self.build_table(unit.frequency.wave_type);
+        self.build_table(unit.volume.wave_type);
       }
     }
 
     let rand_tbl = self.tables[WaveType::Random as usize]
       .as_deref()
       .unwrap_or(&[]);
-    let smp_num = (noise.smp_num_44k as f64 / (44100.0 / sps as f64)) as u32;
+    let frame_count = (noise.frame_count_44k as f64 / (44100.0 / sample_rate as f64)) as u32;
 
     // Build unit states
     let mut units: Vec<UnitState> = noise
@@ -357,7 +360,7 @@ impl NoiseBuilder {
         let enves: Vec<(u32, f64)> = du
           .envelopes
           .iter()
-          .map(|e| (sps * e.x / 1000, e.y as f64 / 100.0))
+          .map(|e| (sample_rate * e.x / 1000, e.y as f64 / 100.0))
           .collect();
 
         let mut enve_index = 0usize;
@@ -380,25 +383,25 @@ impl NoiseBuilder {
           enve_mag_start,
           enve_mag_margin,
           enve_count: 0,
-          main: OscState::from_design(&du.main, sps, rand_tbl),
-          freq: OscState::from_design(&du.freq, sps, rand_tbl),
-          volu: OscState::from_design(&du.volu, sps, rand_tbl),
+          main: OscState::from_design(&du.main, sample_rate, rand_tbl),
+          frequency: OscState::from_design(&du.frequency, sample_rate, rand_tbl),
+          volume: OscState::from_design(&du.volume, sample_rate, rand_tbl),
         }
       })
       .collect();
 
-    let mut pcm = Pcm::create(ch_num, sps, bps, smp_num)?;
+    let mut pcm = Pcm::create(channels, sample_rate, bits_per_sample, frame_count)?;
     let buf = pcm.samples_mut();
     let mut buf_pos = 0usize;
 
-    for _ in 0..smp_num as usize {
-      for c in 0..ch_num as usize {
+    for _ in 0..frame_count as usize {
+      for c in 0..channels as usize {
         let store: f64 = units
           .iter()
           .filter(|u| u.enabled)
           .map(|u| {
             let main = u.main.get_sample(&self.tables);
-            let vol = u.volu.get_sample(&self.tables);
+            let vol = u.volume.get_sample(&self.tables);
             let work = main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0) * u.pan[c];
             let envelope = if u.enve_index < u.enves.len() {
               let smp = u.enves[u.enve_index].0;
@@ -414,7 +417,7 @@ impl NoiseBuilder {
           })
           .sum();
         let byte4 = (store as i32).clamp(-SAMPLING_TOP as i32, SAMPLING_TOP as i32);
-        if bps == 8 {
+        if bits_per_sample == 8 {
           buf[buf_pos] = ((byte4 >> 8) + 128) as u8;
           buf_pos += 1;
         } else {
@@ -432,16 +435,16 @@ impl NoiseBuilder {
         }
         // freq → fre
         let fre = {
-          let po = &u.freq;
+          let po = &u.frequency;
 
           po.get_sample(&self.tables) // already scaled by volume in get_sample
         };
-        let main_inc = u.main.increment * freq.get(fre as i32) as f64;
+        let main_inc = u.main.increment * frequency.get(fre as i32) as f64;
         u.main.increment(main_inc, rand_tbl);
-        let freq_inc = u.freq.increment;
-        u.freq.increment(freq_inc, rand_tbl);
-        let volu_inc = u.volu.increment;
-        u.volu.increment(volu_inc, rand_tbl);
+        let freq_inc = u.frequency.increment;
+        u.frequency.increment(freq_inc, rand_tbl);
+        let volu_inc = u.volume.increment;
+        u.volume.increment(volu_inc, rand_tbl);
 
         // envelope
         if u.enve_index < u.enves.len() {

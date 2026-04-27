@@ -5,34 +5,34 @@ use crate::error::PxtoneError;
 
 #[derive(Debug)]
 pub(crate) struct Pcm {
-  pub(crate) ch_num: u8,
-  pub(crate) sps: u32,
-  pub(crate) bps: u8,
-  pub(crate) smp_head: u32,
-  pub(crate) smp_body: u32,
-  pub(crate) smp_tail: u32,
+  pub(crate) channels: u8,
+  pub(crate) sample_rate: u32,
+  pub(crate) bits_per_sample: u8,
+  pub(crate) head_frames: u32,
+  pub(crate) body_frames: u32,
+  pub(crate) tail_frames: u32,
   samples: Vec<u8>,
 }
 
 impl Pcm {
   pub(crate) fn create(
-    ch_num: u8,
-    sps: u32,
-    bps: u8,
+    channels: u8,
+    sample_rate: u32,
+    bits_per_sample: u8,
     sample_num: u32,
   ) -> Result<Self, PxtoneError> {
-    if bps != 8 && bps != 16 {
+    if bits_per_sample != 8 && bits_per_sample != 16 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let size = (sample_num * bps as u32 * ch_num as u32 / 8) as usize;
-    let fill = if bps == 8 { 128u8 } else { 0u8 };
+    let size = (sample_num * bits_per_sample as u32 * channels as u32 / 8) as usize;
+    let fill = if bits_per_sample == 8 { 128u8 } else { 0u8 };
     Ok(Self {
-      ch_num,
-      sps,
-      bps,
-      smp_head: 0,
-      smp_body: sample_num,
-      smp_tail: 0,
+      channels,
+      sample_rate,
+      bits_per_sample,
+      head_frames: 0,
+      body_frames: sample_num,
+      tail_frames: 0,
       samples: vec![fill; size],
     })
   }
@@ -49,29 +49,29 @@ impl Pcm {
   pub(crate) fn convert(
     &mut self,
     new_ch: u8,
-    new_sps: u32,
-    new_bps: u8,
+    new_sample_rate: u32,
+    new_bits_per_sample: u8,
   ) -> Result<(), PxtoneError> {
     self.convert_channel(new_ch)?;
-    self.convert_bps(new_bps)?;
-    self.convert_sps(new_sps)?;
+    self.convert_bps(new_bits_per_sample)?;
+    self.convert_sps(new_sample_rate)?;
     Ok(())
   }
 
   fn total_samples(&self) -> u32 {
-    self.smp_head + self.smp_body + self.smp_tail
+    self.head_frames + self.body_frames + self.tail_frames
   }
 
   fn convert_channel(&mut self, new_ch: u8) -> Result<(), PxtoneError> {
-    if self.ch_num == new_ch {
+    if self.channels == new_ch {
       return Ok(());
     }
     let total = self.total_samples() as usize;
-    let work = match (self.ch_num, new_ch) {
+    let work = match (self.channels, new_ch) {
       // mono → stereo
       (1, 2) => {
-        let mut w = vec![0u8; total * self.bps as usize / 8 * 2];
-        match self.bps {
+        let mut w = vec![0u8; total * self.bits_per_sample as usize / 8 * 2];
+        match self.bits_per_sample {
           8 => {
             for (i, &b) in self.samples.iter().enumerate() {
               w[i * 2] = b;
@@ -93,8 +93,8 @@ impl Pcm {
       }
       // stereo → mono
       (2, 1) => {
-        let mut w = vec![0u8; total * self.bps as usize / 8 / 2];
-        match self.bps {
+        let mut w = vec![0u8; total * self.bits_per_sample as usize / 8 / 2];
+        match self.bits_per_sample {
           8 => {
             for (i, item) in w.iter_mut().enumerate().take(total / 2) {
               let a = self.samples[i * 2] as i32;
@@ -119,16 +119,16 @@ impl Pcm {
       _ => return Err(PxtoneError::PcmConvert),
     };
     self.samples = work;
-    self.ch_num = new_ch;
+    self.channels = new_ch;
     Ok(())
   }
 
-  fn convert_bps(&mut self, new_bps: u8) -> Result<(), PxtoneError> {
-    if self.bps == new_bps {
+  fn convert_bps(&mut self, new_bits_per_sample: u8) -> Result<(), PxtoneError> {
+    if self.bits_per_sample == new_bits_per_sample {
       return Ok(());
     }
-    let total = (self.total_samples() * self.ch_num as u32) as usize;
-    let work = match (self.bps, new_bps) {
+    let total = (self.total_samples() * self.channels as u32) as usize;
+    let work = match (self.bits_per_sample, new_bits_per_sample) {
       // 16 → 8
       (16, 8) => {
         let mut w = vec![0u8; total / 2];
@@ -152,36 +152,39 @@ impl Pcm {
       _ => return Err(PxtoneError::PcmConvert),
     };
     self.samples = work;
-    self.bps = new_bps;
+    self.bits_per_sample = new_bits_per_sample;
     Ok(())
   }
 
-  fn convert_sps(&mut self, new_sps: u32) -> Result<(), PxtoneError> {
-    if self.sps == new_sps {
+  fn convert_sps(&mut self, new_sample_rate: u32) -> Result<(), PxtoneError> {
+    if self.sample_rate == new_sample_rate {
       return Ok(());
     }
-    let bytes_per_sample = self.ch_num as usize * self.bps as usize / 8;
+    let bytes_per_sample = self.channels as usize * self.bits_per_sample as usize / 8;
     let old_total = self.total_samples() as usize;
-    let new_head =
-      ((self.smp_head as f64 * new_sps as f64 + self.sps as f64 - 1.0) / self.sps as f64) as usize;
-    let new_body =
-      ((self.smp_body as f64 * new_sps as f64 + self.sps as f64 - 1.0) / self.sps as f64) as usize;
-    let new_tail =
-      ((self.smp_tail as f64 * new_sps as f64 + self.sps as f64 - 1.0) / self.sps as f64) as usize;
+    let new_head = ((self.head_frames as f64 * new_sample_rate as f64 + self.sample_rate as f64
+      - 1.0)
+      / self.sample_rate as f64) as usize;
+    let new_body = ((self.body_frames as f64 * new_sample_rate as f64 + self.sample_rate as f64
+      - 1.0)
+      / self.sample_rate as f64) as usize;
+    let new_tail = ((self.tail_frames as f64 * new_sample_rate as f64 + self.sample_rate as f64
+      - 1.0)
+      / self.sample_rate as f64) as usize;
     let new_total = new_head + new_body + new_tail;
     let mut work = vec![0u8; new_total * bytes_per_sample];
     for a in 0..new_total {
-      let b = (a as f64 * self.sps as f64 / new_sps as f64) as usize;
+      let b = (a as f64 * self.sample_rate as f64 / new_sample_rate as f64) as usize;
       let b = b.min(old_total - 1);
       let src = &self.samples[b * bytes_per_sample..(b + 1) * bytes_per_sample];
       let dst = &mut work[a * bytes_per_sample..(a + 1) * bytes_per_sample];
       dst.copy_from_slice(src);
     }
     self.samples = work;
-    self.smp_head = new_head as u32;
-    self.smp_body = new_body as u32;
-    self.smp_tail = new_tail as u32;
-    self.sps = new_sps;
+    self.head_frames = new_head as u32;
+    self.body_frames = new_body as u32;
+    self.tail_frames = new_tail as u32;
+    self.sample_rate = new_sample_rate;
     Ok(())
   }
 }

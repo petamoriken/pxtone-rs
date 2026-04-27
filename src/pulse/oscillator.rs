@@ -52,7 +52,7 @@ impl Oscillator {
   }
 
   /// Gets one sample via coordinate interpolation
-  pub(crate) fn get_one_sample_coodinate(&self, index: u32) -> f64 {
+  pub(crate) fn get_one_sample_coordinate(&self, index: u32) -> f64 {
     let i = self.point_reso * index / self.sample_num;
 
     // Find the two surrounding points

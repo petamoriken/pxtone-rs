@@ -20,9 +20,9 @@ fn load_service(service: &mut PxtoneService, path: &Path) {
     .unwrap_or_else(|e| panic!("{}: tones_ready failed: {:?}", path.display(), e));
 }
 
-fn pcm_to_wav(samples: &[u8], ch_num: u8, sps: u32) -> Vec<u8> {
+fn pcm_to_wav(samples: &[u8], channels: u8, sample_rate: u32) -> Vec<u8> {
   let data_len = samples.len() as u32;
-  let byte_rate = sps * ch_num as u32 * 2;
+  let byte_rate = sample_rate * channels as u32 * 2;
   let mut wav = Vec::with_capacity(44 + samples.len());
   wav.extend_from_slice(b"RIFF");
   wav.extend_from_slice(&(36u32 + data_len).to_le_bytes());
@@ -30,10 +30,10 @@ fn pcm_to_wav(samples: &[u8], ch_num: u8, sps: u32) -> Vec<u8> {
   wav.extend_from_slice(b"fmt ");
   wav.extend_from_slice(&16u32.to_le_bytes());
   wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
-  wav.extend_from_slice(&(ch_num as u16).to_le_bytes());
-  wav.extend_from_slice(&sps.to_le_bytes());
+  wav.extend_from_slice(&(channels as u16).to_le_bytes());
+  wav.extend_from_slice(&sample_rate.to_le_bytes());
   wav.extend_from_slice(&byte_rate.to_le_bytes());
-  wav.extend_from_slice(&(ch_num as u16 * 2).to_le_bytes());
+  wav.extend_from_slice(&(channels as u16 * 2).to_le_bytes());
   wav.extend_from_slice(&16u16.to_le_bytes());
   wav.extend_from_slice(b"data");
   wav.extend_from_slice(&data_len.to_le_bytes());
@@ -47,7 +47,7 @@ fn decode_ptcop_to_wav(service: &mut PxtoneService) -> Vec<u8> {
     .expect("moo_preparation failed");
 
   let q = service.get_destination_quality();
-  let bytes_per_frame = (q.ch_num * 2) as usize;
+  let bytes_per_frame = (q.channels * 2) as usize;
   let mut chunk = vec![0u8; bytes_per_frame * 4096];
   let mut pcm = Vec::new();
 
@@ -58,7 +58,7 @@ fn decode_ptcop_to_wav(service: &mut PxtoneService) -> Vec<u8> {
     pcm.extend_from_slice(&chunk);
   }
 
-  pcm_to_wav(&pcm, q.ch_num, q.sps)
+  pcm_to_wav(&pcm, q.channels, q.sample_rate)
 }
 
 fn decode_to_metadata(service: &PxtoneService) -> String {
@@ -182,11 +182,15 @@ fn decoded_ptnoise_matches_reference() {
       .render_noise(&mut reader)
       .unwrap_or_else(|e| panic!("{}: render_noise failed: {:?}", ptnoise_path.display(), e));
 
-    let wav = pcm_to_wav(&noise_wave.samples, noise_wave.ch_num, noise_wave.sps);
+    let wav = pcm_to_wav(
+      &noise_wave.samples,
+      noise_wave.channels,
+      noise_wave.sample_rate,
+    );
 
     let mut table = Table::new();
-    table.insert("ch".into(), Value::Integer(noise_wave.ch_num as i64));
-    table.insert("sps".into(), Value::Integer(noise_wave.sps as i64));
+    table.insert("ch".into(), Value::Integer(noise_wave.channels as i64));
+    table.insert("sps".into(), Value::Integer(noise_wave.sample_rate as i64));
     let metadata = toml::to_string(&table).unwrap();
 
     if update {

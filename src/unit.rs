@@ -10,14 +10,14 @@ pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
 /// Runtime playback state for a single voice layer within a unit.
 #[derive(Clone, Default)]
 pub struct VoiceTone {
-  pub(crate) smp_pos: f64,
-  pub(crate) offset_freq: f32,
-  pub(crate) env_volume: i32,
+  pub(crate) sample_pos: f64,
+  pub(crate) offset_frequency: f32,
+  pub(crate) envelope_volume: i32,
   pub(crate) life_count: u32,
   pub(crate) on_count: u32,
-  pub(crate) env_start: i32,
-  pub(crate) env_pos: u32,
-  pub(crate) env_release_clock: u32,
+  pub(crate) envelope_start: i32,
+  pub(crate) envelope_pos: u32,
+  pub(crate) envelope_release: u32,
   pub(crate) smooth_volume: u32,
 }
 
@@ -27,22 +27,22 @@ pub struct Unit {
   pub(crate) name: String,
 
   // Key state
-  pub(crate) key_now: i32,
+  pub(crate) key: i32,
   pub(crate) key_start: i32,
-  pub(crate) key_margin: i32,
-  pub(crate) portament_sample_pos: u32,
-  pub(crate) portament_sample_num: u32,
+  pub(crate) key_delta: i32,
+  pub(crate) portamento_pos: u32,
+  pub(crate) portamento_duration: u32,
 
   // Pan
-  pub(crate) pan_vols: [u32; MAX_CHANNEL],
-  pub(crate) pan_times: [u32; MAX_CHANNEL],
-  pub(crate) pan_time_bufs: [[i32; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
+  pub(crate) pan_volumes: [u32; MAX_CHANNEL],
+  pub(crate) pan_delays: [u32; MAX_CHANNEL],
+  pub(crate) pan_delay_buffers: [[i32; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
 
   // Velocity, volume, etc.
-  pub(crate) v_volume: u32,
-  pub(crate) v_velocity: u32,
-  pub(crate) v_groupno: usize,
-  pub(crate) v_tuning: f32,
+  pub(crate) volume: u32,
+  pub(crate) velocity: u32,
+  pub(crate) group_index: usize,
+  pub(crate) tuning: f32,
 
   // Voice references (one per instance)
   pub(crate) voice_num: usize,
@@ -55,18 +55,18 @@ impl Default for Unit {
     Self {
       played: true,
       name: "no name".to_string(),
-      key_now: EVENTDEFAULT_KEY,
+      key: EVENTDEFAULT_KEY,
       key_start: EVENTDEFAULT_KEY,
-      key_margin: 0,
-      portament_sample_pos: 0,
-      portament_sample_num: 0,
-      pan_vols: [64; MAX_CHANNEL],
-      pan_times: [0; MAX_CHANNEL],
-      pan_time_bufs: [[0; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
-      v_volume: EVENTDEFAULT_VOLUME,
-      v_velocity: EVENTDEFAULT_VELOCITY,
-      v_groupno: EVENTDEFAULT_GROUPNO,
-      v_tuning: EVENTDEFAULT_TUNING,
+      key_delta: 0,
+      portamento_pos: 0,
+      portamento_duration: 0,
+      pan_volumes: [64; MAX_CHANNEL],
+      pan_delays: [0; MAX_CHANNEL],
+      pan_delay_buffers: [[0; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
+      volume: EVENTDEFAULT_VOLUME,
+      velocity: EVENTDEFAULT_VELOCITY,
+      group_index: EVENTDEFAULT_GROUPNO,
+      tuning: EVENTDEFAULT_TUNING,
       voice_num: 0,
       voice_flags: Vec::new(),
       tones: Default::default(),
@@ -80,18 +80,18 @@ impl Unit {
   }
 
   pub(crate) fn tone_init(&mut self) {
-    self.v_groupno = EVENTDEFAULT_GROUPNO;
-    self.v_velocity = EVENTDEFAULT_VELOCITY;
-    self.v_volume = EVENTDEFAULT_VOLUME;
-    self.v_tuning = EVENTDEFAULT_TUNING;
-    self.portament_sample_num = 0;
-    self.portament_sample_pos = 0;
-    self.pan_vols.fill(64);
-    self.pan_times.fill(0);
+    self.group_index = EVENTDEFAULT_GROUPNO;
+    self.velocity = EVENTDEFAULT_VELOCITY;
+    self.volume = EVENTDEFAULT_VOLUME;
+    self.tuning = EVENTDEFAULT_TUNING;
+    self.portamento_duration = 0;
+    self.portamento_pos = 0;
+    self.pan_volumes.fill(64);
+    self.pan_delays.fill(0);
   }
 
   pub(crate) fn tone_clear(&mut self) {
-    for buf in &mut self.pan_time_bufs {
+    for buf in &mut self.pan_delay_buffers {
       buf.fill(0);
     }
   }
@@ -100,22 +100,22 @@ impl Unit {
     &mut self,
     voice_idx: usize,
     env_rls_clock: u32,
-    offset_freq: f32,
+    offset_frequency: f32,
   ) {
     let t = &mut self.tones[voice_idx];
     t.life_count = 0;
     t.on_count = 0;
-    t.smp_pos = 0.0;
+    t.sample_pos = 0.0;
     t.smooth_volume = 0;
-    t.env_release_clock = env_rls_clock;
-    t.offset_freq = offset_freq;
+    t.envelope_release = env_rls_clock;
+    t.offset_frequency = offset_frequency;
   }
 
   pub(crate) fn set_woice(&mut self, voice_num: usize, voice_flags: Vec<u32>) {
     self.voice_num = voice_num;
     self.voice_flags = voice_flags;
-    self.key_now = EVENTDEFAULT_KEY;
-    self.key_margin = 0;
+    self.key = EVENTDEFAULT_KEY;
+    self.key_delta = 0;
     self.key_start = EVENTDEFAULT_KEY;
   }
 
@@ -128,79 +128,79 @@ impl Unit {
 
   #[inline]
   pub(crate) fn tone_key_on(&mut self) {
-    self.key_now = self.key_start + self.key_margin;
-    self.key_start = self.key_now;
-    self.key_margin = 0;
+    self.key = self.key_start + self.key_delta;
+    self.key_start = self.key;
+    self.key_delta = 0;
   }
 
   #[inline]
   pub(crate) fn tone_key(&mut self, key: i32) {
-    self.key_start = self.key_now;
-    self.key_margin = key - self.key_start;
-    self.portament_sample_pos = 0;
+    self.key_start = self.key;
+    self.key_delta = key - self.key_start;
+    self.portamento_pos = 0;
   }
 
-  pub(crate) fn tone_pan_volume(&mut self, ch_num: u32, pan: u32) {
-    self.pan_vols[0] = 64;
-    self.pan_vols[1] = 64;
-    if ch_num == 2 {
+  pub(crate) fn tone_pan_volume(&mut self, channels: u32, pan: u32) {
+    self.pan_volumes[0] = 64;
+    self.pan_volumes[1] = 64;
+    if channels == 2 {
       if pan >= 64 {
-        self.pan_vols[0] = 128 - pan;
+        self.pan_volumes[0] = 128 - pan;
       } else {
-        self.pan_vols[1] = pan;
+        self.pan_volumes[1] = pan;
       }
     }
   }
 
-  pub(crate) fn tone_pan_time(&mut self, ch_num: u32, pan: u32, sps: u32) {
-    self.pan_times[0] = 0;
-    self.pan_times[1] = 0;
-    if ch_num == 2 {
+  pub(crate) fn tone_pan_time(&mut self, channels: u32, pan: u32, sample_rate: u32) {
+    self.pan_delays[0] = 0;
+    self.pan_delays[1] = 0;
+    if channels == 2 {
       if pan >= 64 {
         let v = (pan - 64).min(63);
-        self.pan_times[0] = v * 44100 / sps;
+        self.pan_delays[0] = v * 44100 / sample_rate;
       } else {
         let v = (64 - pan).min(63);
-        self.pan_times[1] = v * 44100 / sps;
+        self.pan_delays[1] = v * 44100 / sample_rate;
       }
     }
   }
 
   #[inline]
   pub(crate) fn tone_velocity(&mut self, val: u32) {
-    self.v_velocity = val;
+    self.velocity = val;
   }
   #[inline]
   pub(crate) fn tone_volume(&mut self, val: u32) {
-    self.v_volume = val;
+    self.volume = val;
   }
   #[inline]
   pub(crate) fn tone_portament(&mut self, val: u32) {
-    self.portament_sample_num = val;
+    self.portamento_duration = val;
   }
   #[inline]
   pub(crate) fn tone_groupno(&mut self, val: usize) {
-    self.v_groupno = val;
+    self.group_index = val;
   }
   #[inline]
   pub(crate) fn tone_tuning(&mut self, val: f32) {
-    self.v_tuning = val;
+    self.tuning = val;
   }
 
   pub(crate) fn tone_envelope(&mut self, instances: &[VoiceInstance]) {
     for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
       let vt = &mut self.tones[v];
-      if vt.life_count > 0 && vi.env_size > 0 {
+      if vt.life_count > 0 && vi.envelope_size > 0 {
         if vt.on_count > 0 {
-          if vt.env_pos < vi.env_size {
-            vt.env_volume = vi.env[vt.env_pos as usize] as i32;
-            vt.env_pos += 1;
+          if vt.envelope_pos < vi.envelope_size {
+            vt.envelope_volume = vi.envelope[vt.envelope_pos as usize] as i32;
+            vt.envelope_pos += 1;
           }
         } else {
           // release
-          vt.env_volume =
-            vt.env_start + (0 - vt.env_start) * vt.env_pos as i32 / vi.env_release.max(1) as i32;
-          vt.env_pos += 1;
+          vt.envelope_volume = vt.envelope_start
+            + (0 - vt.envelope_start) * vt.envelope_pos as i32 / vi.envelope_release.max(1) as i32;
+          vt.envelope_pos += 1;
         }
       }
     }
@@ -209,15 +209,15 @@ impl Unit {
   // Generates samples and writes them into pan_time_bufs
   pub(crate) fn tone_sample(
     &mut self,
-    b_mute_by_unit: bool,
-    ch_num: u8,
+    mute_by_unit: bool,
+    channels: u8,
     time_pan_index: usize,
     smooth_smp: u32,
     instances: &[VoiceInstance],
   ) {
-    if b_mute_by_unit && !self.played {
-      for ch in 0..ch_num as usize {
-        self.pan_time_bufs[ch][time_pan_index] = 0;
+    if mute_by_unit && !self.played {
+      for ch in 0..channels as usize {
+        self.pan_delay_buffers[ch][time_pan_index] = 0;
       }
       return;
     }
@@ -227,20 +227,20 @@ impl Unit {
       for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
         let vt = &self.tones[v];
         if vt.life_count > 0 {
-          let pos = vt.smp_pos as usize;
+          let pos = vt.sample_pos as usize;
           let mut work = vi.get_sample_i16(pos, ch) as i32;
 
-          if ch_num == 1 {
+          if channels == 1 {
             work += vi.get_sample_i16(pos, 1) as i32;
             work /= 2;
           }
 
-          work = work * self.v_velocity as i32 / 128;
-          work = work * self.v_volume as i32 / 128;
-          work = work * self.pan_vols[ch] as i32 / 64;
+          work = work * self.velocity as i32 / 128;
+          work = work * self.volume as i32 / 128;
+          work = work * self.pan_volumes[ch] as i32 / 64;
 
-          if vi.env_size > 0 {
-            work = work * vt.env_volume / 128;
+          if vi.envelope_size > 0 {
+            work = work * vt.envelope_volume / 128;
           }
 
           // smooth tail
@@ -252,42 +252,42 @@ impl Unit {
           buf += work;
         }
       }
-      self.pan_time_bufs[ch][time_pan_index] = buf;
+      self.pan_delay_buffers[ch][time_pan_index] = buf;
     }
   }
 
-  // Adds pan_time_bufs values to group samples
+  // Adds pan_delay_buffers values to group samples
   #[inline]
   pub(crate) fn tone_supple(&self, group_smps: &mut [i32], ch: usize, time_pan_index: usize) {
     let idx =
-      (time_pan_index + BUFSIZE_TIMEPAN - self.pan_times[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
-    if self.v_groupno < group_smps.len() {
-      group_smps[self.v_groupno] += self.pan_time_bufs[ch][idx];
+      (time_pan_index + BUFSIZE_TIMEPAN - self.pan_delays[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
+    if self.group_index < group_smps.len() {
+      group_smps[self.group_index] += self.pan_delay_buffers[ch][idx];
     }
   }
 
   // Applies portamento processing and returns the current key
   #[inline]
   pub(crate) fn tone_increment_key(&mut self) -> i32 {
-    if self.portament_sample_num != 0 && self.key_margin != 0 {
-      if self.portament_sample_pos < self.portament_sample_num {
-        self.portament_sample_pos += 1;
-        self.key_now = self.key_start
-          + (self.key_margin as f64 * self.portament_sample_pos as f64
-            / self.portament_sample_num as f64) as i32;
+    if self.portamento_duration != 0 && self.key_delta != 0 {
+      if self.portamento_pos < self.portamento_duration {
+        self.portamento_pos += 1;
+        self.key = self.key_start
+          + (self.key_delta as f64 * self.portamento_pos as f64 / self.portamento_duration as f64)
+            as i32;
       } else {
-        self.key_now = self.key_start + self.key_margin;
-        self.key_start = self.key_now;
-        self.key_margin = 0;
+        self.key = self.key_start + self.key_delta;
+        self.key_start = self.key;
+        self.key_delta = 0;
       }
     } else {
-      self.key_now = self.key_start + self.key_margin;
+      self.key = self.key_start + self.key_delta;
     }
-    self.key_now
+    self.key
   }
 
   // Advances the sample position
-  pub(crate) fn tone_increment_sample(&mut self, freq: f32, instances: &[VoiceInstance]) {
+  pub(crate) fn tone_increment_sample(&mut self, frequency: f32, instances: &[VoiceInstance]) {
     for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
@@ -297,23 +297,23 @@ impl Unit {
         if vt.on_count > 0 {
           vt.on_count -= 1;
         }
-        vt.smp_pos += vt.offset_freq as f64 * self.v_tuning as f64 * freq as f64;
+        vt.sample_pos += vt.offset_frequency as f64 * self.tuning as f64 * frequency as f64;
 
-        let body = vi.smp_body_w as f64;
-        if vt.smp_pos >= body {
+        let body = vi.body_frames as f64;
+        if vt.sample_pos >= body {
           if self.voice_flags.get(v).copied().unwrap_or(0) & VOICE_FLAG_WAVELOOP != 0 {
-            vt.smp_pos -= body;
-            if vt.smp_pos >= body {
-              vt.smp_pos = 0.0;
+            vt.sample_pos -= body;
+            if vt.sample_pos >= body {
+              vt.sample_pos = 0.0;
             }
           } else {
             vt.life_count = 0;
           }
         }
 
-        if vt.on_count == 0 && vi.env_size > 0 {
-          vt.env_start = vt.env_volume;
-          vt.env_pos = 0;
+        if vt.on_count == 0 && vi.envelope_size > 0 {
+          vt.envelope_start = vt.envelope_volume;
+          vt.envelope_pos = 0;
         }
       }
     }

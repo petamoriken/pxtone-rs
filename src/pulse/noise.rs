@@ -60,10 +60,10 @@ impl TryFrom<i32> for WaveType {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct NoiseOscillator {
   pub(crate) wave_type: WaveType,
-  pub(crate) freq: f32,
+  pub(crate) frequency: f32,
   pub(crate) volume: f32,
   pub(crate) offset: f32,
-  pub(crate) b_rev: bool,
+  pub(crate) reversed: bool,
 }
 
 // ---- Noise unit design ----
@@ -80,8 +80,8 @@ pub(crate) struct NoiseUnit {
   pub(crate) envelopes: Vec<NoisePoint>,
   pub(crate) pan: i8,
   pub(crate) main: NoiseOscillator,
-  pub(crate) freq: NoiseOscillator,
-  pub(crate) volu: NoiseOscillator,
+  pub(crate) frequency: NoiseOscillator,
+  pub(crate) volume: NoiseOscillator,
 }
 
 // ---- Flag constants ----
@@ -89,8 +89,8 @@ pub(crate) struct NoiseUnit {
 const FLAG_ENVELOPE: u32 = 0x0004;
 const FLAG_PAN: u32 = 0x0008;
 const FLAG_OSC_MAIN: u32 = 0x0010;
-const FLAG_OSC_FREQ: u32 = 0x0020;
-const FLAG_OSC_VOLU: u32 = 0x0040;
+const FLAG_OSC_FREQUENCY: u32 = 0x0020;
+const FLAG_OSC_VOLUME: u32 = 0x0040;
 const FLAG_UNCOVERED: u32 = 0xffffff83;
 
 const MAX_UNIT_NUM: usize = 4;
@@ -110,7 +110,7 @@ const LIMIT_ENVE_Y: u32 = 100;
 
 #[derive(Debug, Default)]
 pub(crate) struct Noise {
-  pub(crate) smp_num_44k: u32,
+  pub(crate) frame_count_44k: u32,
   pub(crate) units: Vec<NoiseUnit>,
 }
 
@@ -121,8 +121,8 @@ impl Noise {
 
   /// Clamps all parameters to their valid ranges
   pub(crate) fn fix(&mut self) {
-    if self.smp_num_44k > LIMIT_SMP_NUM {
-      self.smp_num_44k = LIMIT_SMP_NUM;
+    if self.frame_count_44k > LIMIT_SMP_NUM {
+      self.frame_count_44k = LIMIT_SMP_NUM;
     }
     for unit in &mut self.units {
       if unit.enabled {
@@ -132,8 +132,8 @@ impl Noise {
         }
         unit.pan = unit.pan.clamp(-100, 100);
         fix_osc(&mut unit.main);
-        fix_osc(&mut unit.freq);
-        fix_osc(&mut unit.volu);
+        fix_osc(&mut unit.frequency);
+        fix_osc(&mut unit.volume);
       }
     }
   }
@@ -153,7 +153,7 @@ impl Noise {
       return Err(PxtoneError::NewFormat);
     }
 
-    self.smp_num_44k = r.read_var_u32()?;
+    self.frame_count_44k = r.read_var_u32()?;
 
     let mut unit_num_byte = [0u8; 1];
     r.read_exact(&mut unit_num_byte)?;
@@ -193,11 +193,11 @@ impl Noise {
       if flags & FLAG_OSC_MAIN != 0 {
         read_oscillator(r, &mut unit.main)?;
       }
-      if flags & FLAG_OSC_FREQ != 0 {
-        read_oscillator(r, &mut unit.freq)?;
+      if flags & FLAG_OSC_FREQUENCY != 0 {
+        read_oscillator(r, &mut unit.frequency)?;
       }
-      if flags & FLAG_OSC_VOLU != 0 {
-        read_oscillator(r, &mut unit.volu)?;
+      if flags & FLAG_OSC_VOLUME != 0 {
+        read_oscillator(r, &mut unit.volume)?;
       }
 
       self.units.push(unit);
@@ -207,7 +207,7 @@ impl Noise {
 }
 
 fn fix_osc(osc: &mut NoiseOscillator) {
-  osc.freq = osc.freq.clamp(0.0, LIMIT_OSC_FREQUENCY);
+  osc.frequency = osc.frequency.clamp(0.0, LIMIT_OSC_FREQUENCY);
   osc.volume = osc.volume.clamp(0.0, LIMIT_OSC_VOLUME);
   osc.offset = osc.offset.clamp(0.0, LIMIT_OSC_OFFSET);
 }
@@ -215,10 +215,9 @@ fn fix_osc(osc: &mut NoiseOscillator) {
 fn read_oscillator<R: Read>(r: &mut R, osc: &mut NoiseOscillator) -> Result<(), PxtoneError> {
   let type_val = r.read_var_i32()?;
   osc.wave_type = WaveType::try_from(type_val).map_err(|_| PxtoneError::UnknownFormat)?;
-  let b_rev = r.read_var_u32()?;
-  osc.b_rev = b_rev != 0;
+  osc.reversed = r.read_var_u32()? != 0;
   let freq = r.read_var_u32()?;
-  osc.freq = freq as f32 / 10.0;
+  osc.frequency = freq as f32 / 10.0;
   let volume = r.read_var_u32()?;
   osc.volume = volume as f32 / 10.0;
   let offset = r.read_var_u32()?;

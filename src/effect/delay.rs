@@ -30,9 +30,9 @@ pub(crate) struct Delay {
   pub(crate) unit: DelayUnit,
   pub(crate) group: usize,
   pub(crate) rate: f32,
-  pub(crate) freq: f32,
+  pub(crate) frequency: f32,
   // runtime
-  smp_num: usize,
+  buffer_size: usize,
   offset: usize,
   rate_s32: i32,
   bufs: [Vec<i32>; 2],
@@ -45,8 +45,8 @@ impl Default for Delay {
       unit: DelayUnit::Beat,
       group: 0,
       rate: 33.0,
-      freq: 3.0,
-      smp_num: 0,
+      frequency: 3.0,
+      buffer_size: 0,
       offset: 0,
       rate_s32: 100,
       bufs: Default::default(),
@@ -60,35 +60,38 @@ impl Delay {
   }
 
   /// Prepares before playback: allocates the delay buffer
-  pub(crate) fn tone_ready(&mut self, beat_num: u8, beat_tempo: f32, sps: u32) {
-    self.smp_num = 0;
+  pub(crate) fn tone_ready(&mut self, beat_num: u8, beat_tempo: f32, sample_rate: u32) {
+    self.buffer_size = 0;
     self.bufs[0].clear();
     self.bufs[1].clear();
 
-    if self.freq == 0.0 || self.rate == 0.0 {
+    if self.frequency == 0.0 || self.rate == 0.0 {
       return;
     }
 
     self.offset = 0;
     self.rate_s32 = self.rate as i32;
 
-    self.smp_num = match self.unit {
-      DelayUnit::Beat => (sps as f64 * 60.0 / beat_tempo as f64 / self.freq as f64) as usize,
-      DelayUnit::Meas => {
-        (sps as f64 * 60.0 * beat_num as f64 / beat_tempo as f64 / self.freq as f64) as usize
+    self.buffer_size = match self.unit {
+      DelayUnit::Beat => {
+        (sample_rate as f64 * 60.0 / beat_tempo as f64 / self.frequency as f64) as usize
       }
-      DelayUnit::Second => (sps as f64 / self.freq as f64) as usize,
+      DelayUnit::Meas => {
+        (sample_rate as f64 * 60.0 * beat_num as f64 / beat_tempo as f64 / self.frequency as f64)
+          as usize
+      }
+      DelayUnit::Second => (sample_rate as f64 / self.frequency as f64) as usize,
     };
 
-    if self.smp_num > 0 {
-      self.bufs[0] = vec![0i32; self.smp_num];
-      self.bufs[1] = vec![0i32; self.smp_num];
+    if self.buffer_size > 0 {
+      self.bufs[0] = vec![0i32; self.buffer_size];
+      self.bufs[1] = vec![0i32; self.buffer_size];
     }
   }
 
   /// Applies delay to group samples
   pub(crate) fn tone_supple(&mut self, ch: usize, group_smps: &mut [i32]) {
-    if self.smp_num == 0 {
+    if self.buffer_size == 0 {
       return;
     }
     let a = self.bufs[ch][self.offset] * self.rate_s32 / 100;
@@ -99,10 +102,10 @@ impl Delay {
   }
 
   pub(crate) fn tone_increment(&mut self) {
-    if self.smp_num == 0 {
+    if self.buffer_size == 0 {
       return;
     }
-    self.offset = (self.offset + 1) % self.smp_num;
+    self.offset = (self.offset + 1) % self.buffer_size;
   }
 
   pub(crate) fn tone_clear(&mut self) {
@@ -117,10 +120,8 @@ impl Delay {
     let unit = r.read_u16::<LE>()?;
     let group = r.read_u16::<LE>()? as usize;
     let rate = r.read_f32::<LE>()?;
-    let freq = r.read_f32::<LE>()?;
-
     self.unit = DelayUnit::try_from(unit).map_err(|_| PxtoneError::UnknownFormat)?;
-    self.freq = freq;
+    self.frequency = r.read_f32::<LE>()?;
     self.rate = rate;
     self.group = group.min(MAX_GROUP_NUM - 1);
     Ok(())
