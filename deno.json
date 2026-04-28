@@ -1,0 +1,6 @@
+{
+  "tasks": {
+    "build-wasm": "cargo build --target wasm32-unknown-unknown --release",
+    "test-wasm": "deno test --allow-read --no-check tests/wasm_test.ts"
+  }
+}

@@ -10,5 +10,8 @@ pub(crate) mod pulse;
 pub(crate) mod read_ext;
 pub(crate) mod woice;
 
+#[cfg(target_arch = "wasm32")]
+pub mod wasm;
+
 pub use error::PxtoneError;
 pub use service::{DestinationQuality, NoiseWave, PxtoneService, VomitPrepFlags, VomitPreparation};
