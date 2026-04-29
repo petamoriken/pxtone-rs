@@ -1,4 +1,4 @@
-import source pxtoneWasm from "../target/wasm32-unknown-unknown/release/pxtone.wasm";
+import source pxtoneWasm from "../target/wasm32-unknown-unknown/release-wasm/pxtone.wasm";
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";

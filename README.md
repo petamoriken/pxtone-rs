@@ -63,12 +63,20 @@ let wave = service.render_noise(&mut reader).unwrap();
 Build the `.wasm` binary:
 
 ```sh
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32-unknown-unknown --profile release-wasm
 ```
 
 The compiled module exports a C FFI interface. Memory management uses explicit
 `alloc`/`dealloc` exports. See [`src/wasm.rs`](src/wasm.rs) for the full API and
 [`tests/wasm_test.ts`](tests/wasm_test.ts) for usage examples.
+
+To further optimize the binary with
+[Binaryen](https://github.com/WebAssembly/binaryen)'s `wasm-opt`
+(`brew install binaryen`):
+
+```sh
+deno task opt-wasm
+```
 
 ## Running Tests
 
@@ -77,7 +85,7 @@ The compiled module exports a C FFI interface. Memory management uses explicit
 cargo test
 
 # WebAssembly tests (requires Deno)
-cargo build --target wasm32-unknown-unknown --release
+cargo build --target wasm32-unknown-unknown --profile release-wasm
 deno task test-wasm
 ```
 
