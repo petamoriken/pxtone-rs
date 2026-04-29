@@ -60,7 +60,10 @@ let wave = service.render_noise(&mut reader).unwrap();
 
 ### WebAssembly
 
-Build the `.wasm` binary:
+Pre-built `pxtone.wasm` binaries are available on the
+[Releases page](https://github.com/petamoriken/pxtone-rs/releases).
+
+To build the `.wasm` binary yourself:
 
 ```sh
 cargo build --target wasm32-unknown-unknown --profile release-wasm
