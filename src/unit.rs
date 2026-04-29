@@ -24,7 +24,7 @@ pub struct VoiceTone {
 /// A single track (channel) in the song, with its current playback state.
 pub struct Unit {
   pub(crate) played: bool,
-  pub(crate) name: String,
+  pub(crate) name: Vec<u8>,
 
   // Key state
   pub(crate) key: i32,
@@ -54,7 +54,7 @@ impl Default for Unit {
   fn default() -> Self {
     Self {
       played: true,
-      name: "no name".to_string(),
+      name: b"no name".to_vec(),
       key: EVENTDEFAULT_KEY,
       key_start: EVENTDEFAULT_KEY,
       key_delta: 0,
@@ -75,6 +75,24 @@ impl Default for Unit {
 }
 
 impl Unit {
+  /// Unit name as raw bytes (may be Shift-JIS encoded for Japanese names).
+  #[inline]
+  pub fn name(&self) -> &[u8] {
+    &self.name
+  }
+
+  /// Whether this unit is not muted.
+  #[inline]
+  pub fn played(&self) -> bool {
+    self.played
+  }
+
+  /// Sets whether this unit is active. Pass `false` to mute, `true` to enable.
+  #[inline]
+  pub fn set_played(&mut self, played: bool) {
+    self.played = played;
+  }
+
   pub(crate) fn new() -> Self {
     Self::default()
   }

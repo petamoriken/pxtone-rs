@@ -3,6 +3,8 @@ import source pxtoneWasm from "../target/wasm32-unknown-unknown/release/pxtone.w
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { parse as parseToml } from "@std/toml";
+
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 interface WasmExports {
@@ -26,6 +28,19 @@ interface WasmExports {
     outSampleRate: number,
     outSamplesLen: number,
   ) => number;
+  service_get_unit_count: (svc: number) => number;
+  service_unit_name: (svc: number, idx: number, outLen: number) => number;
+  service_unit_played: (svc: number, idx: number) => number;
+  service_get_event_count: (svc: number) => number;
+  service_get_event_clock: (svc: number, idx: number) => number;
+  service_get_event_unit_index: (svc: number, idx: number) => number;
+  service_get_event_kind: (svc: number, idx: number) => number;
+  service_get_event_value: (svc: number, idx: number) => number;
+}
+
+interface PtcopSnapshot {
+  units: Array<{ name: string; played: boolean }>;
+  events: Array<{ clock: number; unit_index: number; kind: number; value: number }>;
 }
 
 function instantiate(): WasmExports {
@@ -69,10 +84,13 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
   if (names.length === 0) throw new Error("no .ptcop files found in tests/sample/ptcop/");
 
   const failures: string[] = [];
+  const dec = new TextDecoder();
 
   for (const name of names) {
     const stem = name.slice(0, -6);
     const ptcopData = await Deno.readFile(join(sampleDir, name));
+    const tomlText = await Deno.readTextFile(join(snapshotDir, `${stem}.toml`));
+    const snapshot = parseToml(tomlText) as unknown as PtcopSnapshot;
 
     const dataPtr = ex.alloc(ptcopData.length);
     new Uint8Array(ex.memory.buffer, dataPtr, ptcopData.length).set(ptcopData);
@@ -92,6 +110,43 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       ex.service_free(svc);
       continue;
     }
+
+    // Units
+    const unitCount = ex.service_get_unit_count(svc);
+    if (unitCount !== snapshot.units.length) {
+      failures.push(`${stem}.toml: unit count mismatch (got ${unitCount}, expected ${snapshot.units.length})`);
+    } else {
+      const lenPtr = ex.alloc(4);
+      for (let i = 0; i < unitCount; i++) {
+        const namePtr = ex.service_unit_name(svc, i, lenPtr);
+        const nameLen = new Uint32Array(ex.memory.buffer, lenPtr, 1)[0];
+        const unitName = dec.decode(new Uint8Array(ex.memory.buffer, namePtr, nameLen));
+        const played = ex.service_unit_played(svc, i) !== 0;
+        const expected = snapshot.units[i];
+        if (unitName !== expected.name || played !== expected.played) {
+          failures.push(`${stem}.toml: unit[${i}] mismatch`);
+        }
+      }
+      ex.dealloc(lenPtr, 4);
+    }
+
+    // Events
+    const eventCount = ex.service_get_event_count(svc);
+    if (eventCount !== snapshot.events.length) {
+      failures.push(`${stem}.toml: event count mismatch (got ${eventCount}, expected ${snapshot.events.length})`);
+    } else {
+      for (let i = 0; i < eventCount; i++) {
+        const clock = ex.service_get_event_clock(svc, i);
+        const unitNo = ex.service_get_event_unit_index(svc, i);
+        const kind = ex.service_get_event_kind(svc, i);
+        const value = ex.service_get_event_value(svc, i);
+        const expected = snapshot.events[i];
+        if (clock !== expected.clock || unitNo !== expected.unit_index || kind !== expected.kind || value !== expected.value) {
+          failures.push(`${stem}.toml: event[${i}] mismatch`);
+        }
+      }
+    }
+
     if (ex.service_moo_preparation(svc) !== 0) {
       failures.push(`${name}: service_moo_preparation failed`);
       ex.service_free(svc);

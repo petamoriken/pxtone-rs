@@ -75,9 +75,35 @@ fn compare_priority(kind1: u8, kind2: u8) -> i16 {
 #[derive(Clone, Debug, Default)]
 pub struct EventRecord {
   pub(crate) kind: u8,
-  pub(crate) unit_no: u8,
+  pub(crate) unit_index: u8,
   pub(crate) value: i32,
   pub(crate) clock: i32,
+}
+
+impl EventRecord {
+  /// Event kind. See the `EVENTKIND_*` constants.
+  #[inline]
+  pub fn kind(&self) -> u8 {
+    self.kind
+  }
+
+  /// Index of the unit (track) this event belongs to.
+  #[inline]
+  pub fn unit_index(&self) -> u8 {
+    self.unit_index
+  }
+
+  /// Event value. Interpretation depends on [`kind`](Self::kind).
+  #[inline]
+  pub fn value(&self) -> i32 {
+    self.value
+  }
+
+  /// Tick position at which the event occurs.
+  #[inline]
+  pub fn clock(&self) -> i32 {
+    self.clock
+  }
 }
 
 /// The chronologically ordered list of automation events for a song.
@@ -126,13 +152,13 @@ impl EventList {
 
     for _ in 0..eve_num {
       let clock_delta = r.read_var_i32()?;
-      let unit_no = r.read_u8()?;
+      let unit_index = r.read_u8()?;
       let kind = r.read_u8()?;
       let value = r.read_var_i32()?;
       absolute += clock_delta;
       self.events.push(EventRecord {
         kind,
-        unit_no,
+        unit_index,
         value,
         clock: absolute,
       });
@@ -191,10 +217,10 @@ impl EventList {
   }
 
   // Inserts an event in x4x format in priority order
-  fn insert_x4x(&mut self, clock: i32, unit_no: u8, kind: u8, value: i32) {
+  fn insert_x4x(&mut self, clock: i32, unit_index: u8, kind: u8, value: i32) {
     let rec = EventRecord {
       kind,
-      unit_no,
+      unit_index,
       value,
       clock,
     };
@@ -207,7 +233,7 @@ impl EventList {
     // Replace if a record with the same clock/unit/kind already exists
     if let Some(existing) = self.events[..pos]
       .iter()
-      .rposition(|e| e.clock == clock && e.unit_no == unit_no && e.kind == kind)
+      .rposition(|e| e.clock == clock && e.unit_index == unit_index && e.kind == kind)
     {
       self.events[existing] = rec;
     } else {
@@ -216,31 +242,31 @@ impl EventList {
   }
 
   /// Removes events belonging to the given unit number and decrements subsequent unit numbers
-  pub fn remove_unit(&mut self, unit_no: u8) {
+  pub fn remove_unit(&mut self, unit_index: u8) {
     self.events.retain_mut(|e| {
-      if e.unit_no == unit_no {
+      if e.unit_index == unit_index {
         return false;
       }
-      if e.unit_no > unit_no {
-        e.unit_no -= 1;
+      if e.unit_index > unit_index {
+        e.unit_index -= 1;
       }
       true
     });
   }
 
   /// Adds an event (inserts into the sorted list)
-  pub fn add_i(&mut self, clock: i32, unit_no: u8, kind: u8, value: i32) {
-    self.insert_x4x(clock, unit_no, kind, value);
+  pub fn add_i(&mut self, clock: i32, unit_index: u8, kind: u8, value: i32) {
+    self.insert_x4x(clock, unit_index, kind, value);
   }
 
   /// Adds a floating-point event at the given tick clock.
-  pub fn add_f(&mut self, clock: i32, unit_no: u8, kind: u8, value_f: f32) {
-    self.add_i(clock, unit_no, kind, value_f.to_bits() as i32);
+  pub fn add_f(&mut self, clock: i32, unit_index: u8, kind: u8, value_f: f32) {
+    self.add_i(clock, unit_index, kind, value_f.to_bits() as i32);
   }
 
   /// Shifts the value of all matching events in `[clock1, clock2)` by `delta`.
   /// Pass `clock2 = -1` to apply through the end of the song.
-  pub fn value_change(&mut self, clock1: i32, clock2: i32, unit_no: u8, kind: u8, delta: i32) {
+  pub fn value_change(&mut self, clock1: i32, clock2: i32, unit_index: u8, kind: u8, delta: i32) {
     let (max, min) = match kind {
       EVENTKIND_NULL => (0, 0),
       EVENTKIND_ON => (120, 120),
@@ -252,7 +278,7 @@ impl EventList {
       _ => (0, 0),
     };
     for e in &mut self.events {
-      if e.unit_no == unit_no
+      if e.unit_index == unit_index
         && e.kind == kind
         && e.clock >= clock1
         && (clock2 == -1 || e.clock < clock2)

@@ -2,5 +2,8 @@
   "tasks": {
     "build-wasm": "cargo build --target wasm32-unknown-unknown --release",
     "test-wasm": "deno test --allow-read --no-check tests/wasm_test.ts"
+  },
+  "imports": {
+    "@std/toml": "jsr:@std/toml@^1.0.11"
   }
 }

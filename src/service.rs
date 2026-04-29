@@ -303,7 +303,7 @@ impl PxtoneService {
 
     let clock1 = self.events.get_max_clock() as u32;
     let clock2 = self.master.get_last_clock();
-    self.master.adjust_meas_num(clock1.max(clock2));
+    self.master.adjust_measure_num(clock1.max(clock2));
 
     self.data_loaded = true;
     Ok(())
@@ -498,7 +498,7 @@ impl PxtoneService {
     }
 
     let end = name.iter().position(|&b| b == 0).unwrap_or(MAX_UNIT_NAME);
-    self.units[unit_index].name = String::from_utf8_lossy(&name[..end]).into_owned();
+    self.units[unit_index].name = name[..end].to_vec();
     Ok(())
   }
 
@@ -517,7 +517,7 @@ impl PxtoneService {
     let u_idx = self.units.len();
     let end = name.iter().position(|&b| b == 0).unwrap_or(MAX_UNIT_NAME);
     let mut unit = Unit::new();
-    unit.name = String::from_utf8_lossy(&name[..end]).into_owned();
+    unit.name = name[..end].to_vec();
     self.units.push(unit);
     self.unit_woice_idxs.push(0);
 
@@ -560,7 +560,7 @@ impl PxtoneService {
     let beat_clock = r.read_u16::<LE>()?;
     let beat_num = r.read_u16::<LE>()? as u8;
     let _beat_note = r.read_u16::<LE>()?;
-    let _meas_num = r.read_u16::<LE>()?;
+    let _measure_num = r.read_u16::<LE>()?;
     let _channels = r.read_u16::<LE>()?;
     let _bits_per_sample = r.read_u16::<LE>()?;
     let _sample_rate = r.read_u32::<LE>()?;
@@ -583,7 +583,7 @@ impl PxtoneService {
         .events
         .records()
         .iter()
-        .any(|e| e.unit_no == u as u8 && e.kind == EVENTKIND_KEY);
+        .any(|e| e.unit_index == u as u8 && e.kind == EVENTKIND_KEY);
       if !has_key {
         self.events.add_i(0, u as u8, EVENTKIND_KEY, 0x6000);
       }
@@ -654,7 +654,7 @@ impl PxtoneService {
     let measure_end = prep
       .measure_end
       .unwrap_or_else(|| self.master.get_play_meas());
-    let measure_repeat = prep.measure_repeat.unwrap_or(self.master.repeat_meas);
+    let measure_repeat = prep.measure_repeat.unwrap_or(self.master.repeat_measure);
     let fade_in_secs = prep.fade_in_secs;
     self.moo_mute_by_unit = prep.flags & VomitPrepFlags::UNIT_MUTE != 0;
     self.moo_loop = prep.flags & VomitPrepFlags::LOOP != 0;
@@ -719,7 +719,7 @@ impl PxtoneService {
     if tempo == 0.0 {
       return 0;
     }
-    let total_beats = self.master.meas_num * self.master.beat_num as u32;
+    let total_beats = self.master.measure_num * self.master.beat_num as u32;
     (self.dst_sample_rate as f64 * 60.0 * total_beats as f64 / tempo as f64) as u32
   }
 
@@ -830,7 +830,7 @@ impl PxtoneService {
       let ev: EventRecord = self.events.records()[self.moo_event_index].clone();
       self.moo_event_index += 1;
 
-      let u = ev.unit_no as usize;
+      let u = ev.unit_index as usize;
       if u >= self.units.len() {
         continue;
       }
@@ -984,7 +984,7 @@ impl PxtoneService {
             if let Some(ne) = self.events.records()[self.moo_event_index..]
               .iter()
               .take_while(|e| e.clock <= c_limit)
-              .find(|e| e.unit_no == ev.unit_no && e.kind == EVENTKIND_ON)
+              .find(|e| e.unit_index == ev.unit_index && e.kind == EVENTKIND_ON)
             {
               max_life2 = ((ne.clock - clock) as f64 * clock_rate) as i32;
             }

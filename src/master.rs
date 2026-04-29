@@ -13,9 +13,9 @@ pub struct Master {
   pub(crate) beat_num: u8,
   pub(crate) beat_tempo: f32,
   pub(crate) beat_clock: u16,
-  pub(crate) meas_num: u32,
-  pub(crate) repeat_meas: u32,
-  pub(crate) last_meas: u32,
+  pub(crate) measure_num: u32,
+  pub(crate) repeat_measure: u32,
+  pub(crate) last_measure: u32,
 }
 
 impl Default for Master {
@@ -24,9 +24,9 @@ impl Default for Master {
       beat_num: EVENTDEFAULT_BEATNUM,
       beat_tempo: EVENTDEFAULT_BEATTEMPO,
       beat_clock: EVENTDEFAULT_BEATCLOCK,
-      meas_num: 1,
-      repeat_meas: 0,
-      last_meas: 0,
+      measure_num: 1,
+      repeat_measure: 0,
+      last_measure: 0,
     }
   }
 }
@@ -52,52 +52,52 @@ impl Master {
   }
 
   /// Returns the total length of the song in measures.
-  pub fn meas_num(&self) -> u32 {
-    self.meas_num
+  pub fn measure_num(&self) -> u32 {
+    self.measure_num
   }
 
   /// Returns the loop start position in measures. `0` means no loop point is set.
-  pub fn repeat_meas(&self) -> u32 {
-    self.repeat_meas
+  pub fn repeat_measure(&self) -> u32 {
+    self.repeat_measure
   }
 
   /// Returns the loop end position in measures. `0` means use the full song length.
-  pub fn last_meas(&self) -> u32 {
-    self.last_meas
+  pub fn last_measure(&self) -> u32 {
+    self.last_measure
   }
 
   pub(crate) fn get_last_clock(&self) -> u32 {
-    self.last_meas * self.beat_clock as u32 * self.beat_num as u32
+    self.last_measure * self.beat_clock as u32 * self.beat_num as u32
   }
 
   pub(crate) fn get_play_meas(&self) -> u32 {
-    if self.last_meas != 0 {
-      self.last_meas
+    if self.last_measure != 0 {
+      self.last_measure
     } else {
-      self.meas_num
+      self.measure_num
     }
   }
 
-  pub(crate) fn adjust_meas_num(&mut self, clock: u32) {
+  pub(crate) fn adjust_measure_num(&mut self, clock: u32) {
     let b_num = clock.div_ceil(self.beat_clock as u32);
     let m_num = b_num.div_ceil(self.beat_num as u32);
-    if self.meas_num <= m_num {
-      self.meas_num = m_num;
+    if self.measure_num <= m_num {
+      self.measure_num = m_num;
     }
-    if self.repeat_meas >= self.meas_num {
-      self.repeat_meas = 0;
+    if self.repeat_measure >= self.measure_num {
+      self.repeat_measure = 0;
     }
-    if self.last_meas > self.meas_num {
-      self.last_meas = self.meas_num;
+    if self.last_measure > self.measure_num {
+      self.last_measure = self.measure_num;
     }
   }
 
-  pub(crate) fn set_repeat_meas(&mut self, meas: u32) {
-    self.repeat_meas = meas;
+  pub(crate) fn set_repeat_measure(&mut self, meas: u32) {
+    self.repeat_measure = meas;
   }
 
-  pub(crate) fn set_last_meas(&mut self, meas: u32) {
-    self.last_meas = meas;
+  pub(crate) fn set_last_measure(&mut self, meas: u32) {
+    self.last_measure = meas;
   }
 
   // Reads a v5-format Master block.
@@ -121,8 +121,8 @@ impl Master {
 
     let denom = beat_num as i32 * beat_clock;
     if denom > 0 {
-      self.set_repeat_meas((clock_repeat / denom) as u32);
-      self.set_last_meas((clock_last / denom) as u32);
+      self.set_repeat_measure((clock_repeat / denom) as u32);
+      self.set_last_measure((clock_last / denom) as u32);
     }
 
     Ok(())
@@ -197,8 +197,8 @@ impl Master {
 
     let denom = beat_num as i32 * beat_clock;
     if denom > 0 {
-      self.set_repeat_meas((repeat_clock / denom) as u32);
-      self.set_last_meas((last_clock / denom) as u32);
+      self.set_repeat_measure((repeat_clock / denom) as u32);
+      self.set_last_measure((last_clock / denom) as u32);
     }
 
     Ok(())

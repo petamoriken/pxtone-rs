@@ -65,20 +65,62 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
   let m = &service.master;
   let t = &service.text;
   let mut table = Table::new();
-  table.insert(
+  let mut text_table = Table::new();
+  text_table.insert(
     "name".into(),
     Value::String(decode_shift_jis(t.name().unwrap_or_default())),
   );
-  table.insert(
+  text_table.insert(
     "comment".into(),
     Value::String(decode_shift_jis(t.comment().unwrap_or_default())),
   );
-  table.insert("beat_clock".into(), Value::Integer(m.beat_clock() as i64));
-  table.insert("beat_num".into(), Value::Integer(m.beat_num() as i64));
-  table.insert("beat_tempo".into(), Value::Float(m.beat_tempo() as f64));
-  table.insert("meas_num".into(), Value::Integer(m.meas_num() as i64));
-  table.insert("repeat_meas".into(), Value::Integer(m.repeat_meas() as i64));
-  table.insert("last_meas".into(), Value::Integer(m.last_meas() as i64));
+  table.insert("text".into(), Value::Table(text_table));
+  let mut master_table = Table::new();
+  master_table.insert("beat_clock".into(), Value::Integer(m.beat_clock() as i64));
+  master_table.insert("beat_num".into(), Value::Integer(m.beat_num() as i64));
+  master_table.insert("beat_tempo".into(), Value::Float(m.beat_tempo() as f64));
+  master_table.insert("measure_num".into(), Value::Integer(m.measure_num() as i64));
+  master_table.insert(
+    "repeat_measure".into(),
+    Value::Integer(m.repeat_measure() as i64),
+  );
+  master_table.insert(
+    "last_measure".into(),
+    Value::Integer(m.last_measure() as i64),
+  );
+  table.insert("master".into(), Value::Table(master_table));
+
+  let units_array = Value::Array(
+    service
+      .units
+      .iter()
+      .map(|u| {
+        let mut t = Table::new();
+        t.insert("name".into(), Value::String(decode_shift_jis(u.name())));
+        t.insert("played".into(), Value::Boolean(u.played()));
+        Value::Table(t)
+      })
+      .collect(),
+  );
+  table.insert("units".into(), units_array);
+
+  let events_array = Value::Array(
+    service
+      .events
+      .records()
+      .iter()
+      .map(|e| {
+        let mut t = Table::new();
+        t.insert("clock".into(), Value::Integer(e.clock() as i64));
+        t.insert("unit_index".into(), Value::Integer(e.unit_index() as i64));
+        t.insert("kind".into(), Value::Integer(e.kind() as i64));
+        t.insert("value".into(), Value::Integer(e.value() as i64));
+        Value::Table(t)
+      })
+      .collect(),
+  );
+  table.insert("events".into(), events_array);
+
   toml::to_string(&table).unwrap()
 }
 

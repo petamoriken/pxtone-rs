@@ -222,3 +222,149 @@ pub unsafe extern "C" fn service_render_noise(
   }
   ptr
 }
+
+/// Returns the number of units in the loaded song.
+/// Returns 0 if `svc` is null.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_get_unit_count(svc: *const PxtoneService) -> u32 {
+  if svc.is_null() {
+    return 0;
+  }
+  unsafe { &*svc }.units.len() as u32
+}
+
+/// Returns a pointer to the unit's raw name bytes and writes their byte length to `*out_len`.
+/// The pointer is valid as long as `svc` is alive and unmodified.
+/// Returns null if `svc` is null, `out_len` is null, or `idx` is out of range.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`].
+/// `out_len` must be a valid writable pointer.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_unit_name(
+  svc: *const PxtoneService,
+  idx: u32,
+  out_len: *mut u32,
+) -> *const u8 {
+  if svc.is_null() || out_len.is_null() {
+    return std::ptr::null();
+  }
+  let svc = unsafe { &*svc };
+  match svc.units.get(idx as usize) {
+    Some(unit) => {
+      let name = unit.name();
+      unsafe { *out_len = name.len() as u32 };
+      name.as_ptr()
+    }
+    None => {
+      unsafe { *out_len = 0 };
+      std::ptr::null()
+    }
+  }
+}
+
+/// Returns 1 if the unit at `idx` is active (not muted), 0 if muted, -1 on error.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_unit_played(svc: *const PxtoneService, idx: u32) -> i32 {
+  if svc.is_null() {
+    return -1;
+  }
+  let svc = unsafe { &*svc };
+  match svc.units.get(idx as usize) {
+    Some(u) => {
+      if u.played() {
+        1
+      } else {
+        0
+      }
+    }
+    None => -1,
+  }
+}
+
+/// Returns the number of events in the loaded song.
+/// Returns 0 if `svc` is null.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_get_event_count(svc: *const PxtoneService) -> u32 {
+  if svc.is_null() {
+    return 0;
+  }
+  unsafe { &*svc }.events.records().len() as u32
+}
+
+/// Returns the tick clock of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_get_event_clock(svc: *const PxtoneService, idx: u32) -> i32 {
+  if svc.is_null() {
+    return 0;
+  }
+  let svc = unsafe { &*svc };
+  svc
+    .events
+    .records()
+    .get(idx as usize)
+    .map_or(0, |e| e.clock())
+}
+
+/// Returns the unit index of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_get_event_unit_index(svc: *const PxtoneService, idx: u32) -> u32 {
+  if svc.is_null() {
+    return 0;
+  }
+  let svc = unsafe { &*svc };
+  svc
+    .events
+    .records()
+    .get(idx as usize)
+    .map_or(0, |e| e.unit_index() as u32)
+}
+
+/// Returns the kind of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_get_event_kind(svc: *const PxtoneService, idx: u32) -> u32 {
+  if svc.is_null() {
+    return 0;
+  }
+  let svc = unsafe { &*svc };
+  svc
+    .events
+    .records()
+    .get(idx as usize)
+    .map_or(0, |e| e.kind() as u32)
+}
+
+/// Returns the value of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_get_event_value(svc: *const PxtoneService, idx: u32) -> i32 {
+  if svc.is_null() {
+    return 0;
+  }
+  let svc = unsafe { &*svc };
+  svc
+    .events
+    .records()
+    .get(idx as usize)
+    .map_or(0, |e| e.value())
+}
