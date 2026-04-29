@@ -40,7 +40,9 @@ interface WasmExports {
 
 interface PtcopSnapshot {
   units: Array<{ name: string; played: boolean }>;
-  events: Array<{ clock: number; unit_index: number; kind: number; value: number }>;
+  events: Array<
+    { clock: number; unit_index: number; kind: number; value: number }
+  >;
 }
 
 function instantiate(): WasmExports {
@@ -48,11 +50,16 @@ function instantiate(): WasmExports {
   return instance.exports as unknown as WasmExports;
 }
 
-function pcmToWav(samples: Uint8Array, channels: number, sampleRate: number): Uint8Array {
+function pcmToWav(
+  samples: Uint8Array,
+  channels: number,
+  sampleRate: number,
+): Uint8Array {
   const buf = new ArrayBuffer(44 + samples.length);
   const view = new DataView(buf);
   const enc = new TextEncoder();
-  const str = (s: string, off: number) => enc.encode(s).forEach((b, i) => view.setUint8(off + i, b));
+  const str = (s: string, off: number) =>
+    enc.encode(s).forEach((b, i) => view.setUint8(off + i, b));
   str("RIFF", 0);
   view.setUint32(4, 36 + samples.length, true);
   str("WAVE", 8);
@@ -81,7 +88,9 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
   }
   names.sort();
 
-  if (names.length === 0) throw new Error("no .ptcop files found in tests/sample/ptcop/");
+  if (names.length === 0) {
+    throw new Error("no .ptcop files found in tests/sample/ptcop/");
+  }
 
   const failures: string[] = [];
   const dec = new TextDecoder();
@@ -114,13 +123,17 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
     // Units
     const unitCount = ex.service_get_unit_count(svc);
     if (unitCount !== snapshot.units.length) {
-      failures.push(`${stem}.toml: unit count mismatch (got ${unitCount}, expected ${snapshot.units.length})`);
+      failures.push(
+        `${stem}.toml: unit count mismatch (got ${unitCount}, expected ${snapshot.units.length})`,
+      );
     } else {
       const lenPtr = ex.alloc(4);
       for (let i = 0; i < unitCount; i++) {
         const namePtr = ex.service_unit_name(svc, i, lenPtr);
         const nameLen = new Uint32Array(ex.memory.buffer, lenPtr, 1)[0];
-        const unitName = dec.decode(new Uint8Array(ex.memory.buffer, namePtr, nameLen));
+        const unitName = dec.decode(
+          new Uint8Array(ex.memory.buffer, namePtr, nameLen),
+        );
         const played = ex.service_unit_played(svc, i) !== 0;
         const expected = snapshot.units[i];
         if (unitName !== expected.name || played !== expected.played) {
@@ -133,7 +146,9 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
     // Events
     const eventCount = ex.service_get_event_count(svc);
     if (eventCount !== snapshot.events.length) {
-      failures.push(`${stem}.toml: event count mismatch (got ${eventCount}, expected ${snapshot.events.length})`);
+      failures.push(
+        `${stem}.toml: event count mismatch (got ${eventCount}, expected ${snapshot.events.length})`,
+      );
     } else {
       for (let i = 0; i < eventCount; i++) {
         const clock = ex.service_get_event_clock(svc, i);
@@ -141,7 +156,10 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
         const kind = ex.service_get_event_kind(svc, i);
         const value = ex.service_get_event_value(svc, i);
         const expected = snapshot.events[i];
-        if (clock !== expected.clock || unitNo !== expected.unit_index || kind !== expected.kind || value !== expected.value) {
+        if (
+          clock !== expected.clock || unitNo !== expected.unit_index ||
+          kind !== expected.kind || value !== expected.value
+        ) {
           failures.push(`${stem}.toml: event[${i}] mismatch`);
         }
       }
@@ -170,20 +188,27 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
     const totalLen = chunks.reduce((n, c) => n + c.length, 0);
     const pcm = new Uint8Array(totalLen);
     let off = 0;
-    for (const c of chunks) { pcm.set(c, off); off += c.length; }
+    for (const c of chunks) {
+      pcm.set(c, off);
+      off += c.length;
+    }
 
     const wav = pcmToWav(pcm, channels, sampleRate);
     const wavPath = join(snapshotDir, `${stem}.wav`);
     const expected = await Deno.readFile(wavPath);
 
-    if (wav.length !== expected.length || wav.some((b, i) => b !== expected[i])) {
+    if (
+      wav.length !== expected.length || wav.some((b, i) => b !== expected[i])
+    ) {
       failures.push(wavPath);
     }
   }
 
   if (failures.length > 0) {
     throw new Error(
-      `Decoded output does not match reference (${failures.length} file(s)):\n${failures.join("\n")}`,
+      `Decoded output does not match reference (${failures.length} file(s)):\n${
+        failures.join("\n")
+      }`,
     );
   }
 });
@@ -199,7 +224,9 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
   }
   names.sort();
 
-  if (names.length === 0) throw new Error("no .ptnoise files found in tests/sample/ptnoise/");
+  if (names.length === 0) {
+    throw new Error("no .ptnoise files found in tests/sample/ptnoise/");
+  }
 
   const failures: string[] = [];
   const svc = ex.service_new();
@@ -214,7 +241,9 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
     const ptnoiseData = await Deno.readFile(join(sampleDir, name));
 
     const dataPtr = ex.alloc(ptnoiseData.length);
-    new Uint8Array(ex.memory.buffer, dataPtr, ptnoiseData.length).set(ptnoiseData);
+    new Uint8Array(ex.memory.buffer, dataPtr, ptnoiseData.length).set(
+      ptnoiseData,
+    );
 
     const samplesPtr = ex.service_render_noise(
       svc,
@@ -235,14 +264,17 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
     const sampleRate = new Uint32Array(ex.memory.buffer, outSampleRate, 1)[0];
     const samplesLen = new Uint32Array(ex.memory.buffer, outSamplesLen, 1)[0];
 
-    const samples = new Uint8Array(ex.memory.buffer, samplesPtr, samplesLen).slice();
+    const samples = new Uint8Array(ex.memory.buffer, samplesPtr, samplesLen)
+      .slice();
     ex.dealloc(samplesPtr, samplesLen);
 
     const wav = pcmToWav(samples, channels, sampleRate);
     const wavPath = join(snapshotDir, `${stem}.wav`);
     const expected = await Deno.readFile(wavPath);
 
-    if (wav.length !== expected.length || wav.some((b, i) => b !== expected[i])) {
+    if (
+      wav.length !== expected.length || wav.some((b, i) => b !== expected[i])
+    ) {
       failures.push(wavPath);
     }
   }
@@ -254,7 +286,9 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
 
   if (failures.length > 0) {
     throw new Error(
-      `Decoded output does not match reference (${failures.length} file(s)):\n${failures.join("\n")}`,
+      `Decoded output does not match reference (${failures.length} file(s)):\n${
+        failures.join("\n")
+      }`,
     );
   }
 });
