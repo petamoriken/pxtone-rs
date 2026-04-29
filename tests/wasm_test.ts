@@ -3,13 +3,21 @@ import {
   dealloc,
   memory,
   service_free,
+  service_get_beat_clock,
+  service_get_beat_num,
+  service_get_beat_tempo,
   service_get_channels,
   service_get_event_clock,
   service_get_event_count,
   service_get_event_kind,
   service_get_event_unit_index,
   service_get_event_value,
+  service_get_last_measure,
+  service_get_measure_num,
+  service_get_repeat_measure,
   service_get_sample_rate,
+  service_get_text_comment,
+  service_get_text_name,
   service_get_unit_count,
   service_get_unit_name,
   service_get_unit_played,
@@ -30,6 +38,15 @@ import { parse as parseToml } from "@std/toml";
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
 interface PtcopSnapshot {
+  text: { name: string; comment: string };
+  master: {
+    beat_clock: number;
+    beat_num: number;
+    beat_tempo: number;
+    measure_num: number;
+    repeat_measure: number;
+    last_measure: number;
+  };
   units: Array<{ name: string; played: boolean }>;
   events: Array<
     { clock: number; unit_index: number; kind: number; value: number }
@@ -79,6 +96,7 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
 
   const failures: string[] = [];
   const dec = new TextDecoder();
+  const decSjis = new TextDecoder("shift-jis");
 
   for (const name of names) {
     const stem = name.slice(0, -6);
@@ -105,6 +123,49 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       continue;
     }
 
+    const lenPtr = alloc(4);
+
+    // Text
+    {
+      const namePtr = service_get_text_name(svc, lenPtr);
+      const nameLen = new Uint32Array(memory.buffer, lenPtr, 1)[0];
+      const textName = namePtr !== 0
+        ? decSjis.decode(new Uint8Array(memory.buffer, namePtr, nameLen))
+        : "";
+      const commentPtr = service_get_text_comment(svc, lenPtr);
+      const commentLen = new Uint32Array(memory.buffer, lenPtr, 1)[0];
+      const textComment = commentPtr !== 0
+        ? decSjis.decode(new Uint8Array(memory.buffer, commentPtr, commentLen))
+        : "";
+      if (
+        textName !== snapshot.text.name ||
+        textComment !== snapshot.text.comment
+      ) {
+        failures.push(`${stem}.toml: text mismatch`);
+      }
+    }
+
+    // Master
+    {
+      const beatClock = service_get_beat_clock(svc);
+      const beatNum = service_get_beat_num(svc);
+      const beatTempo = service_get_beat_tempo(svc);
+      const measureNum = service_get_measure_num(svc);
+      const repeatMeasure = service_get_repeat_measure(svc);
+      const lastMeasure = service_get_last_measure(svc);
+      const m = snapshot.master;
+      if (
+        beatClock !== m.beat_clock ||
+        beatNum !== m.beat_num ||
+        Math.abs(beatTempo - m.beat_tempo) >= 0.001 ||
+        measureNum !== m.measure_num ||
+        repeatMeasure !== m.repeat_measure ||
+        lastMeasure !== m.last_measure
+      ) {
+        failures.push(`${stem}.toml: master mismatch`);
+      }
+    }
+
     // Units
     const unitCount = service_get_unit_count(svc);
     if (unitCount !== snapshot.units.length) {
@@ -112,7 +173,6 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
         `${stem}.toml: unit count mismatch (got ${unitCount}, expected ${snapshot.units.length})`,
       );
     } else {
-      const lenPtr = alloc(4);
       for (let i = 0; i < unitCount; i++) {
         const namePtr = service_get_unit_name(svc, i, lenPtr);
         const nameLen = new Uint32Array(memory.buffer, lenPtr, 1)[0];
@@ -125,8 +185,9 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
           failures.push(`${stem}.toml: unit[${i}] mismatch`);
         }
       }
-      dealloc(lenPtr, 4);
     }
+
+    dealloc(lenPtr, 4);
 
     // Events
     const eventCount = service_get_event_count(svc);
