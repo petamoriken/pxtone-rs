@@ -1,6 +1,6 @@
 {
   "tasks": {
-    "build-wasm": "cargo build --target wasm32-unknown-unknown --profile release-wasm",
+    "build-wasm": "RUSTFLAGS=\"--remap-path-prefix $HOME=~\" cargo build --target wasm32-unknown-unknown --profile release-wasm",
     "opt-wasm": "wasm-opt -O3 --enable-bulk-memory-opt --enable-nontrapping-float-to-int target/wasm32-unknown-unknown/release-wasm/pxtone.wasm -o target/wasm32-unknown-unknown/release-wasm/pxtone.wasm",
     "test-wasm": "deno test --allow-read --no-check tests/wasm_test.ts"
   },
