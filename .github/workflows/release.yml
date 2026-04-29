@@ -37,7 +37,7 @@ jobs:
         run: deno task opt-wasm
 
       - name: Create release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ github.event.inputs.tag }}
           files: target/wasm32-unknown-unknown/release-wasm/pxtone.wasm
