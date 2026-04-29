@@ -1,7 +1,7 @@
 use crate::error::PxtoneError;
 use crate::event::{
-  EVENTDEFAULT_BEATCLOCK, EVENTDEFAULT_BEATNUM, EVENTDEFAULT_BEATTEMPO, EVENTKIND_BEATCLOCK,
-  EVENTKIND_BEATNUM, EVENTKIND_BEATTEMPO, EVENTKIND_LAST, EVENTKIND_REPEAT,
+  EVENT_DEFAULT_BEAT_CLOCK, EVENT_DEFAULT_BEAT_NUM, EVENT_DEFAULT_BEAT_TEMPO, EVENT_KIND_BEAT_CLOCK,
+  EVENT_KIND_BEAT_NUM, EVENT_KIND_BEAT_TEMPO, EVENT_KIND_LAST, EVENT_KIND_REPEAT,
 };
 use crate::read_ext::ReadExt;
 use byteorder::{LE, ReadBytesExt};
@@ -21,9 +21,9 @@ pub struct Master {
 impl Default for Master {
   fn default() -> Self {
     Self {
-      beat_num: EVENTDEFAULT_BEATNUM,
-      beat_tempo: EVENTDEFAULT_BEATTEMPO,
-      beat_clock: EVENTDEFAULT_BEATCLOCK,
+      beat_num: EVENT_DEFAULT_BEAT_NUM,
+      beat_tempo: EVENT_DEFAULT_BEAT_TEMPO,
+      beat_clock: EVENT_DEFAULT_BEAT_CLOCK,
       measure_num: 1,
       repeat_measure: 0,
       last_measure: 0,
@@ -142,9 +142,9 @@ impl Master {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let mut beat_clock: i32 = EVENTDEFAULT_BEATCLOCK.into();
-    let mut beat_num: u8 = EVENTDEFAULT_BEATNUM;
-    let mut beat_tempo = EVENTDEFAULT_BEATTEMPO;
+    let mut beat_clock: i32 = EVENT_DEFAULT_BEAT_CLOCK.into();
+    let mut beat_num: u8 = EVENT_DEFAULT_BEAT_NUM;
+    let mut beat_tempo = EVENT_DEFAULT_BEAT_TEMPO;
     let mut repeat_clock = 0i32;
     let mut last_clock = 0i32;
     let mut absolute = 0i32;
@@ -157,31 +157,31 @@ impl Master {
       let clock = absolute;
 
       match status as u8 {
-        EVENTKIND_BEATCLOCK => {
+        EVENT_KIND_BEAT_CLOCK => {
           if clock != 0 {
             return Err(PxtoneError::BrokenFile);
           }
           beat_clock = volume;
         }
-        EVENTKIND_BEATTEMPO => {
+        EVENT_KIND_BEAT_TEMPO => {
           if clock != 0 {
             return Err(PxtoneError::BrokenFile);
           }
           beat_tempo = f32::from_bits(volume as u32);
         }
-        EVENTKIND_BEATNUM => {
+        EVENT_KIND_BEAT_NUM => {
           if clock != 0 {
             return Err(PxtoneError::BrokenFile);
           }
           beat_num = volume as u8;
         }
-        EVENTKIND_REPEAT => {
+        EVENT_KIND_REPEAT => {
           if volume != 0 {
             return Err(PxtoneError::BrokenFile);
           }
           repeat_clock = clock;
         }
-        EVENTKIND_LAST => {
+        EVENT_KIND_LAST => {
           if volume != 0 {
             return Err(PxtoneError::BrokenFile);
           }

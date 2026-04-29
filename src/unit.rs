@@ -1,6 +1,6 @@
 use crate::event::{
-  EVENTDEFAULT_GROUPNO, EVENTDEFAULT_KEY, EVENTDEFAULT_TUNING, EVENTDEFAULT_VELOCITY,
-  EVENTDEFAULT_VOLUME,
+  EVENT_DEFAULT_GROUP_NO, EVENT_DEFAULT_KEY, EVENT_DEFAULT_TUNING, EVENT_DEFAULT_VELOCITY,
+  EVENT_DEFAULT_VOLUME,
 };
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, VoiceInstance};
 
@@ -55,18 +55,18 @@ impl Default for Unit {
     Self {
       played: true,
       name: b"no name".to_vec(),
-      key: EVENTDEFAULT_KEY,
-      key_start: EVENTDEFAULT_KEY,
+      key: EVENT_DEFAULT_KEY,
+      key_start: EVENT_DEFAULT_KEY,
       key_delta: 0,
       portamento_pos: 0,
       portamento_duration: 0,
       pan_volumes: [64; MAX_CHANNEL],
       pan_delays: [0; MAX_CHANNEL],
       pan_delay_buffers: [[0; BUFSIZE_TIMEPAN]; MAX_CHANNEL],
-      volume: EVENTDEFAULT_VOLUME,
-      velocity: EVENTDEFAULT_VELOCITY,
-      group_index: EVENTDEFAULT_GROUPNO,
-      tuning: EVENTDEFAULT_TUNING,
+      volume: EVENT_DEFAULT_VOLUME,
+      velocity: EVENT_DEFAULT_VELOCITY,
+      group_index: EVENT_DEFAULT_GROUP_NO,
+      tuning: EVENT_DEFAULT_TUNING,
       voice_num: 0,
       voice_flags: Vec::new(),
       tones: Default::default(),
@@ -98,10 +98,10 @@ impl Unit {
   }
 
   pub(crate) fn tone_init(&mut self) {
-    self.group_index = EVENTDEFAULT_GROUPNO;
-    self.velocity = EVENTDEFAULT_VELOCITY;
-    self.volume = EVENTDEFAULT_VOLUME;
-    self.tuning = EVENTDEFAULT_TUNING;
+    self.group_index = EVENT_DEFAULT_GROUP_NO;
+    self.velocity = EVENT_DEFAULT_VELOCITY;
+    self.volume = EVENT_DEFAULT_VOLUME;
+    self.tuning = EVENT_DEFAULT_TUNING;
     self.portamento_duration = 0;
     self.portamento_pos = 0;
     self.pan_volumes.fill(64);
@@ -132,9 +132,9 @@ impl Unit {
   pub(crate) fn set_woice(&mut self, voice_num: usize, voice_flags: Vec<u32>) {
     self.voice_num = voice_num;
     self.voice_flags = voice_flags;
-    self.key = EVENTDEFAULT_KEY;
+    self.key = EVENT_DEFAULT_KEY;
     self.key_delta = 0;
-    self.key_start = EVENTDEFAULT_KEY;
+    self.key_start = EVENT_DEFAULT_KEY;
   }
 
   #[inline]

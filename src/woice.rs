@@ -1,5 +1,5 @@
 use crate::error::PxtoneError;
-use crate::event::EVENTDEFAULT_BASICKEY;
+use crate::event::EVENT_DEFAULT_BASIC_KEY;
 use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
@@ -85,7 +85,7 @@ impl Default for VoiceData {
 /// Design parameters for one voice layer within an instrument.
 pub(crate) struct VoiceUnit {
   /// Base pitch in raw pxtone key units. Event KEY values are relative to this.
-  /// The default `EVENTDEFAULT_BASICKEY` (`0x4500`) is the reference concert pitch.
+  /// The default `EVENT_DEFAULT_BASIC_KEY` (`0x4500`) is the reference concert pitch.
   pub(crate) basic_key: u32,
   /// Base volume (0–128).
   pub(crate) volume: u32,
@@ -102,7 +102,7 @@ pub(crate) struct VoiceUnit {
 impl Default for VoiceUnit {
   fn default() -> Self {
     Self {
-      basic_key: EVENTDEFAULT_BASICKEY,
+      basic_key: EVENT_DEFAULT_BASIC_KEY,
       volume: 128,
       pan: 64,
       tuning: 1.0,

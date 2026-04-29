@@ -2,9 +2,9 @@ use crate::effect::delay::Delay;
 use crate::effect::overdrive::OverDrive;
 use crate::error::PxtoneError;
 use crate::event::{
-  EVENTDEFAULT_BASICKEY, EVENTDEFAULT_VOICENO, EVENTKIND_GROUPNO, EVENTKIND_KEY, EVENTKIND_ON,
-  EVENTKIND_PAN_TIME, EVENTKIND_PAN_VOLUME, EVENTKIND_PORTAMENT, EVENTKIND_TUNING,
-  EVENTKIND_VELOCITY, EVENTKIND_VOICENO, EVENTKIND_VOLUME, EventList, EventRecord,
+  EVENT_DEFAULT_BASIC_KEY, EVENT_DEFAULT_VOICE_NO, EVENT_KIND_GROUP_NO, EVENT_KIND_KEY, EVENT_KIND_ON,
+  EVENT_KIND_PAN_TIME, EVENT_KIND_PAN_VOLUME, EVENT_KIND_PORTAMENT, EVENT_KIND_TUNING,
+  EVENT_KIND_VELOCITY, EVENT_KIND_VOICE_NO, EVENT_KIND_VOLUME, EventList, EventRecord,
 };
 use crate::master::Master;
 use crate::pulse::frequency::FrequencyTable;
@@ -522,10 +522,10 @@ impl PxtoneService {
     self.unit_woice_idxs.push(0);
 
     let g = group.min(self.group_num as i32 - 1);
-    self.events.add_i(0, u_idx as u8, EVENTKIND_GROUPNO, g);
+    self.events.add_i(0, u_idx as u8, EVENT_KIND_GROUP_NO, g);
     self
       .events
-      .add_i(0, u_idx as u8, EVENTKIND_VOICENO, u_idx as i32);
+      .add_i(0, u_idx as u8, EVENT_KIND_VOICE_NO, u_idx as i32);
     Ok(())
   }
 
@@ -544,10 +544,10 @@ impl PxtoneService {
     self.unit_woice_idxs.push(0);
 
     let g = group.min(self.group_num as i32 - 1);
-    self.events.add_i(0, u_idx as u8, EVENTKIND_GROUPNO, g);
+    self.events.add_i(0, u_idx as u8, EVENT_KIND_GROUP_NO, g);
     self
       .events
-      .add_i(0, u_idx as u8, EVENTKIND_VOICENO, u_idx as i32);
+      .add_i(0, u_idx as u8, EVENT_KIND_VOICE_NO, u_idx as i32);
     Ok(())
   }
 
@@ -575,21 +575,21 @@ impl PxtoneService {
   // ---- x3x/x2x/x1x post-processing ----
 
   fn x3x_tuning_key_event(&mut self) -> Result<(), PxtoneError> {
-    use crate::event::EVENTKIND_KEY;
+    use crate::event::EVENT_KIND_KEY;
     let unit_num = self.units.len().min(self.woices.len());
     for u in 0..unit_num {
-      let change = self.woices[u].x3x_basic_key as i32 - EVENTDEFAULT_BASICKEY as i32;
+      let change = self.woices[u].x3x_basic_key as i32 - EVENT_DEFAULT_BASIC_KEY as i32;
       let has_key = self
         .events
         .records()
         .iter()
-        .any(|e| e.unit_index == u as u8 && e.kind == EVENTKIND_KEY);
+        .any(|e| e.unit_index == u as u8 && e.kind == EVENT_KIND_KEY);
       if !has_key {
-        self.events.add_i(0, u as u8, EVENTKIND_KEY, 0x6000);
+        self.events.add_i(0, u as u8, EVENT_KIND_KEY, 0x6000);
       }
       self
         .events
-        .value_change(0, -1, u as u8, EVENTKIND_KEY, change);
+        .value_change(0, -1, u as u8, EVENT_KIND_KEY, change);
     }
     Ok(())
   }
@@ -599,7 +599,7 @@ impl PxtoneService {
     for u in 0..unit_num {
       let tuning = self.woices[u].x3x_tuning;
       if tuning != 0.0 {
-        self.events.add_f(0, u as u8, EVENTKIND_TUNING, tuning);
+        self.events.add_f(0, u as u8, EVENT_KIND_TUNING, tuning);
       }
     }
   }
@@ -770,7 +770,7 @@ impl PxtoneService {
       } else {
         self
           .frequency
-          .get(EVENTDEFAULT_BASICKEY as i32 - basic_key as i32)
+          .get(EVENT_DEFAULT_BASIC_KEY as i32 - basic_key as i32)
           * tuning
       };
 
@@ -787,7 +787,7 @@ impl PxtoneService {
   fn moo_init_unit_tone(&mut self) {
     for u in 0..self.units.len() {
       self.units[u].tone_init();
-      self.moo_reset_voice_on(u, EVENTDEFAULT_VOICENO);
+      self.moo_reset_voice_on(u, EVENT_DEFAULT_VOICE_NO);
     }
   }
 
@@ -942,7 +942,7 @@ impl PxtoneService {
     clock_rate: f64,
   ) {
     match ev.kind {
-      EVENTKIND_ON => {
+      EVENT_KIND_ON => {
         let on_count = ((ev.clock + ev.value - clock) as f64 * clock_rate) as i32;
         if on_count <= 0 {
           self.units[u].tone_zero_lives();
@@ -984,7 +984,7 @@ impl PxtoneService {
             if let Some(ne) = self.events.records()[self.moo_event_index..]
               .iter()
               .take_while(|e| e.clock <= c_limit)
-              .find(|e| e.unit_index == ev.unit_index && e.kind == EVENTKIND_ON)
+              .find(|e| e.unit_index == ev.unit_index && e.kind == EVENT_KIND_ON)
             {
               max_life2 = ((ne.clock - clock) as f64 * clock_rate) as i32;
             }
@@ -1010,24 +1010,24 @@ impl PxtoneService {
           }
         }
       }
-      EVENTKIND_KEY => self.units[u].tone_key(ev.value),
-      EVENTKIND_PAN_VOLUME => {
+      EVENT_KIND_KEY => self.units[u].tone_key(ev.value),
+      EVENT_KIND_PAN_VOLUME => {
         self.units[u].tone_pan_volume(self.dst_channels as u32, ev.value as u32)
       }
-      EVENTKIND_PAN_TIME => self.units[u].tone_pan_time(
+      EVENT_KIND_PAN_TIME => self.units[u].tone_pan_time(
         self.dst_channels as u32,
         ev.value as u32,
         self.dst_sample_rate,
       ),
-      EVENTKIND_VELOCITY => self.units[u].tone_velocity(ev.value as u32),
-      EVENTKIND_VOLUME => self.units[u].tone_volume(ev.value as u32),
-      EVENTKIND_PORTAMENT => {
+      EVENT_KIND_VELOCITY => self.units[u].tone_velocity(ev.value as u32),
+      EVENT_KIND_VOLUME => self.units[u].tone_volume(ev.value as u32),
+      EVENT_KIND_PORTAMENT => {
         let v = (ev.value as f64 * clock_rate) as u32;
         self.units[u].tone_portament(v);
       }
-      EVENTKIND_VOICENO => self.moo_reset_voice_on(u, ev.value as usize),
-      EVENTKIND_GROUPNO => self.units[u].tone_groupno(ev.value as usize),
-      EVENTKIND_TUNING => self.units[u].tone_tuning(f32::from_bits(ev.value as u32)),
+      EVENT_KIND_VOICE_NO => self.moo_reset_voice_on(u, ev.value as usize),
+      EVENT_KIND_GROUP_NO => self.units[u].tone_groupno(ev.value as usize),
+      EVENT_KIND_TUNING => self.units[u].tone_tuning(f32::from_bits(ev.value as u32)),
       _ => {} // BEATCLOCK, BEATTEMPO, BEATNUM, REPEAT, LAST are ignored
     }
   }

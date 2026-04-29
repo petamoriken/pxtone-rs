@@ -4,48 +4,48 @@ use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
 // Event kind constants
-pub const EVENTKIND_NULL: u8 = 0;
-pub const EVENTKIND_ON: u8 = 1;
-pub const EVENTKIND_KEY: u8 = 2;
-pub const EVENTKIND_PAN_VOLUME: u8 = 3;
-pub const EVENTKIND_VELOCITY: u8 = 4;
-pub const EVENTKIND_VOLUME: u8 = 5;
-pub const EVENTKIND_PORTAMENT: u8 = 6;
-pub const EVENTKIND_BEATCLOCK: u8 = 7;
-pub const EVENTKIND_BEATTEMPO: u8 = 8;
-pub const EVENTKIND_BEATNUM: u8 = 9;
-pub const EVENTKIND_REPEAT: u8 = 10;
-pub const EVENTKIND_LAST: u8 = 11;
-pub const EVENTKIND_VOICENO: u8 = 12;
-pub const EVENTKIND_GROUPNO: u8 = 13;
-pub const EVENTKIND_TUNING: u8 = 14;
-pub const EVENTKIND_PAN_TIME: u8 = 15;
-pub const EVENTKIND_NUM: usize = 16;
+pub const EVENT_KIND_NULL: u8 = 0;
+pub const EVENT_KIND_ON: u8 = 1;
+pub const EVENT_KIND_KEY: u8 = 2;
+pub const EVENT_KIND_PAN_VOLUME: u8 = 3;
+pub const EVENT_KIND_VELOCITY: u8 = 4;
+pub const EVENT_KIND_VOLUME: u8 = 5;
+pub const EVENT_KIND_PORTAMENT: u8 = 6;
+pub const EVENT_KIND_BEAT_CLOCK: u8 = 7;
+pub const EVENT_KIND_BEAT_TEMPO: u8 = 8;
+pub const EVENT_KIND_BEAT_NUM: u8 = 9;
+pub const EVENT_KIND_REPEAT: u8 = 10;
+pub const EVENT_KIND_LAST: u8 = 11;
+pub const EVENT_KIND_VOICE_NO: u8 = 12;
+pub const EVENT_KIND_GROUP_NO: u8 = 13;
+pub const EVENT_KIND_TUNING: u8 = 14;
+pub const EVENT_KIND_PAN_TIME: u8 = 15;
+pub const EVENT_KIND_NUM: usize = 16;
 
 // Default values
-pub const EVENTDEFAULT_VOLUME: u32 = 104;
-pub const EVENTDEFAULT_VELOCITY: u32 = 104;
-pub const EVENTDEFAULT_PAN_VOLUME: u32 = 64;
-pub const EVENTDEFAULT_PAN_TIME: u32 = 64;
-pub const EVENTDEFAULT_PORTAMENT: u32 = 0;
-pub const EVENTDEFAULT_VOICENO: usize = 0;
-pub const EVENTDEFAULT_GROUPNO: usize = 0;
-pub const EVENTDEFAULT_KEY: i32 = 0x6000;
-pub const EVENTDEFAULT_BASICKEY: u32 = 0x4500;
-pub const EVENTDEFAULT_TUNING: f32 = 1.0;
+pub const EVENT_DEFAULT_VOLUME: u32 = 104;
+pub const EVENT_DEFAULT_VELOCITY: u32 = 104;
+pub const EVENT_DEFAULT_PAN_VOLUME: u32 = 64;
+pub const EVENT_DEFAULT_PAN_TIME: u32 = 64;
+pub const EVENT_DEFAULT_PORTAMENT: u32 = 0;
+pub const EVENT_DEFAULT_VOICE_NO: usize = 0;
+pub const EVENT_DEFAULT_GROUP_NO: usize = 0;
+pub const EVENT_DEFAULT_KEY: i32 = 0x6000;
+pub const EVENT_DEFAULT_BASIC_KEY: u32 = 0x4500;
+pub const EVENT_DEFAULT_TUNING: f32 = 1.0;
 
-pub const EVENTDEFAULT_BEATNUM: u8 = 4;
-pub const EVENTDEFAULT_BEATTEMPO: f32 = 120.0;
-pub const EVENTDEFAULT_BEATCLOCK: u16 = 480;
+pub const EVENT_DEFAULT_BEAT_NUM: u8 = 4;
+pub const EVENT_DEFAULT_BEAT_TEMPO: f32 = 120.0;
+pub const EVENT_DEFAULT_BEAT_CLOCK: u16 = 480;
 
 // Returns whether an event is a "tail" event (ON and PORTAMENT)
 #[inline]
 pub(crate) fn event_kind_is_tail(kind: u8) -> bool {
-  kind == EVENTKIND_ON || kind == EVENTKIND_PORTAMENT
+  kind == EVENT_KIND_ON || kind == EVENT_KIND_PORTAMENT
 }
 
 // Event priority table
-const PRIORITY_TABLE: [u8; EVENTKIND_NUM] = [
+const PRIORITY_TABLE: [u8; EVENT_KIND_NUM] = [
   0,   // NULL
   50,  // ON
   40,  // KEY
@@ -191,7 +191,7 @@ impl EventList {
     if data_num != 2 {
       return Err(PxtoneError::UnknownFormat);
     }
-    if (event_kind as usize) >= EVENTKIND_NUM {
+    if (event_kind as usize) >= EVENT_KIND_NUM {
       return Err(PxtoneError::UnknownFormat);
     }
     if check_rrr && rrr != 0 {
@@ -268,13 +268,13 @@ impl EventList {
   /// Pass `clock2 = -1` to apply through the end of the song.
   pub fn value_change(&mut self, clock1: i32, clock2: i32, unit_index: u8, kind: u8, delta: i32) {
     let (max, min) = match kind {
-      EVENTKIND_NULL => (0, 0),
-      EVENTKIND_ON => (120, 120),
-      EVENTKIND_KEY => (0xbfff, 0),
-      EVENTKIND_PAN_VOLUME => (0x80, 0),
-      EVENTKIND_PAN_TIME => (0x80, 0),
-      EVENTKIND_VELOCITY => (0x80, 0),
-      EVENTKIND_VOLUME => (0x80, 0),
+      EVENT_KIND_NULL => (0, 0),
+      EVENT_KIND_ON => (120, 120),
+      EVENT_KIND_KEY => (0xbfff, 0),
+      EVENT_KIND_PAN_VOLUME => (0x80, 0),
+      EVENT_KIND_PAN_TIME => (0x80, 0),
+      EVENT_KIND_VELOCITY => (0x80, 0),
+      EVENT_KIND_VOLUME => (0x80, 0),
       _ => (0, 0),
     };
     for e in &mut self.events {

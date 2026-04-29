@@ -244,7 +244,7 @@ pub unsafe extern "C" fn service_get_unit_count(svc: *const PxtoneService) -> u3
 /// `svc` must be a valid pointer from [`service_new`].
 /// `out_len` must be a valid writable pointer.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_unit_name(
+pub unsafe extern "C" fn service_get_unit_name(
   svc: *const PxtoneService,
   idx: u32,
   out_len: *mut u32,
@@ -271,7 +271,7 @@ pub unsafe extern "C" fn service_unit_name(
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`] or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_unit_played(svc: *const PxtoneService, idx: u32) -> i32 {
+pub unsafe extern "C" fn service_get_unit_played(svc: *const PxtoneService, idx: u32) -> i32 {
   if svc.is_null() {
     return -1;
   }
@@ -283,6 +283,30 @@ pub unsafe extern "C" fn service_unit_played(svc: *const PxtoneService, idx: u32
       } else {
         0
       }
+    }
+    None => -1,
+  }
+}
+
+/// Sets whether the unit at `idx` is active (not muted).
+/// Returns 0 on success, -1 on error.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_set_unit_played(
+  svc: *mut PxtoneService,
+  idx: u32,
+  played: i32,
+) -> i32 {
+  if svc.is_null() {
+    return -1;
+  }
+  let svc = unsafe { &mut *svc };
+  match svc.units.get_mut(idx as usize) {
+    Some(u) => {
+      u.set_played(played != 0);
+      0
     }
     None => -1,
   }

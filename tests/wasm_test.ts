@@ -1,4 +1,26 @@
-import source pxtoneWasm from "../target/wasm32-unknown-unknown/release-wasm/pxtone.wasm";
+import {
+  alloc,
+  dealloc,
+  memory,
+  service_free,
+  service_get_channels,
+  service_get_event_clock,
+  service_get_event_count,
+  service_get_event_kind,
+  service_get_event_unit_index,
+  service_get_event_value,
+  service_get_sample_rate,
+  service_get_unit_count,
+  service_get_unit_name,
+  service_get_unit_played,
+  service_is_end_vomit,
+  service_moo,
+  service_moo_preparation,
+  service_new,
+  service_read,
+  service_render_noise,
+  service_tones_ready,
+} from "../target/wasm32-unknown-unknown/release-wasm/pxtone.wasm";
 
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -7,47 +29,11 @@ import { parse as parseToml } from "@std/toml";
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-interface WasmExports {
-  memory: WebAssembly.Memory;
-  alloc: (size: number) => number;
-  dealloc: (ptr: number, size: number) => void;
-  service_new: () => number;
-  service_free: (ptr: number) => void;
-  service_read: (svc: number, data: number, len: number) => number;
-  service_tones_ready: (svc: number) => number;
-  service_moo_preparation: (svc: number) => number;
-  service_moo: (svc: number, buf: number, len: number) => number;
-  service_is_end_vomit: (svc: number) => number;
-  service_get_channels: (svc: number) => number;
-  service_get_sample_rate: (svc: number) => number;
-  service_render_noise: (
-    svc: number,
-    data: number,
-    dataLen: number,
-    outChannels: number,
-    outSampleRate: number,
-    outSamplesLen: number,
-  ) => number;
-  service_get_unit_count: (svc: number) => number;
-  service_unit_name: (svc: number, idx: number, outLen: number) => number;
-  service_unit_played: (svc: number, idx: number) => number;
-  service_get_event_count: (svc: number) => number;
-  service_get_event_clock: (svc: number, idx: number) => number;
-  service_get_event_unit_index: (svc: number, idx: number) => number;
-  service_get_event_kind: (svc: number, idx: number) => number;
-  service_get_event_value: (svc: number, idx: number) => number;
-}
-
 interface PtcopSnapshot {
   units: Array<{ name: string; played: boolean }>;
   events: Array<
     { clock: number; unit_index: number; kind: number; value: number }
   >;
-}
-
-function instantiate(): WasmExports {
-  const instance = new WebAssembly.Instance(pxtoneWasm);
-  return instance.exports as unknown as WasmExports;
 }
 
 function pcmToWav(
@@ -78,7 +64,6 @@ function pcmToWav(
 }
 
 Deno.test("decoded ptcop matches reference (wasm)", async () => {
-  const ex = instantiate();
   const sampleDir = join(projectRoot, "tests/sample/ptcop");
   const snapshotDir = join(projectRoot, "tests/snapshots/ptcop");
 
@@ -101,60 +86,60 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
     const tomlText = await Deno.readTextFile(join(snapshotDir, `${stem}.toml`));
     const snapshot = parseToml(tomlText) as unknown as PtcopSnapshot;
 
-    const dataPtr = ex.alloc(ptcopData.length);
-    new Uint8Array(ex.memory.buffer, dataPtr, ptcopData.length).set(ptcopData);
+    const dataPtr = alloc(ptcopData.length);
+    new Uint8Array(memory.buffer, dataPtr, ptcopData.length).set(ptcopData);
 
-    const svc = ex.service_new();
+    const svc = service_new();
 
-    if (ex.service_read(svc, dataPtr, ptcopData.length) !== 0) {
+    if (service_read(svc, dataPtr, ptcopData.length) !== 0) {
       failures.push(`${name}: service_read failed`);
-      ex.dealloc(dataPtr, ptcopData.length);
-      ex.service_free(svc);
+      dealloc(dataPtr, ptcopData.length);
+      service_free(svc);
       continue;
     }
-    ex.dealloc(dataPtr, ptcopData.length);
+    dealloc(dataPtr, ptcopData.length);
 
-    if (ex.service_tones_ready(svc) !== 0) {
+    if (service_tones_ready(svc) !== 0) {
       failures.push(`${name}: service_tones_ready failed`);
-      ex.service_free(svc);
+      service_free(svc);
       continue;
     }
 
     // Units
-    const unitCount = ex.service_get_unit_count(svc);
+    const unitCount = service_get_unit_count(svc);
     if (unitCount !== snapshot.units.length) {
       failures.push(
         `${stem}.toml: unit count mismatch (got ${unitCount}, expected ${snapshot.units.length})`,
       );
     } else {
-      const lenPtr = ex.alloc(4);
+      const lenPtr = alloc(4);
       for (let i = 0; i < unitCount; i++) {
-        const namePtr = ex.service_unit_name(svc, i, lenPtr);
-        const nameLen = new Uint32Array(ex.memory.buffer, lenPtr, 1)[0];
+        const namePtr = service_get_unit_name(svc, i, lenPtr);
+        const nameLen = new Uint32Array(memory.buffer, lenPtr, 1)[0];
         const unitName = dec.decode(
-          new Uint8Array(ex.memory.buffer, namePtr, nameLen),
+          new Uint8Array(memory.buffer, namePtr, nameLen),
         );
-        const played = ex.service_unit_played(svc, i) !== 0;
+        const played = service_get_unit_played(svc, i) !== 0;
         const expected = snapshot.units[i];
         if (unitName !== expected.name || played !== expected.played) {
           failures.push(`${stem}.toml: unit[${i}] mismatch`);
         }
       }
-      ex.dealloc(lenPtr, 4);
+      dealloc(lenPtr, 4);
     }
 
     // Events
-    const eventCount = ex.service_get_event_count(svc);
+    const eventCount = service_get_event_count(svc);
     if (eventCount !== snapshot.events.length) {
       failures.push(
         `${stem}.toml: event count mismatch (got ${eventCount}, expected ${snapshot.events.length})`,
       );
     } else {
       for (let i = 0; i < eventCount; i++) {
-        const clock = ex.service_get_event_clock(svc, i);
-        const unitNo = ex.service_get_event_unit_index(svc, i);
-        const kind = ex.service_get_event_kind(svc, i);
-        const value = ex.service_get_event_value(svc, i);
+        const clock = service_get_event_clock(svc, i);
+        const unitNo = service_get_event_unit_index(svc, i);
+        const kind = service_get_event_kind(svc, i);
+        const value = service_get_event_value(svc, i);
         const expected = snapshot.events[i];
         if (
           clock !== expected.clock || unitNo !== expected.unit_index ||
@@ -165,25 +150,25 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       }
     }
 
-    if (ex.service_moo_preparation(svc) !== 0) {
+    if (service_moo_preparation(svc) !== 0) {
       failures.push(`${name}: service_moo_preparation failed`);
-      ex.service_free(svc);
+      service_free(svc);
       continue;
     }
 
-    const channels = ex.service_get_channels(svc);
-    const sampleRate = ex.service_get_sample_rate(svc);
+    const channels = service_get_channels(svc);
+    const sampleRate = service_get_sample_rate(svc);
     const chunkSize = channels * 2 * 4096;
-    const bufPtr = ex.alloc(chunkSize);
+    const bufPtr = alloc(chunkSize);
 
     const chunks: Uint8Array[] = [];
-    while (ex.service_is_end_vomit(svc) === 0) {
-      if (ex.service_moo(svc, bufPtr, chunkSize) === 0) break;
-      chunks.push(new Uint8Array(ex.memory.buffer, bufPtr, chunkSize).slice());
+    while (service_is_end_vomit(svc) === 0) {
+      if (service_moo(svc, bufPtr, chunkSize) === 0) break;
+      chunks.push(new Uint8Array(memory.buffer, bufPtr, chunkSize).slice());
     }
 
-    ex.dealloc(bufPtr, chunkSize);
-    ex.service_free(svc);
+    dealloc(bufPtr, chunkSize);
+    service_free(svc);
 
     const totalLen = chunks.reduce((n, c) => n + c.length, 0);
     const pcm = new Uint8Array(totalLen);
@@ -214,7 +199,6 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
 });
 
 Deno.test("decoded ptnoise matches reference (wasm)", async () => {
-  const ex = instantiate();
   const sampleDir = join(projectRoot, "tests/sample/ptnoise");
   const snapshotDir = join(projectRoot, "tests/snapshots/ptnoise");
 
@@ -229,23 +213,23 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
   }
 
   const failures: string[] = [];
-  const svc = ex.service_new();
+  const svc = service_new();
 
   // Allocate output pointer slots (4 bytes each; u32 on wasm32)
-  const outChannels = ex.alloc(4);
-  const outSampleRate = ex.alloc(4);
-  const outSamplesLen = ex.alloc(4);
+  const outChannels = alloc(4);
+  const outSampleRate = alloc(4);
+  const outSamplesLen = alloc(4);
 
   for (const name of names) {
     const stem = name.slice(0, -8); // remove ".ptnoise"
     const ptnoiseData = await Deno.readFile(join(sampleDir, name));
 
-    const dataPtr = ex.alloc(ptnoiseData.length);
-    new Uint8Array(ex.memory.buffer, dataPtr, ptnoiseData.length).set(
+    const dataPtr = alloc(ptnoiseData.length);
+    new Uint8Array(memory.buffer, dataPtr, ptnoiseData.length).set(
       ptnoiseData,
     );
 
-    const samplesPtr = ex.service_render_noise(
+    const samplesPtr = service_render_noise(
       svc,
       dataPtr,
       ptnoiseData.length,
@@ -253,20 +237,20 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
       outSampleRate,
       outSamplesLen,
     );
-    ex.dealloc(dataPtr, ptnoiseData.length);
+    dealloc(dataPtr, ptnoiseData.length);
 
     if (samplesPtr === 0) {
       failures.push(`${name}: service_render_noise failed`);
       continue;
     }
 
-    const channels = new Uint32Array(ex.memory.buffer, outChannels, 1)[0];
-    const sampleRate = new Uint32Array(ex.memory.buffer, outSampleRate, 1)[0];
-    const samplesLen = new Uint32Array(ex.memory.buffer, outSamplesLen, 1)[0];
+    const channels = new Uint32Array(memory.buffer, outChannels, 1)[0];
+    const sampleRate = new Uint32Array(memory.buffer, outSampleRate, 1)[0];
+    const samplesLen = new Uint32Array(memory.buffer, outSamplesLen, 1)[0];
 
-    const samples = new Uint8Array(ex.memory.buffer, samplesPtr, samplesLen)
+    const samples = new Uint8Array(memory.buffer, samplesPtr, samplesLen)
       .slice();
-    ex.dealloc(samplesPtr, samplesLen);
+    dealloc(samplesPtr, samplesLen);
 
     const wav = pcmToWav(samples, channels, sampleRate);
     const wavPath = join(snapshotDir, `${stem}.wav`);
@@ -279,10 +263,10 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
     }
   }
 
-  ex.dealloc(outChannels, 4);
-  ex.dealloc(outSampleRate, 4);
-  ex.dealloc(outSamplesLen, 4);
-  ex.service_free(svc);
+  dealloc(outChannels, 4);
+  dealloc(outSampleRate, 4);
+  dealloc(outSamplesLen, 4);
+  service_free(svc);
 
   if (failures.length > 0) {
     throw new Error(
