@@ -1,4 +1,4 @@
-use crate::service::{PxtoneService, VomitPrepFlags, VomitPreparation};
+use crate::service::{PxtoneService, StartPos, VomitPrepFlags, VomitPreparation};
 use std::alloc::{Layout, alloc as sys_alloc, dealloc as sys_dealloc};
 use std::io::Cursor;
 
@@ -92,6 +92,7 @@ pub unsafe extern "C" fn service_tones_ready(svc: *mut PxtoneService) -> i32 {
 /// Prepares playback. Must be called after [`service_tones_ready`].
 /// Returns 0 on success, -1 on failure or if `svc` is null.
 ///
+/// `start_sample` — sample offset to start from; `0` means the beginning of the song.
 /// `unit_mute` — non-zero to mute units whose played flag is false.
 /// `loop_` — non-zero to loop playback from the song's repeat point.
 ///
@@ -100,6 +101,7 @@ pub unsafe extern "C" fn service_tones_ready(svc: *mut PxtoneService) -> i32 {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn service_moo_preparation(
   svc: *mut PxtoneService,
+  start_sample: u32,
   unit_mute: i32,
   loop_: i32,
 ) -> i32 {
@@ -107,6 +109,11 @@ pub unsafe extern "C" fn service_moo_preparation(
     return -1;
   }
   let svc = unsafe { &mut *svc };
+  let start_pos = if start_sample == 0 {
+    StartPos::Beginning
+  } else {
+    StartPos::Sample(start_sample)
+  };
   let mut flags = 0u8;
   if unit_mute != 0 {
     flags |= VomitPrepFlags::UNIT_MUTE;
@@ -116,6 +123,7 @@ pub unsafe extern "C" fn service_moo_preparation(
   }
   let prep = VomitPreparation {
     flags,
+    start_pos,
     ..VomitPreparation::default()
   };
   match svc.moo_preparation(prep) {
