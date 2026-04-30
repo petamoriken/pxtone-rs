@@ -211,7 +211,7 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       }
     }
 
-    if (service_moo_preparation(svc) !== 0) {
+    if (service_moo_preparation(svc, 0, 0) !== 0) {
       failures.push(`${name}: service_moo_preparation failed`);
       service_free(svc);
       continue;
