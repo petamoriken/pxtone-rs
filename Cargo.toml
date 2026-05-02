@@ -10,6 +10,9 @@ crate-type = ["cdylib", "rlib"]
 byteorder = "1.5.0"
 lewton = "0.10.2"
 
+[target.'cfg(all(not(target_feature = "atomics"), target_family = "wasm"))'.dependencies]
+talc = "5.0.3"
+
 [profile.release]
 lto = true
 codegen-units = 1

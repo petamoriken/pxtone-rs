@@ -2,6 +2,13 @@ use crate::service::{PxtoneService, StartPos, VomitPrepFlags, VomitPreparation};
 use std::alloc::{Layout, alloc as sys_alloc, dealloc as sys_dealloc};
 use std::io::Cursor;
 
+#[cfg(not(target_feature = "atomics"))]
+use talc::wasm::{WasmDynamicTalc, new_wasm_dynamic_allocator};
+
+#[cfg(not(target_feature = "atomics"))]
+#[global_allocator]
+static TALC: WasmDynamicTalc = new_wasm_dynamic_allocator();
+
 /// Allocates `size` bytes on the heap and returns a pointer to the buffer.
 /// Returns null if `size` is 0 or allocation fails.
 /// Free with [`dealloc`].

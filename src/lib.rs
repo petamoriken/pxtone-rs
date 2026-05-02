@@ -10,7 +10,7 @@ pub(crate) mod pulse;
 pub(crate) mod read_ext;
 pub(crate) mod woice;
 
-#[cfg(target_arch = "wasm32")]
+#[cfg(target_family = "wasm")]
 pub mod wasm;
 
 pub use error::PxtoneError;
