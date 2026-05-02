@@ -66,7 +66,7 @@ Pre-built `pxtone.wasm` binaries are available on the
 To build the `.wasm` binary yourself:
 
 ```sh
-cargo build --target wasm32-unknown-unknown --profile release-wasm
+deno task build:wasm:raw
 ```
 
 The compiled module exports a C FFI interface. Memory management uses explicit
@@ -78,18 +78,17 @@ To further optimize the binary with
 (`brew install binaryen`):
 
 ```sh
-deno task opt-wasm
+deno task build:wasm:opt
 ```
 
 ## Running Tests
 
 ```sh
 # Rust tests
-cargo test
+deno task test:rust
 
-# WebAssembly tests (requires Deno)
-cargo build --target wasm32-unknown-unknown --profile release-wasm
-deno task test-wasm
+# WebAssembly tests
+deno task test:wasm
 ```
 
 ## License
