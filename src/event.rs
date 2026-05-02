@@ -164,11 +164,12 @@ impl EventList {
       });
     }
 
-    // Sort in chronological order (priority is used as a tiebreaker)
+    // Sort in chronological order (priority is used as a tiebreaker).
+    // Lower numeric priority values should come first for same-clock events.
     self.events.sort_by(|a, b| {
       a.clock
         .cmp(&b.clock)
-        .then_with(|| compare_priority(b.kind, a.kind).cmp(&0))
+        .then_with(|| compare_priority(a.kind, b.kind).cmp(&0))
     });
 
     Ok(())
