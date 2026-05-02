@@ -453,7 +453,7 @@ impl Woice {
           instance.samples = pcm.samples().to_vec();
         }
         VoiceData::OggVorbis(ogg) => {
-          let decoded = decode_ogg(&ogg.data).map_err(PxtoneError::OggVorbis)?;
+          let decoded = decode_ogg(&ogg.data)?;
           let mut work = Pcm::create(ogg.channels, ogg.sample_rate, 16, ogg.frame_count)?;
           let src = &decoded[..decoded.len().min(work.samples().len())];
           work.samples_mut()[..src.len()].copy_from_slice(src);
@@ -652,18 +652,21 @@ fn update_wave_ptv(
 }
 
 // ---- OGG Vorbis decode (lewton) ----
-fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, String> {
+fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, PxtoneError> {
   use lewton::inside_ogg::OggStreamReader;
   use std::io::Cursor;
 
   let cursor = Cursor::new(data);
-  let mut reader = OggStreamReader::new(cursor).map_err(|e| format!("{e}"))?;
+  let mut reader = OggStreamReader::new(cursor).map_err(|e| PxtoneError::OggVorbis(e))?;
 
   let _ch = reader.ident_hdr.audio_channels as usize;
   let _sps = reader.ident_hdr.audio_sample_rate;
 
   let mut pcm_i16: Vec<i16> = Vec::new();
-  while let Some(pck) = reader.read_dec_packet_itl().map_err(|e| format!("{e}"))? {
+  while let Some(pck) = reader
+    .read_dec_packet_itl()
+    .map_err(|e| PxtoneError::OggVorbis(e))?
+  {
     pcm_i16.extend_from_slice(&pck);
   }
 
