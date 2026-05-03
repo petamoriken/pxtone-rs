@@ -256,6 +256,19 @@ pub unsafe extern "C" fn service_render_noise(
   ptr
 }
 
+/// Returns the number of ticks per beat.
+/// Returns 0 if `svc` is null.
+///
+/// # Safety
+/// `svc` must be a valid pointer from [`service_new`] or null.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn service_get_beat_clock(svc: *const PxtoneService) -> u32 {
+  if svc.is_null() {
+    return 0;
+  }
+  unsafe { &*svc }.master.beat_clock() as u32
+}
+
 /// Returns the number of beats per measure.
 /// Returns 0 if `svc` is null.
 ///
