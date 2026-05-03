@@ -276,9 +276,8 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
   const failures: string[] = [];
   const svc = service_new();
 
-  // Allocate output pointer slots (4 bytes each; u32 on wasm32)
-  const outChannels = alloc(4);
-  const outSampleRate = alloc(4);
+  const channels = service_get_channels(svc);
+  const sampleRate = service_get_sample_rate(svc);
   const outSamplesLen = alloc(4);
 
   for (const name of names) {
@@ -294,8 +293,6 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
       svc,
       dataPtr,
       ptnoiseData.length,
-      outChannels,
-      outSampleRate,
       outSamplesLen,
     );
     dealloc(dataPtr, ptnoiseData.length);
@@ -305,10 +302,7 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
       continue;
     }
 
-    const channels = new Uint32Array(memory.buffer, outChannels, 1)[0];
-    const sampleRate = new Uint32Array(memory.buffer, outSampleRate, 1)[0];
     const samplesLen = new Uint32Array(memory.buffer, outSamplesLen, 1)[0];
-
     const samples = new Uint8Array(memory.buffer, samplesPtr, samplesLen)
       .slice();
     dealloc(samplesPtr, samplesLen);
@@ -324,8 +318,6 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
     }
   }
 
-  dealloc(outChannels, 4);
-  dealloc(outSampleRate, 4);
   dealloc(outSamplesLen, 4);
   service_free(svc);
 

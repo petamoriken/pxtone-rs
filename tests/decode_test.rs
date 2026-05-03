@@ -215,7 +215,6 @@ fn decoded_ptnoise_matches_reference() {
     let ptnoise_path = entry.path();
     let stem = ptnoise_path.file_stem().unwrap().to_string_lossy();
     let wav_path = snapshot_dir.join(format!("{}.wav", stem));
-    let toml_path = snapshot_dir.join(format!("{}.toml", stem));
 
     let file =
       File::open(&ptnoise_path).unwrap_or_else(|e| panic!("{}: {}", ptnoise_path.display(), e));
@@ -230,16 +229,9 @@ fn decoded_ptnoise_matches_reference() {
       noise_wave.sample_rate,
     );
 
-    let mut table = Table::new();
-    table.insert("ch".into(), Value::Integer(noise_wave.channels as i64));
-    table.insert("sps".into(), Value::Integer(noise_wave.sample_rate as i64));
-    let metadata = toml::to_string(&table).unwrap();
-
     if update {
       fs::write(&wav_path, &wav)
         .unwrap_or_else(|e| panic!("{}: failed to write snapshot: {}", wav_path.display(), e));
-      fs::write(&toml_path, &metadata)
-        .unwrap_or_else(|e| panic!("{}: failed to write snapshot: {}", toml_path.display(), e));
       continue;
     }
 
@@ -247,18 +239,6 @@ fn decoded_ptnoise_matches_reference() {
       .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", wav_path.display(), e));
     if wav != expected_wav {
       failures.push(wav_path.display().to_string());
-    }
-
-    let expected_txt = fs::read_to_string(&toml_path)
-      .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", toml_path.display(), e));
-    let actual_toml: Table = metadata
-      .parse()
-      .expect("generated metadata is not valid TOML");
-    let expected_toml: Table = expected_txt
-      .parse()
-      .unwrap_or_else(|e| panic!("{}: invalid TOML: {}", toml_path.display(), e));
-    if actual_toml != expected_toml {
-      failures.push(toml_path.display().to_string());
     }
   }
 

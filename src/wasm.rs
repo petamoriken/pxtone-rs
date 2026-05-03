@@ -199,28 +199,21 @@ pub unsafe extern "C" fn service_get_sample_rate(svc: *const PxtoneService) -> u
 
 /// Renders a `.ptnoise` file and returns a pointer to the allocated PCM samples buffer
 /// (signed 16-bit interleaved). The caller must free it with `dealloc(ptr, *out_samples_len)`.
-/// Writes channel count, sample rate, and byte length to the respective `out_*` pointers.
-/// Returns null on failure. All `out_*` pointers must be non-null.
+/// Writes byte length to `out_samples_len`.
+/// Returns null on failure. `out_samples_len` must be non-null.
 ///
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`].
 /// `data` must be valid for `data_len` bytes.
-/// `out_channels`, `out_sample_rate`, and `out_samples_len` must be valid writable pointers.
+/// `out_samples_len` must be a valid writable pointer.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn service_render_noise(
   svc: *mut PxtoneService,
   data: *const u8,
   data_len: usize,
-  out_channels: *mut u32,
-  out_sample_rate: *mut u32,
   out_samples_len: *mut u32,
 ) -> *mut u8 {
-  if svc.is_null()
-    || data.is_null()
-    || out_channels.is_null()
-    || out_sample_rate.is_null()
-    || out_samples_len.is_null()
-  {
+  if svc.is_null() || data.is_null() || out_samples_len.is_null() {
     return std::ptr::null_mut();
   }
   let svc = unsafe { &mut *svc };
@@ -233,8 +226,6 @@ pub unsafe extern "C" fn service_render_noise(
   let len = wave.samples.len();
   if len == 0 {
     unsafe {
-      *out_channels = wave.channels as u32;
-      *out_sample_rate = wave.sample_rate;
       *out_samples_len = 0;
     }
     return std::ptr::null_mut();
@@ -249,8 +240,6 @@ pub unsafe extern "C" fn service_render_noise(
   }
   unsafe {
     std::ptr::copy_nonoverlapping(wave.samples.as_ptr(), ptr, len);
-    *out_channels = wave.channels as u32;
-    *out_sample_rate = wave.sample_rate;
     *out_samples_len = len as u32;
   }
   ptr
