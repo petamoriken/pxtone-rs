@@ -3,13 +3,12 @@ import {
   dealloc,
   memory,
   service_free,
-  service_get_beat_clock,
-  service_get_beat_num,
   service_get_beat_tempo,
+  service_get_beats_per_measure,
   service_get_channels,
-  service_get_event_clock,
   service_get_event_count,
   service_get_event_kind,
+  service_get_event_tick,
   service_get_event_unit_index,
   service_get_event_value,
   service_get_last_measure,
@@ -18,6 +17,7 @@ import {
   service_get_sample_rate,
   service_get_text_comment,
   service_get_text_name,
+  service_get_ticks_per_beat,
   service_get_unit_count,
   service_get_unit_name,
   service_get_unit_played,
@@ -40,8 +40,8 @@ const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
 interface PtcopSnapshot {
   text: { name: string; comment: string };
   master: {
-    beat_clock: number;
-    beat_num: number;
+    ticks_per_beat: number;
+    beats_per_measure: number;
     beat_tempo: number;
     measure_num: number;
     repeat_measure: number;
@@ -49,7 +49,7 @@ interface PtcopSnapshot {
   };
   units: Array<{ name: string; played: boolean }>;
   events: Array<
-    { clock: number; unit_index: number; kind: number; value: number }
+    { tick: number; unit_index: number; kind: number; value: number }
   >;
 }
 
@@ -147,16 +147,16 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
 
     // Master
     {
-      const beatClock = service_get_beat_clock(svc);
-      const beatNum = service_get_beat_num(svc);
+      const ticksPerBeat = service_get_ticks_per_beat(svc);
+      const beatsPerMeasure = service_get_beats_per_measure(svc);
       const beatTempo = service_get_beat_tempo(svc);
       const measureNum = service_get_measure_num(svc);
       const repeatMeasure = service_get_repeat_measure(svc);
       const lastMeasure = service_get_last_measure(svc);
       const m = snapshot.master;
       if (
-        beatClock !== m.beat_clock ||
-        beatNum !== m.beat_num ||
+        ticksPerBeat !== m.ticks_per_beat ||
+        beatsPerMeasure !== m.beats_per_measure ||
         Math.abs(beatTempo - m.beat_tempo) >= 0.001 ||
         measureNum !== m.measure_num ||
         repeatMeasure !== m.repeat_measure ||
@@ -197,13 +197,13 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       );
     } else {
       for (let i = 0; i < eventCount; i++) {
-        const clock = service_get_event_clock(svc, i);
+        const tick = service_get_event_tick(svc, i);
         const unitNo = service_get_event_unit_index(svc, i);
         const kind = service_get_event_kind(svc, i);
         const value = service_get_event_value(svc, i);
         const expected = snapshot.events[i];
         if (
-          clock !== expected.clock || unitNo !== expected.unit_index ||
+          tick !== expected.tick || unitNo !== expected.unit_index ||
           kind !== expected.kind || value !== expected.value
         ) {
           failures.push(`${stem}.toml: event[${i}] mismatch`);

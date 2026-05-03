@@ -76,8 +76,14 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
   );
   table.insert("text".into(), Value::Table(text_table));
   let mut master_table = Table::new();
-  master_table.insert("beat_clock".into(), Value::Integer(m.beat_clock() as i64));
-  master_table.insert("beat_num".into(), Value::Integer(m.beat_num() as i64));
+  master_table.insert(
+    "ticks_per_beat".into(),
+    Value::Integer(m.ticks_per_beat() as i64),
+  );
+  master_table.insert(
+    "beats_per_measure".into(),
+    Value::Integer(m.beats_per_measure() as i64),
+  );
   master_table.insert("beat_tempo".into(), Value::Float(m.beat_tempo() as f64));
   master_table.insert("measure_num".into(), Value::Integer(m.measure_num() as i64));
   master_table.insert(
@@ -111,7 +117,7 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
       .iter()
       .map(|e| {
         let mut t = Table::new();
-        t.insert("clock".into(), Value::Integer(e.clock() as i64));
+        t.insert("tick".into(), Value::Integer(e.tick() as i64));
         t.insert("unit_index".into(), Value::Integer(e.unit_index() as i64));
         t.insert("kind".into(), Value::Integer(e.kind() as i64));
         t.insert("value".into(), Value::Integer(e.value() as i64));

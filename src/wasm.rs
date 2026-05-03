@@ -251,11 +251,11 @@ pub unsafe extern "C" fn service_render_noise(
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`] or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_get_beat_clock(svc: *const PxtoneService) -> u32 {
+pub unsafe extern "C" fn service_get_ticks_per_beat(svc: *const PxtoneService) -> u32 {
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.master.beat_clock() as u32
+  unsafe { &*svc }.master.ticks_per_beat() as u32
 }
 
 /// Returns the number of beats per measure.
@@ -264,11 +264,11 @@ pub unsafe extern "C" fn service_get_beat_clock(svc: *const PxtoneService) -> u3
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`] or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_get_beat_num(svc: *const PxtoneService) -> u32 {
+pub unsafe extern "C" fn service_get_beats_per_measure(svc: *const PxtoneService) -> u32 {
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.master.beat_num() as u32
+  unsafe { &*svc }.master.beats_per_measure() as u32
 }
 
 /// Returns the tempo in beats per minute.
@@ -481,12 +481,12 @@ pub unsafe extern "C" fn service_get_event_count(svc: *const PxtoneService) -> u
   unsafe { &*svc }.events.records().len() as u32
 }
 
-/// Returns the tick clock of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
+/// Returns the tick position of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
 ///
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`] or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_get_event_clock(svc: *const PxtoneService, idx: u32) -> i32 {
+pub unsafe extern "C" fn service_get_event_tick(svc: *const PxtoneService, idx: u32) -> i32 {
   if svc.is_null() {
     return 0;
   }
@@ -495,7 +495,7 @@ pub unsafe extern "C" fn service_get_event_clock(svc: *const PxtoneService, idx:
     .events
     .records()
     .get(idx as usize)
-    .map_or(0, |e| e.clock())
+    .map_or(0, |e| e.tick())
 }
 
 /// Returns the unit index of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.

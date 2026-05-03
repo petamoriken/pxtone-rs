@@ -60,7 +60,7 @@ impl Delay {
   }
 
   /// Prepares before playback: allocates the delay buffer
-  pub(crate) fn tone_ready(&mut self, beat_num: u8, beat_tempo: f32, sample_rate: u32) {
+  pub(crate) fn tone_ready(&mut self, beats_per_measure: u8, beat_tempo: f32, sample_rate: u32) {
     self.buffer_size = 0;
     self.bufs[0].clear();
     self.bufs[1].clear();
@@ -77,8 +77,9 @@ impl Delay {
         (sample_rate as f64 * 60.0 / beat_tempo as f64 / self.frequency as f64) as usize
       }
       DelayUnit::Meas => {
-        (sample_rate as f64 * 60.0 * beat_num as f64 / beat_tempo as f64 / self.frequency as f64)
-          as usize
+        (sample_rate as f64 * 60.0 * beats_per_measure as f64
+          / beat_tempo as f64
+          / self.frequency as f64) as usize
       }
       DelayUnit::Second => (sample_rate as f64 / self.frequency as f64) as usize,
     };

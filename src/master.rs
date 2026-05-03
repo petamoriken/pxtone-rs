@@ -1,8 +1,8 @@
 use crate::error::PxtoneError;
 use crate::event::{
-  EVENT_DEFAULT_BEAT_CLOCK, EVENT_DEFAULT_BEAT_NUM, EVENT_DEFAULT_BEAT_TEMPO,
-  EVENT_KIND_BEAT_CLOCK, EVENT_KIND_BEAT_NUM, EVENT_KIND_BEAT_TEMPO, EVENT_KIND_LAST,
-  EVENT_KIND_REPEAT,
+  EVENT_DEFAULT_BEAT_TEMPO, EVENT_DEFAULT_BEATS_PER_MEASURE, EVENT_DEFAULT_TICKS_PER_BEAT,
+  EVENT_KIND_BEAT_TEMPO, EVENT_KIND_BEATS_PER_MEASURE, EVENT_KIND_LAST, EVENT_KIND_REPEAT,
+  EVENT_KIND_TICKS_PER_BEAT,
 };
 use crate::read_ext::ReadExt;
 use byteorder::{LE, ReadBytesExt};
@@ -11,9 +11,9 @@ use std::io::{Read, Seek};
 /// Song-level timing parameters loaded from the file.
 #[derive(Debug)]
 pub struct Master {
-  pub(crate) beat_num: u8,
+  pub(crate) beats_per_measure: u8,
   pub(crate) beat_tempo: f32,
-  pub(crate) beat_clock: u16,
+  pub(crate) ticks_per_beat: u16,
   pub(crate) measure_num: u32,
   pub(crate) repeat_measure: u32,
   pub(crate) last_measure: u32,
@@ -22,9 +22,9 @@ pub struct Master {
 impl Default for Master {
   fn default() -> Self {
     Self {
-      beat_num: EVENT_DEFAULT_BEAT_NUM,
+      beats_per_measure: EVENT_DEFAULT_BEATS_PER_MEASURE,
       beat_tempo: EVENT_DEFAULT_BEAT_TEMPO,
-      beat_clock: EVENT_DEFAULT_BEAT_CLOCK,
+      ticks_per_beat: EVENT_DEFAULT_TICKS_PER_BEAT,
       measure_num: 1,
       repeat_measure: 0,
       last_measure: 0,
@@ -38,13 +38,13 @@ impl Master {
   }
 
   /// Returns the number of ticks per beat.
-  pub fn beat_clock(&self) -> u16 {
-    self.beat_clock
+  pub fn ticks_per_beat(&self) -> u16 {
+    self.ticks_per_beat
   }
 
   /// Returns the number of beats per measure.
-  pub fn beat_num(&self) -> u8 {
-    self.beat_num
+  pub fn beats_per_measure(&self) -> u8 {
+    self.beats_per_measure
   }
 
   /// Returns the tempo in beats per minute.
@@ -67,8 +67,8 @@ impl Master {
     self.last_measure
   }
 
-  pub(crate) fn get_last_clock(&self) -> u32 {
-    self.last_measure * self.beat_clock as u32 * self.beat_num as u32
+  pub(crate) fn get_last_tick(&self) -> u32 {
+    self.last_measure * self.ticks_per_beat as u32 * self.beats_per_measure as u32
   }
 
   pub(crate) fn get_play_meas(&self) -> u32 {
@@ -79,9 +79,9 @@ impl Master {
     }
   }
 
-  pub(crate) fn adjust_measure_num(&mut self, clock: u32) {
-    let b_num = clock.div_ceil(self.beat_clock as u32);
-    let m_num = b_num.div_ceil(self.beat_num as u32);
+  pub(crate) fn adjust_measure_num(&mut self, tick: u32) {
+    let b_num = tick.div_ceil(self.ticks_per_beat as u32);
+    let m_num = b_num.div_ceil(self.beats_per_measure as u32);
     if self.measure_num <= m_num {
       self.measure_num = m_num;
     }
@@ -102,28 +102,28 @@ impl Master {
   }
 
   // Reads a v5-format Master block.
-  // Block: u32 size(=15), i16 beat_clock, u8 beat_num, f32 beat_tempo,
-  //        i32 clock_repeat, i32 clock_last
+  // Block: u32 size(=15), i16 ticks_per_beat, u8 beats_per_measure, f32 beat_tempo,
+  //        i32 tick_repeat, i32 tick_last
   pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let size = r.read_u32::<LE>()?;
     if size != 15 {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let beat_clock = r.read_i16::<LE>()? as i32;
-    let beat_num = r.read_u8()?;
+    let ticks_per_beat = r.read_i16::<LE>()? as i32;
+    let beats_per_measure = r.read_u8()?;
     let beat_tempo = r.read_f32::<LE>()?;
-    let clock_repeat = r.read_i32::<LE>()?;
-    let clock_last = r.read_i32::<LE>()?;
+    let tick_repeat = r.read_i32::<LE>()?;
+    let tick_last = r.read_i32::<LE>()?;
 
-    self.beat_clock = beat_clock as u16;
-    self.beat_num = beat_num;
+    self.ticks_per_beat = ticks_per_beat as u16;
+    self.beats_per_measure = beats_per_measure;
     self.beat_tempo = beat_tempo;
 
-    let denom = beat_num as i32 * beat_clock;
+    let denom = beats_per_measure as i32 * ticks_per_beat;
     if denom > 0 {
-      self.set_repeat_measure((clock_repeat / denom) as u32);
-      self.set_last_measure((clock_last / denom) as u32);
+      self.set_repeat_measure((tick_repeat / denom) as u32);
+      self.set_last_measure((tick_last / denom) as u32);
     }
 
     Ok(())
@@ -143,63 +143,63 @@ impl Master {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let mut beat_clock: i32 = EVENT_DEFAULT_BEAT_CLOCK.into();
-    let mut beat_num: u8 = EVENT_DEFAULT_BEAT_NUM;
+    let mut ticks_per_beat: i32 = EVENT_DEFAULT_TICKS_PER_BEAT.into();
+    let mut beats_per_measure: u8 = EVENT_DEFAULT_BEATS_PER_MEASURE;
     let mut beat_tempo = EVENT_DEFAULT_BEAT_TEMPO;
-    let mut repeat_clock = 0i32;
-    let mut last_clock = 0i32;
+    let mut repeat_tick = 0i32;
+    let mut last_tick = 0i32;
     let mut absolute = 0i32;
 
     for _ in 0..event_num {
       let status = r.read_var_u32()?;
-      let clock_delta = r.read_var_i32()?;
+      let tick_delta = r.read_var_i32()?;
       let volume = r.read_var_i32()?;
-      absolute += clock_delta;
-      let clock = absolute;
+      absolute += tick_delta;
+      let tick = absolute;
 
       match status as u8 {
-        EVENT_KIND_BEAT_CLOCK => {
-          if clock != 0 {
+        EVENT_KIND_TICKS_PER_BEAT => {
+          if tick != 0 {
             return Err(PxtoneError::BrokenFile);
           }
-          beat_clock = volume;
+          ticks_per_beat = volume;
         }
         EVENT_KIND_BEAT_TEMPO => {
-          if clock != 0 {
+          if tick != 0 {
             return Err(PxtoneError::BrokenFile);
           }
           beat_tempo = f32::from_bits(volume as u32);
         }
-        EVENT_KIND_BEAT_NUM => {
-          if clock != 0 {
+        EVENT_KIND_BEATS_PER_MEASURE => {
+          if tick != 0 {
             return Err(PxtoneError::BrokenFile);
           }
-          beat_num = volume as u8;
+          beats_per_measure = volume as u8;
         }
         EVENT_KIND_REPEAT => {
           if volume != 0 {
             return Err(PxtoneError::BrokenFile);
           }
-          repeat_clock = clock;
+          repeat_tick = tick;
         }
         EVENT_KIND_LAST => {
           if volume != 0 {
             return Err(PxtoneError::BrokenFile);
           }
-          last_clock = clock;
+          last_tick = tick;
         }
         _ => return Err(PxtoneError::UnknownFormat),
       }
     }
 
-    self.beat_num = beat_num;
+    self.beats_per_measure = beats_per_measure;
     self.beat_tempo = beat_tempo;
-    self.beat_clock = beat_clock as u16;
+    self.ticks_per_beat = ticks_per_beat as u16;
 
-    let denom = beat_num as i32 * beat_clock;
+    let denom = beats_per_measure as i32 * ticks_per_beat;
     if denom > 0 {
-      self.set_repeat_measure((repeat_clock / denom) as u32);
-      self.set_last_measure((last_clock / denom) as u32);
+      self.set_repeat_measure((repeat_tick / denom) as u32);
+      self.set_last_measure((last_tick / denom) as u32);
     }
 
     Ok(())

@@ -179,7 +179,7 @@ pub struct PxtoneService {
   group_num: usize,
   unit_woice_idxs: Vec<usize>, // current voice index per unit
 
-  moo_clock_rate: f64,
+  moo_samples_per_tick: f64,
   moo_sample_stride: f32,
   moo_sample_count: u32,
   moo_sample_end: u32,
@@ -187,8 +187,8 @@ pub struct PxtoneService {
   moo_sample_start: u32,
   moo_sample_smooth: u32,
   moo_output_clip: i32,
-  moo_beat_clock: u16,
-  moo_beat_num: u8,
+  moo_ticks_per_beat: u16,
+  moo_beats_per_measure: u8,
   moo_beat_tempo: f32,
   moo_time_pan_index: usize,
   moo_event_index: usize,
@@ -222,7 +222,7 @@ impl PxtoneService {
       group_num: MAX_GROUP_NUM,
       unit_woice_idxs: Vec::new(),
 
-      moo_clock_rate: 0.0,
+      moo_samples_per_tick: 0.0,
       moo_sample_stride: 1.0,
       moo_sample_count: 0,
       moo_sample_end: 0,
@@ -230,8 +230,8 @@ impl PxtoneService {
       moo_sample_start: 0,
       moo_sample_smooth: 0,
       moo_output_clip: 0x7fff,
-      moo_beat_clock: 0,
-      moo_beat_num: 0,
+      moo_ticks_per_beat: 0,
+      moo_beats_per_measure: 0,
       moo_beat_tempo: 0.0,
       moo_time_pan_index: 0,
       moo_event_index: 0,
@@ -302,9 +302,11 @@ impl PxtoneService {
       self.x3x_set_voice_names();
     }
 
-    let clock1 = self.events.get_max_clock() as u32;
-    let clock2 = self.master.get_last_clock();
-    self.master.adjust_measure_num(clock1.max(clock2));
+    let max_event_tick = self.events.get_max_tick() as u32;
+    let last_master_tick = self.master.get_last_tick();
+    self
+      .master
+      .adjust_measure_num(max_event_tick.max(last_master_tick));
 
     self.data_loaded = true;
     Ok(())
@@ -558,8 +560,8 @@ impl PxtoneService {
     let mut name = [0u8; 16];
     r.read_exact(&mut name)?;
     let beat_tempo = r.read_f32::<LE>()?;
-    let beat_clock = r.read_u16::<LE>()?;
-    let beat_num = r.read_u16::<LE>()? as u8;
+    let ticks_per_beat = r.read_u16::<LE>()?;
+    let beats_per_measure = r.read_u16::<LE>()? as u8;
     let _beat_note = r.read_u16::<LE>()?;
     let _measure_num = r.read_u16::<LE>()?;
     let _channels = r.read_u16::<LE>()?;
@@ -567,9 +569,9 @@ impl PxtoneService {
     let _sample_rate = r.read_u32::<LE>()?;
 
     self.text.set_name_raw(&name);
-    self.master.beat_num = beat_num;
+    self.master.beats_per_measure = beats_per_measure;
     self.master.beat_tempo = beat_tempo;
-    self.master.beat_clock = beat_clock;
+    self.master.ticks_per_beat = ticks_per_beat;
     Ok(())
   }
 
@@ -626,7 +628,11 @@ impl PxtoneService {
       w.tone_ready(noise_builder, freq, sample_rate)?;
     }
     for d in &mut self.delays {
-      d.tone_ready(self.master.beat_num, self.master.beat_tempo, sample_rate);
+      d.tone_ready(
+        self.master.beats_per_measure,
+        self.master.beat_tempo,
+        sample_rate,
+      );
     }
     for od in &mut self.overdrives {
       od.tone_ready();
@@ -661,17 +667,18 @@ impl PxtoneService {
     self.moo_loop = prep.flags & VomitPrepFlags::LOOP != 0;
     self.moo_master_volume = prep.master_volume;
 
-    self.moo_beat_clock = self.master.beat_clock;
-    self.moo_beat_num = self.master.beat_num;
+    self.moo_ticks_per_beat = self.master.ticks_per_beat;
+    self.moo_beats_per_measure = self.master.beats_per_measure;
     self.moo_beat_tempo = self.master.beat_tempo;
-    self.moo_clock_rate = 60.0 * self.dst_sample_rate as f64
-      / (self.moo_beat_tempo as f64 * self.moo_beat_clock as f64);
+    self.moo_samples_per_tick = 60.0 * self.dst_sample_rate as f64
+      / (self.moo_beat_tempo as f64 * self.moo_ticks_per_beat as f64);
     self.moo_sample_stride = 44100.0 / self.dst_sample_rate as f32;
     self.moo_output_clip = 0x7fff;
     self.moo_time_pan_index = 0;
 
-    let samples_per_measure =
-      self.moo_beat_num as f64 * self.moo_beat_clock as f64 * self.moo_clock_rate;
+    let samples_per_measure = self.moo_beats_per_measure as f64
+      * self.moo_ticks_per_beat as f64
+      * self.moo_samples_per_tick;
     self.moo_sample_end = (measure_end as f64 * samples_per_measure) as u32;
     self.moo_sample_repeat = (measure_repeat as f64 * samples_per_measure) as u32;
 
@@ -720,7 +727,7 @@ impl PxtoneService {
     if tempo == 0.0 {
       return 0;
     }
-    let total_beats = self.master.measure_num * self.master.beat_num as u32;
+    let total_beats = self.master.measure_num * self.master.beats_per_measure as u32;
     (self.dst_sample_rate as f64 * 60.0 * total_beats as f64 / tempo as f64) as u32
   }
 
@@ -748,8 +755,8 @@ impl PxtoneService {
       self.unit_woice_idxs[unit_idx] = woice_idx;
     }
 
-    // Compute ofs_freq and env_release_clock for each voice, then reset
-    let clock_rate = self.moo_clock_rate;
+    // Compute ofs_freq and env_rls_ticks for each voice, then reset
+    let samples_per_tick = self.moo_samples_per_tick;
     let bt_tempo = self.moo_beat_tempo;
     let inst_len = self.woices[woice_idx].instances.len();
 
@@ -775,13 +782,13 @@ impl PxtoneService {
           * tuning
       };
 
-      let env_rls_clock = if clock_rate > 0.0 {
-        (envelope_release as f64 / clock_rate) as u32
+      let env_rls_ticks = if samples_per_tick > 0.0 {
+        (envelope_release as f64 / samples_per_tick) as u32
       } else {
         0
       };
 
-      self.units[unit_idx].tone_reset_and_2prm(v, env_rls_clock, ofs_freq);
+      self.units[unit_idx].tone_reset_and_2prm(v, env_rls_ticks, ofs_freq);
     }
   }
 
@@ -798,7 +805,7 @@ impl PxtoneService {
     let unit_num = self.units.len();
     let group_num = self.group_num;
     let channel_count = self.dst_channels as usize;
-    let clock_rate = self.moo_clock_rate;
+    let samples_per_tick = self.moo_samples_per_tick;
     let sample_count = self.moo_sample_count;
     let mute_by_unit = self.moo_mute_by_unit;
     let smooth_samples = self.moo_sample_smooth;
@@ -818,12 +825,12 @@ impl PxtoneService {
     }
 
     // ---- 2. Event processing ----
-    let clock = (sample_count as f64 / clock_rate) as i32;
+    let tick = (sample_count as f64 / samples_per_tick) as i32;
     let event_count = self.events.records().len();
 
     while self.moo_event_index < event_count {
-      let ev_clock = self.events.records()[self.moo_event_index].clock;
-      if ev_clock > clock {
+      let ev_tick = self.events.records()[self.moo_event_index].tick;
+      if ev_tick > tick {
         break;
       }
 
@@ -836,7 +843,7 @@ impl PxtoneService {
         continue;
       }
 
-      self.process_event(&ev, u, clock, sample_end, clock_rate);
+      self.process_event(&ev, u, tick, sample_end, samples_per_tick);
     }
 
     // ---- 3. Tone_Sample ----
@@ -938,13 +945,13 @@ impl PxtoneService {
     &mut self,
     ev: &EventRecord,
     u: usize,
-    clock: i32,
+    tick: i32,
     sample_end: u32,
-    clock_rate: f64,
+    samples_per_tick: f64,
   ) {
     match ev.kind {
       EVENT_KIND_ON => {
-        let on_count = ((ev.clock + ev.value - clock) as f64 * clock_rate) as i32;
+        let on_count = ((ev.tick + ev.value - tick) as f64 * samples_per_tick) as i32;
         if on_count <= 0 {
           self.units[u].tone_zero_lives();
           return;
@@ -969,29 +976,29 @@ impl PxtoneService {
             .map(|i| i.envelope_size)
             .unwrap_or(0);
 
-          // Read env_release_clock from tones (immutable borrow of self.units)
-          let tone_rls_clock = self.units[u]
+          // Read tone's envelope release (in ticks) for life calculation
+          let tone_rls_ticks = self.units[u]
             .tones
             .get(v)
             .map(|t| t.envelope_release)
             .unwrap_or(0) as i32;
 
           let life_count = if envelope_release > 0 {
-            let max_life1 = ((ev.value - (clock - ev.clock)) as f64 * clock_rate) as i32
+            let max_life1 = ((ev.value - (tick - ev.tick)) as f64 * samples_per_tick) as i32
               + envelope_release as i32;
-            let c_limit = ev.clock + ev.value + tone_rls_clock;
-            let mut max_life2 = sample_end as i32 - (clock as f64 * clock_rate) as i32;
+            let c_limit = ev.tick + ev.value + tone_rls_ticks;
+            let mut max_life2 = sample_end as i32 - (tick as f64 * samples_per_tick) as i32;
 
             if let Some(ne) = self.events.records()[self.moo_event_index..]
               .iter()
-              .take_while(|e| e.clock <= c_limit)
+              .take_while(|e| e.tick <= c_limit)
               .find(|e| e.unit_index == ev.unit_index && e.kind == EVENT_KIND_ON)
             {
-              max_life2 = ((ne.clock - clock) as f64 * clock_rate) as i32;
+              max_life2 = ((ne.tick - tick) as f64 * samples_per_tick) as i32;
             }
             max_life1.min(max_life2)
           } else {
-            ((ev.value - (clock - ev.clock)) as f64 * clock_rate) as i32
+            ((ev.value - (tick - ev.tick)) as f64 * samples_per_tick) as i32
           };
 
           if life_count > 0
@@ -1023,13 +1030,13 @@ impl PxtoneService {
       EVENT_KIND_VELOCITY => self.units[u].tone_velocity(ev.value as u32),
       EVENT_KIND_VOLUME => self.units[u].tone_volume(ev.value as u32),
       EVENT_KIND_PORTAMENT => {
-        let v = (ev.value as f64 * clock_rate) as u32;
+        let v = (ev.value as f64 * samples_per_tick) as u32;
         self.units[u].tone_portament(v);
       }
       EVENT_KIND_VOICE_NO => self.moo_reset_voice_on(u, ev.value as usize),
       EVENT_KIND_GROUP_NO => self.units[u].tone_groupno(ev.value as usize),
       EVENT_KIND_TUNING => self.units[u].tone_tuning(f32::from_bits(ev.value as u32)),
-      _ => {} // BEATCLOCK, BEATTEMPO, BEATNUM, REPEAT, LAST are ignored
+      _ => {} // TICKS_PER_BEAT, BEAT_TEMPO, BEATS_PER_MEASURE, REPEAT, LAST are ignored
     }
   }
 
@@ -1089,9 +1096,9 @@ impl PxtoneService {
 
   /// Returns the current playback position in ticks.
   #[inline]
-  pub fn moo_get_now_clock(&self) -> u32 {
-    if self.moo_clock_rate > 0.0 {
-      (self.moo_sample_count as f64 / self.moo_clock_rate) as u32
+  pub fn moo_get_now_tick(&self) -> u32 {
+    if self.moo_samples_per_tick > 0.0 {
+      (self.moo_sample_count as f64 / self.moo_samples_per_tick) as u32
     } else {
       0
     }
@@ -1099,9 +1106,9 @@ impl PxtoneService {
 
   /// Returns the tick position at which playback will end.
   #[inline]
-  pub fn moo_get_end_clock(&self) -> u32 {
-    if self.moo_clock_rate > 0.0 {
-      (self.moo_sample_end as f64 / self.moo_clock_rate) as u32
+  pub fn moo_get_end_tick(&self) -> u32 {
+    if self.moo_samples_per_tick > 0.0 {
+      (self.moo_sample_end as f64 / self.moo_samples_per_tick) as u32
     } else {
       0
     }

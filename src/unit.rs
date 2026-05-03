@@ -117,7 +117,7 @@ impl Unit {
   pub(crate) fn tone_reset_and_2prm(
     &mut self,
     voice_idx: usize,
-    env_rls_clock: u32,
+    env_rls_ticks: u32,
     offset_frequency: f32,
   ) {
     let t = &mut self.tones[voice_idx];
@@ -125,7 +125,7 @@ impl Unit {
     t.on_count = 0;
     t.sample_pos = 0.0;
     t.smooth_volume = 0;
-    t.envelope_release = env_rls_clock;
+    t.envelope_release = env_rls_ticks;
     t.offset_frequency = offset_frequency;
   }
 

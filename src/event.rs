@@ -11,9 +11,9 @@ pub const EVENT_KIND_PAN_VOLUME: u8 = 3;
 pub const EVENT_KIND_VELOCITY: u8 = 4;
 pub const EVENT_KIND_VOLUME: u8 = 5;
 pub const EVENT_KIND_PORTAMENT: u8 = 6;
-pub const EVENT_KIND_BEAT_CLOCK: u8 = 7;
+pub const EVENT_KIND_TICKS_PER_BEAT: u8 = 7;
 pub const EVENT_KIND_BEAT_TEMPO: u8 = 8;
-pub const EVENT_KIND_BEAT_NUM: u8 = 9;
+pub const EVENT_KIND_BEATS_PER_MEASURE: u8 = 9;
 pub const EVENT_KIND_REPEAT: u8 = 10;
 pub const EVENT_KIND_LAST: u8 = 11;
 pub const EVENT_KIND_VOICE_NO: u8 = 12;
@@ -34,9 +34,9 @@ pub const EVENT_DEFAULT_KEY: i32 = 0x6000;
 pub const EVENT_DEFAULT_BASIC_KEY: u32 = 0x4500;
 pub const EVENT_DEFAULT_TUNING: f32 = 1.0;
 
-pub const EVENT_DEFAULT_BEAT_NUM: u8 = 4;
+pub const EVENT_DEFAULT_BEATS_PER_MEASURE: u8 = 4;
 pub const EVENT_DEFAULT_BEAT_TEMPO: f32 = 120.0;
-pub const EVENT_DEFAULT_BEAT_CLOCK: u16 = 480;
+pub const EVENT_DEFAULT_TICKS_PER_BEAT: u16 = 480;
 
 // Returns whether an event is a "tail" event (ON and PORTAMENT)
 #[inline]
@@ -53,13 +53,13 @@ const PRIORITY_TABLE: [u8; EVENT_KIND_NUM] = [
   70,  // VELOCITY
   80,  // VOLUME
   30,  // PORTAMENT
-  0,   // BEATCLOCK
-  0,   // BEATTEMPO
-  0,   // BEATNUM
+  0,   // TICKS_PER_BEAT
+  0,   // BEAT_TEMPO
+  0,   // BEATS_PER_MEASURE
   0,   // REPEAT
   255, // LAST
-  10,  // VOICENO
-  20,  // GROUPNO
+  10,  // VOICE_NO
+  20,  // GROUP_NO
   90,  // TUNING
   100, // PAN_TIME
 ];
@@ -77,7 +77,7 @@ pub struct EventRecord {
   pub(crate) kind: u8,
   pub(crate) unit_index: u8,
   pub(crate) value: i32,
-  pub(crate) clock: i32,
+  pub(crate) tick: i32,
 }
 
 impl EventRecord {
@@ -101,8 +101,8 @@ impl EventRecord {
 
   /// Tick position at which the event occurs.
   #[inline]
-  pub fn clock(&self) -> i32 {
-    self.clock
+  pub fn tick(&self) -> i32 {
+    self.tick
   }
 }
 
@@ -128,15 +128,15 @@ impl EventList {
   }
 
   /// Returns the tick position of the last event, including note durations.
-  pub fn get_max_clock(&self) -> i32 {
+  pub fn get_max_tick(&self) -> i32 {
     self
       .events
       .iter()
       .map(|e| {
         if event_kind_is_tail(e.kind) {
-          e.clock + e.value
+          e.tick + e.value
         } else {
-          e.clock
+          e.tick
         }
       })
       .max()
@@ -151,24 +151,24 @@ impl EventList {
     let mut absolute = 0i32;
 
     for _ in 0..eve_num {
-      let clock_delta = r.read_var_i32()?;
+      let tick_delta = r.read_var_i32()?;
       let unit_index = r.read_u8()?;
       let kind = r.read_u8()?;
       let value = r.read_var_i32()?;
-      absolute += clock_delta;
+      absolute += tick_delta;
       self.events.push(EventRecord {
         kind,
         unit_index,
         value,
-        clock: absolute,
+        tick: absolute,
       });
     }
 
     // Sort in chronological order (priority is used as a tiebreaker).
-    // Lower numeric priority values should come first for same-clock events.
+    // Lower numeric priority values should come first for same-tick events.
     self.events.sort_by(|a, b| {
-      a.clock
-        .cmp(&b.clock)
+      a.tick
+        .cmp(&b.tick)
         .then_with(|| compare_priority(a.kind, b.kind).cmp(&0))
     });
 
@@ -202,12 +202,12 @@ impl EventList {
     let mut absolute = 0i32;
 
     for _ in 0..event_num {
-      let clock_delta = r.read_var_i32()?;
+      let tick_delta = r.read_var_i32()?;
       let value = r.read_var_i32()?;
-      absolute += clock_delta;
-      let clock = absolute;
+      absolute += tick_delta;
+      let tick = absolute;
 
-      self.insert_x4x(clock, unit_index as u8, event_kind, value);
+      self.insert_x4x(tick, unit_index as u8, event_kind, value);
 
       if tail_absolute && event_kind_is_tail(event_kind) {
         absolute += value;
@@ -218,23 +218,23 @@ impl EventList {
   }
 
   // Inserts an event in x4x format in priority order
-  fn insert_x4x(&mut self, clock: i32, unit_index: u8, kind: u8, value: i32) {
+  fn insert_x4x(&mut self, tick: i32, unit_index: u8, kind: u8, value: i32) {
     let rec = EventRecord {
       kind,
       unit_index,
       value,
-      clock,
+      tick,
     };
 
-    // Replace an existing record with the same clock/unit/kind, or insert at the appropriate position
+    // Replace an existing record with the same tick/unit/kind, or insert at the appropriate position
     let pos = self.events.partition_point(|e| {
-      e.clock < clock || (e.clock == clock && compare_priority(kind, e.kind) >= 0)
+      e.tick < tick || (e.tick == tick && compare_priority(kind, e.kind) >= 0)
     });
 
-    // Replace if a record with the same clock/unit/kind already exists
+    // Replace if a record with the same tick/unit/kind already exists
     if let Some(existing) = self.events[..pos]
       .iter()
-      .rposition(|e| e.clock == clock && e.unit_index == unit_index && e.kind == kind)
+      .rposition(|e| e.tick == tick && e.unit_index == unit_index && e.kind == kind)
     {
       self.events[existing] = rec;
     } else {
@@ -256,18 +256,18 @@ impl EventList {
   }
 
   /// Adds an event (inserts into the sorted list)
-  pub fn add_i(&mut self, clock: i32, unit_index: u8, kind: u8, value: i32) {
-    self.insert_x4x(clock, unit_index, kind, value);
+  pub fn add_i(&mut self, tick: i32, unit_index: u8, kind: u8, value: i32) {
+    self.insert_x4x(tick, unit_index, kind, value);
   }
 
-  /// Adds a floating-point event at the given tick clock.
-  pub fn add_f(&mut self, clock: i32, unit_index: u8, kind: u8, value_f: f32) {
-    self.add_i(clock, unit_index, kind, value_f.to_bits() as i32);
+  /// Adds a floating-point event at the given tick position.
+  pub fn add_f(&mut self, tick: i32, unit_index: u8, kind: u8, value_f: f32) {
+    self.add_i(tick, unit_index, kind, value_f.to_bits() as i32);
   }
 
-  /// Shifts the value of all matching events in `[clock1, clock2)` by `delta`.
-  /// Pass `clock2 = -1` to apply through the end of the song.
-  pub fn value_change(&mut self, clock1: i32, clock2: i32, unit_index: u8, kind: u8, delta: i32) {
+  /// Shifts the value of all matching events in `[tick1, tick2)` by `delta`.
+  /// Pass `tick2 = -1` to apply through the end of the song.
+  pub fn value_change(&mut self, tick1: i32, tick2: i32, unit_index: u8, kind: u8, delta: i32) {
     let (max, min) = match kind {
       EVENT_KIND_NULL => (0, 0),
       EVENT_KIND_ON => (120, 120),
@@ -281,8 +281,8 @@ impl EventList {
     for e in &mut self.events {
       if e.unit_index == unit_index
         && e.kind == kind
-        && e.clock >= clock1
-        && (clock2 == -1 || e.clock < clock2)
+        && e.tick >= tick1
+        && (tick2 == -1 || e.tick < tick2)
       {
         e.value = (e.value + delta).clamp(min, max);
       }
