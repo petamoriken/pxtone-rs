@@ -45,7 +45,7 @@ pub struct Unit {
   pub(crate) tuning: f32,
 
   // Voice references (one per instance)
-  pub(crate) voice_num: usize,
+  pub(crate) voice_count: usize,
   pub(crate) voice_flags: Vec<u32>,
   pub(crate) tones: [VoiceTone; MAX_UNIT_CONTROL_VOICE],
 }
@@ -67,7 +67,7 @@ impl Default for Unit {
       velocity: EVENT_DEFAULT_VELOCITY,
       group_index: EVENT_DEFAULT_GROUP_NO,
       tuning: EVENT_DEFAULT_TUNING,
-      voice_num: 0,
+      voice_count: 0,
       voice_flags: Vec::new(),
       tones: Default::default(),
     }
@@ -129,8 +129,8 @@ impl Unit {
     t.offset_frequency = offset_frequency;
   }
 
-  pub(crate) fn set_woice(&mut self, voice_num: usize, voice_flags: Vec<u32>) {
-    self.voice_num = voice_num;
+  pub(crate) fn set_woice(&mut self, voice_count: usize, voice_flags: Vec<u32>) {
+    self.voice_count = voice_count;
     self.voice_flags = voice_flags;
     self.key = EVENT_DEFAULT_KEY;
     self.key_delta = 0;
@@ -206,7 +206,7 @@ impl Unit {
   }
 
   pub(crate) fn tone_envelope(&mut self, instances: &[VoiceInstance]) {
-    for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
+    for (v, vi) in instances.iter().enumerate().take(self.voice_count) {
       let vt = &mut self.tones[v];
       if vt.life_count > 0 && vi.envelope_size > 0 {
         if vt.on_count > 0 {
@@ -242,7 +242,7 @@ impl Unit {
 
     for ch in 0..MAX_CHANNEL {
       let mut buf = 0i32;
-      for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
+      for (v, vi) in instances.iter().enumerate().take(self.voice_count) {
         let vt = &self.tones[v];
         if vt.life_count > 0 {
           let pos = vt.sample_pos as usize;
@@ -306,7 +306,7 @@ impl Unit {
 
   // Advances the sample position
   pub(crate) fn tone_increment_sample(&mut self, frequency: f32, instances: &[VoiceInstance]) {
-    for (v, vi) in instances.iter().enumerate().take(self.voice_num) {
+    for (v, vi) in instances.iter().enumerate().take(self.voice_count) {
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
         vt.life_count -= 1;

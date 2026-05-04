@@ -27,7 +27,7 @@ pub(crate) enum WaveType {
   Saw8 = 16,
 }
 
-pub(crate) const WAVETYPE_NUM: usize = 17;
+pub(crate) const WAVETYPE_COUNT: usize = 17;
 
 impl TryFrom<i32> for WaveType {
   type Error = ();
@@ -93,13 +93,13 @@ const FLAG_OSC_FREQUENCY: u32 = 0x0020;
 const FLAG_OSC_VOLUME: u32 = 0x0040;
 const FLAG_UNCOVERED: u32 = 0xffffff83;
 
-const MAX_UNIT_NUM: usize = 4;
-const MAX_ENVELOPE_NUM: usize = 3;
+const MAX_UNIT_COUNT: usize = 4;
+const MAX_ENVELOPE_COUNT: usize = 3;
 
 const CODE: &[u8; 8] = b"PTNOISE-";
 const VER: u32 = 20120418;
 
-const LIMIT_SMP_NUM: u32 = 48000 * 10;
+const LIMIT_SMP_COUNT: u32 = 48000 * 10;
 const LIMIT_OSC_FREQUENCY: f32 = 44100.0;
 const LIMIT_OSC_VOLUME: f32 = 200.0;
 const LIMIT_OSC_OFFSET: f32 = 100.0;
@@ -121,8 +121,8 @@ impl Noise {
 
   /// Clamps all parameters to their valid ranges
   pub(crate) fn fix(&mut self) {
-    if self.frame_count_44k > LIMIT_SMP_NUM {
-      self.frame_count_44k = LIMIT_SMP_NUM;
+    if self.frame_count_44k > LIMIT_SMP_COUNT {
+      self.frame_count_44k = LIMIT_SMP_COUNT;
     }
     for unit in &mut self.units {
       if unit.enabled {
@@ -157,13 +157,13 @@ impl Noise {
 
     let mut unit_num_byte = [0u8; 1];
     r.read_exact(&mut unit_num_byte)?;
-    let unit_num = unit_num_byte[0] as usize;
-    if unit_num > MAX_UNIT_NUM {
+    let unit_count = unit_num_byte[0] as usize;
+    if unit_count > MAX_UNIT_COUNT {
       return Err(PxtoneError::UnknownFormat);
     }
 
     self.units.clear();
-    for _ in 0..unit_num {
+    for _ in 0..unit_count {
       let mut unit = NoiseUnit {
         enabled: true,
         ..Default::default()
@@ -175,11 +175,11 @@ impl Noise {
       }
 
       if flags & FLAG_ENVELOPE != 0 {
-        let enve_num = r.read_var_u32()?;
-        if enve_num as usize > MAX_ENVELOPE_NUM {
+        let enve_count = r.read_var_u32()?;
+        if enve_count as usize > MAX_ENVELOPE_COUNT {
           return Err(PxtoneError::UnknownFormat);
         }
-        for _ in 0..enve_num {
+        for _ in 0..enve_count {
           let x = r.read_var_u32()?;
           let y = r.read_var_u32()?;
           unit.envelopes.push(NoisePoint { x, y });

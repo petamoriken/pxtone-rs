@@ -1,10 +1,10 @@
 // Frequency table (pxtnPulse_Frequency)
 //   16 octaves × 12 keys × 16 samples/key = 3072 entries
 
-const OCTAVE_NUM: usize = 16;
+const OCTAVE_COUNT: usize = 16;
 const KEY_PER_OCTAVE: usize = 12;
 const FREQUENCY_PER_KEY: usize = 0x10; // 16
-const TABLE_SIZE: usize = OCTAVE_NUM * KEY_PER_OCTAVE * FREQUENCY_PER_KEY; // 3072
+const TABLE_SIZE: usize = OCTAVE_COUNT * KEY_PER_OCTAVE * FREQUENCY_PER_KEY; // 3072
 
 /// Computes oct^(1/divi) with high precision (ported from C++)
 fn get_divide_octave_rate(divi: usize) -> f64 {
@@ -45,7 +45,7 @@ pub(crate) struct FrequencyTable {
 
 impl FrequencyTable {
   pub(crate) fn new() -> Self {
-    let oct_table: [f64; OCTAVE_NUM] = [
+    let oct_table: [f64; OCTAVE_COUNT] = [
       0.00390625, // oct 0  (-8)
       0.0078125,  // oct 1  (-7)
       0.015625,   // oct 2  (-6)

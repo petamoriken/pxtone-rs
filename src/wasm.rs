@@ -328,11 +328,11 @@ pub unsafe extern "C" fn service_get_beat_tempo(svc: *const PxtoneService) -> f3
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`] or null.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_get_measure_num(svc: *const PxtoneService) -> u32 {
+pub unsafe extern "C" fn service_get_measure_count(svc: *const PxtoneService) -> u32 {
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.master.measure_num()
+  unsafe { &*svc }.master.measure_count()
 }
 
 /// Returns the repeat position in measures.

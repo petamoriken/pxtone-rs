@@ -1,14 +1,14 @@
 use crate::error::PxtoneError;
 use crate::pulse::frequency::FrequencyTable;
-use crate::pulse::noise::{Noise, NoiseOscillator, WAVETYPE_NUM, WaveType};
+use crate::pulse::noise::{Noise, NoiseOscillator, WAVETYPE_COUNT, WaveType};
 use crate::pulse::oscillator::{Oscillator, Point};
 use crate::pulse::pcm::Pcm;
 
 const BASIC_SAMPLE_RATE: f64 = 44100.0;
 const BASIC_FREQUENCY: f64 = 100.0;
 const SAMPLING_TOP: i16 = 32767;
-const SMP_NUM_RAND: usize = 44100;
-const SMP_NUM: usize = (BASIC_SAMPLE_RATE / BASIC_FREQUENCY) as usize; // 441
+const SMP_COUNT_RAND: usize = 44100;
+const SMP_COUNT: usize = (BASIC_SAMPLE_RATE / BASIC_FREQUENCY) as usize; // 441
 
 // ---- PRNG ----
 struct Rand {
@@ -51,13 +51,14 @@ impl OscState {
     let offset = if ran {
       0.0
     } else {
-      SMP_NUM as f64 * (osc.offset as f64 / 100.0)
+      SMP_COUNT as f64 * (osc.offset as f64 / 100.0)
     };
     let volume = osc.volume as f64 / 100.0;
     let (rdm_start, rdm_margin, rdm_index) = if ran && !rand_tbl.is_empty() {
-      let idx = ((SMP_NUM_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_NUM_RAND - 1);
+      let idx =
+        ((SMP_COUNT_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_COUNT_RAND - 1);
       let start = rand_tbl[idx];
-      let margin = rand_tbl[(idx + 1).min(SMP_NUM_RAND - 1)] as i32 - start as i32;
+      let margin = rand_tbl[(idx + 1).min(SMP_COUNT_RAND - 1)] as i32 - start as i32;
       (start, margin, idx)
     } else {
       (0, 0, 0)
@@ -74,7 +75,7 @@ impl OscState {
     }
   }
 
-  fn get_sample(&self, tables: &[Option<Vec<i16>>; WAVETYPE_NUM]) -> f64 {
+  fn get_sample(&self, tables: &[Option<Vec<i16>>; WAVETYPE_COUNT]) -> f64 {
     let tbl = tables[self.wave_type as usize].as_deref().unwrap_or(&[]);
     if tbl.is_empty() {
       return 0.0;
@@ -82,7 +83,7 @@ impl OscState {
     let offset = self.offset as usize;
     let work = match self.wave_type {
       WaveType::Random => {
-        self.rdm_start as f64 + self.rdm_margin as f64 * offset as f64 / SMP_NUM as f64
+        self.rdm_start as f64 + self.rdm_margin as f64 * offset as f64 / SMP_COUNT as f64
       }
       WaveType::Random2 => self.rdm_start as f64,
       _ => {
@@ -96,14 +97,14 @@ impl OscState {
 
   fn increment(&mut self, inc: f64, rand_tbl: &[i16]) {
     self.offset += inc;
-    if self.offset > SMP_NUM as f64 {
-      self.offset -= SMP_NUM as f64;
-      if self.offset >= SMP_NUM as f64 {
+    if self.offset > SMP_COUNT as f64 {
+      self.offset -= SMP_COUNT as f64;
+      if self.offset >= SMP_COUNT as f64 {
         self.offset = 0.0;
       }
       if matches!(self.wave_type, WaveType::Random | WaveType::Random2) {
         self.rdm_start = rand_tbl[self.rdm_index];
-        self.rdm_index = (self.rdm_index + 1) % SMP_NUM_RAND;
+        self.rdm_index = (self.rdm_index + 1) % SMP_COUNT_RAND;
         self.rdm_margin = rand_tbl[self.rdm_index] as i32 - self.rdm_start as i32;
       }
     }
@@ -127,7 +128,7 @@ struct UnitState {
 // ---- NoiseBuilder ----
 
 pub(crate) struct NoiseBuilder {
-  tables: [Option<Vec<i16>>; WAVETYPE_NUM],
+  tables: [Option<Vec<i16>>; WAVETYPE_COUNT],
 }
 
 impl NoiseBuilder {
@@ -151,22 +152,22 @@ impl NoiseBuilder {
     }
     let mut osci = Oscillator::new();
     let table: Vec<i16> = match wave_type {
-      WaveType::None => vec![0i16; SMP_NUM],
+      WaveType::None => vec![0i16; SMP_COUNT],
       WaveType::Sine => {
-        osci.ready_get_sample(vec![Point { x: 1, y: 128 }], 128, SMP_NUM as u32, 0);
-        (0..SMP_NUM as u32)
+        osci.ready_get_sample(vec![Point { x: 1, y: 128 }], 128, SMP_COUNT as u32, 0);
+        (0..SMP_COUNT as u32)
           .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
           .collect()
       }
       WaveType::Saw => {
         let top2 = (SAMPLING_TOP as i32 * 2) as f64;
-        (0..SMP_NUM)
-          .map(|s| (SAMPLING_TOP as f64 - top2 * s as f64 / SMP_NUM as f64) as i16)
+        (0..SMP_COUNT)
+          .map(|s| (SAMPLING_TOP as f64 - top2 * s as f64 / SMP_COUNT as f64) as i16)
           .collect()
       }
       WaveType::Rect => {
-        let half = SMP_NUM / 2;
-        (0..SMP_NUM)
+        let half = SMP_COUNT / 2;
+        (0..SMP_COUNT)
           .map(|s| {
             if s < half {
               SAMPLING_TOP
@@ -178,16 +179,16 @@ impl NoiseBuilder {
       }
       WaveType::Random => {
         let mut rng = Rand::new();
-        (0..SMP_NUM_RAND).map(|_| rng.get()).collect()
+        (0..SMP_COUNT_RAND).map(|_| rng.get()).collect()
       }
       WaveType::Saw2 => {
         osci.ready_get_sample(
           (1..=16).map(|i| Point { x: i, y: 128 }).collect(),
           128,
-          SMP_NUM as u32,
+          SMP_COUNT as u32,
           0,
         );
-        (0..SMP_NUM as u32)
+        (0..SMP_COUNT as u32)
           .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
           .collect()
       }
@@ -200,15 +201,15 @@ impl NoiseBuilder {
             })
             .collect(),
           128,
-          SMP_NUM as u32,
+          SMP_COUNT as u32,
           0,
         );
-        (0..SMP_NUM as u32)
+        (0..SMP_COUNT as u32)
           .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
           .collect()
       }
       WaveType::Tri => {
-        let n = SMP_NUM as i32;
+        let n = SMP_COUNT as i32;
         osci.ready_get_sample(
           vec![
             Point { x: 0, y: 0 },
@@ -220,43 +221,43 @@ impl NoiseBuilder {
             Point { x: n, y: 0 },
           ],
           128,
-          SMP_NUM as u32,
-          SMP_NUM as u32,
+          SMP_COUNT as u32,
+          SMP_COUNT as u32,
         );
-        (0..SMP_NUM as u32)
+        (0..SMP_COUNT as u32)
           .map(|s| {
             (osci.get_one_sample_coordinate(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
           })
           .collect()
       }
       WaveType::Rect3 => {
-        let t3 = SMP_NUM / 3;
-        (0..SMP_NUM)
+        let t3 = SMP_COUNT / 3;
+        (0..SMP_COUNT)
           .map(|s| if s < t3 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
       WaveType::Rect4 => {
-        let t4 = SMP_NUM / 4;
-        (0..SMP_NUM)
+        let t4 = SMP_COUNT / 4;
+        (0..SMP_COUNT)
           .map(|s| if s < t4 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
       WaveType::Rect8 => {
-        let t8 = SMP_NUM / 8;
-        (0..SMP_NUM)
+        let t8 = SMP_COUNT / 8;
+        (0..SMP_COUNT)
           .map(|s| if s < t8 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
       WaveType::Rect16 => {
-        let t16 = SMP_NUM / 16;
-        (0..SMP_NUM)
+        let t16 = SMP_COUNT / 16;
+        (0..SMP_COUNT)
           .map(|s| if s < t16 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
       WaveType::Saw3 => {
-        let t1 = SMP_NUM / 3;
-        let t2 = SMP_NUM * 2 / 3;
-        (0..SMP_NUM)
+        let t1 = SMP_COUNT / 3;
+        let t2 = SMP_COUNT * 2 / 3;
+        (0..SMP_COUNT)
           .map(|s| {
             if s < t1 {
               SAMPLING_TOP
@@ -269,10 +270,10 @@ impl NoiseBuilder {
           .collect()
       }
       WaveType::Saw4 => {
-        let a1 = SMP_NUM / 4;
-        let a2 = SMP_NUM * 2 / 4;
-        let a3 = SMP_NUM * 3 / 4;
-        (0..SMP_NUM)
+        let a1 = SMP_COUNT / 4;
+        let a2 = SMP_COUNT * 2 / 4;
+        let a3 = SMP_COUNT * 3 / 4;
+        (0..SMP_COUNT)
           .map(|s| {
             if s < a1 {
               SAMPLING_TOP
@@ -295,8 +296,8 @@ impl NoiseBuilder {
           (-(SAMPLING_TOP as i32) + SAMPLING_TOP as i32 * 2 / 5) as i16,
           -SAMPLING_TOP,
         ];
-        (0..SMP_NUM)
-          .map(|s| seg6[(s * 6 / SMP_NUM).min(5)])
+        (0..SMP_COUNT)
+          .map(|s| seg6[(s * 6 / SMP_COUNT).min(5)])
           .collect()
       }
       WaveType::Saw8 => {
@@ -310,8 +311,8 @@ impl NoiseBuilder {
           (-SAMPLING_TOP as i32 + SAMPLING_TOP as i32 * 2 / 7) as i16,
           -SAMPLING_TOP,
         ];
-        (0..SMP_NUM)
-          .map(|s| seg8[(s * 8 / SMP_NUM).min(7)])
+        (0..SMP_COUNT)
+          .map(|s| seg8[(s * 8 / SMP_COUNT).min(7)])
           .collect()
       }
       WaveType::Random2 => unreachable!(),

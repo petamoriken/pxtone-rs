@@ -9,8 +9,8 @@ pub(crate) struct Point {
 
 pub(crate) struct Oscillator {
   volume: u32,
-  sample_num: u32,
-  point_num: usize,
+  sample_count: u32,
+  point_count: usize,
   point_reso: u32,
   points: Vec<Point>,
 }
@@ -19,8 +19,8 @@ impl Oscillator {
   pub(crate) fn new() -> Self {
     Self {
       volume: 0,
-      sample_num: 0,
-      point_num: 0,
+      sample_count: 0,
+      point_count: 0,
       point_reso: 0,
       points: Vec::new(),
     }
@@ -30,13 +30,13 @@ impl Oscillator {
     &mut self,
     points: Vec<Point>,
     volume: u32,
-    sample_num: u32,
+    sample_count: u32,
     point_reso: u32,
   ) {
-    self.point_num = points.len();
+    self.point_count = points.len();
     self.points = points;
     self.volume = volume;
-    self.sample_num = sample_num;
+    self.sample_count = sample_count;
     self.point_reso = point_reso;
   }
 
@@ -45,7 +45,7 @@ impl Oscillator {
     use std::f64::consts::PI;
     let mut work = 0.0f64;
     for p in &self.points {
-      let sss = 2.0 * PI * p.x as f64 * index as f64 / self.sample_num as f64;
+      let sss = 2.0 * PI * p.x as f64 * index as f64 / self.sample_count as f64;
       work += sss.sin() * p.y as f64 / p.x as f64 / 128.0;
     }
     work * self.volume as f64 / 128.0
@@ -53,16 +53,16 @@ impl Oscillator {
 
   /// Gets one sample via coordinate interpolation
   pub(crate) fn get_one_sample_coordinate(&self, index: u32) -> f64 {
-    let i = self.point_reso * index / self.sample_num;
+    let i = self.point_reso * index / self.sample_count;
 
     // Find the two surrounding points
     let c = self
       .points
       .iter()
       .position(|p| p.x > i as i32)
-      .unwrap_or(self.point_num);
+      .unwrap_or(self.point_count);
 
-    let (x1, y1, x2, y2) = if c == self.point_num {
+    let (x1, y1, x2, y2) = if c == self.point_count {
       // End of list
       let last = &self.points[c - 1];
       let first = &self.points[0];

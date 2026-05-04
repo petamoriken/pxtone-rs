@@ -19,19 +19,19 @@ impl Pcm {
     channels: u8,
     sample_rate: u32,
     bits_per_sample: u8,
-    sample_num: u32,
+    sample_count: u32,
   ) -> Result<Self, PxtoneError> {
     if bits_per_sample != 8 && bits_per_sample != 16 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let size = (sample_num * bits_per_sample as u32 * channels as u32 / 8) as usize;
+    let size = (sample_count * bits_per_sample as u32 * channels as u32 / 8) as usize;
     let fill = if bits_per_sample == 8 { 128u8 } else { 0u8 };
     Ok(Self {
       channels,
       sample_rate,
       bits_per_sample,
       head_frames: 0,
-      body_frames: sample_num,
+      body_frames: sample_count,
       tail_frames: 0,
       samples: vec![fill; size],
     })

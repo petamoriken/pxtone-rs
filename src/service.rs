@@ -18,11 +18,11 @@ use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
 // ---- Constants ----
-const MAX_UNIT_NUM: usize = 50;
-const MAX_WOICE_NUM: usize = 100;
-const MAX_GROUP_NUM: usize = 7;
-const MAX_DELAY_NUM: usize = 4;
-const MAX_OVERDRIVE_NUM: usize = 2;
+const MAX_UNIT_COUNT: usize = 50;
+const MAX_WOICE_COUNT: usize = 100;
+const MAX_GROUP_COUNT: usize = 7;
+const MAX_DELAY_COUNT: usize = 4;
+const MAX_OVERDRIVE_COUNT: usize = 2;
 const MAX_WOICE_NAME: usize = 16;
 const MAX_UNIT_NAME: usize = 16;
 
@@ -176,7 +176,7 @@ pub struct PxtoneService {
   dst_sample_rate: u32,
 
   // moo runtime
-  group_num: usize,
+  group_count: usize,
   unit_woice_idxs: Vec<usize>, // current voice index per unit
 
   moo_samples_per_tick: f64,
@@ -219,7 +219,7 @@ impl PxtoneService {
       dst_channels: 2,
       dst_sample_rate: 44100,
 
-      group_num: MAX_GROUP_NUM,
+      group_count: MAX_GROUP_COUNT,
       unit_woice_idxs: Vec::new(),
 
       moo_samples_per_tick: 0.0,
@@ -306,7 +306,7 @@ impl PxtoneService {
     let last_master_tick = self.master.get_last_tick();
     self
       .master
-      .adjust_measure_num(max_event_tick.max(last_master_tick));
+      .adjust_measure_count(max_event_tick.max(last_master_tick));
 
     self.data_loaded = true;
     Ok(())
@@ -378,7 +378,7 @@ impl PxtoneService {
           if rrr != 0 {
             return Err(PxtoneError::UnknownFormat);
           }
-          if num > MAX_UNIT_NUM {
+          if num > MAX_UNIT_COUNT {
             return Err(PxtoneError::UnknownFormat);
           }
           self.units = (0..num).map(|_| Unit::new()).collect();
@@ -388,7 +388,7 @@ impl PxtoneService {
         b"Event V5" => self.events.read_v5(r)?,
 
         b"matePCM " | b"matePCM=" => {
-          if self.woices.len() >= MAX_WOICE_NUM {
+          if self.woices.len() >= MAX_WOICE_COUNT {
             return Err(PxtoneError::WoiceFull);
           }
           let mut w = Woice::new();
@@ -396,7 +396,7 @@ impl PxtoneService {
           self.woices.push(w);
         }
         b"matePTV " => {
-          if self.woices.len() >= MAX_WOICE_NUM {
+          if self.woices.len() >= MAX_WOICE_COUNT {
             return Err(PxtoneError::WoiceFull);
           }
           let mut w = Woice::new();
@@ -404,7 +404,7 @@ impl PxtoneService {
           self.woices.push(w);
         }
         b"matePTN " => {
-          if self.woices.len() >= MAX_WOICE_NUM {
+          if self.woices.len() >= MAX_WOICE_COUNT {
             return Err(PxtoneError::WoiceFull);
           }
           let mut w = Woice::new();
@@ -412,7 +412,7 @@ impl PxtoneService {
           self.woices.push(w);
         }
         b"mateOGGV" => {
-          if self.woices.len() >= MAX_WOICE_NUM {
+          if self.woices.len() >= MAX_WOICE_COUNT {
             return Err(PxtoneError::WoiceFull);
           }
           let mut w = Woice::new();
@@ -420,7 +420,7 @@ impl PxtoneService {
           self.woices.push(w);
         }
         b"effeDELA" => {
-          if self.delays.len() >= MAX_DELAY_NUM {
+          if self.delays.len() >= MAX_DELAY_COUNT {
             return Err(PxtoneError::UnknownFormat);
           }
           let mut d = Delay::new();
@@ -428,7 +428,7 @@ impl PxtoneService {
           self.delays.push(d);
         }
         b"effeOVER" => {
-          if self.overdrives.len() >= MAX_OVERDRIVE_NUM {
+          if self.overdrives.len() >= MAX_OVERDRIVE_COUNT {
             return Err(PxtoneError::UnknownFormat);
           }
           let mut od = OverDrive::new();
@@ -507,7 +507,7 @@ impl PxtoneService {
 
   /// Reads a v1x unit struct (size:i32 + name[16] + type:u16 + group:u16)
   fn read_old_unit_v1<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    if self.units.len() >= MAX_UNIT_NUM {
+    if self.units.len() >= MAX_UNIT_COUNT {
       return Err(PxtoneError::UnknownFormat);
     }
 
@@ -524,7 +524,7 @@ impl PxtoneService {
     self.units.push(unit);
     self.unit_woice_idxs.push(0);
 
-    let g = group.min(self.group_num as i32 - 1);
+    let g = group.min(self.group_count as i32 - 1);
     self.events.add_i(0, u_idx as u8, EVENT_KIND_GROUP_NO, g);
     self
       .events
@@ -534,7 +534,7 @@ impl PxtoneService {
 
   /// Reads a v3x unit struct (size:i32 + type:u16 + group:u16)
   fn read_old_unit_v3<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    if self.units.len() >= MAX_UNIT_NUM {
+    if self.units.len() >= MAX_UNIT_COUNT {
       return Err(PxtoneError::UnknownFormat);
     }
 
@@ -546,7 +546,7 @@ impl PxtoneService {
     self.units.push(Unit::new());
     self.unit_woice_idxs.push(0);
 
-    let g = group.min(self.group_num as i32 - 1);
+    let g = group.min(self.group_count as i32 - 1);
     self.events.add_i(0, u_idx as u8, EVENT_KIND_GROUP_NO, g);
     self
       .events
@@ -563,7 +563,7 @@ impl PxtoneService {
     let ticks_per_beat = r.read_u16::<LE>()?;
     let beats_per_measure = r.read_u16::<LE>()? as u8;
     let _beat_note = r.read_u16::<LE>()?;
-    let _measure_num = r.read_u16::<LE>()?;
+    let _measure_count = r.read_u16::<LE>()?;
     let _channels = r.read_u16::<LE>()?;
     let _bits_per_sample = r.read_u16::<LE>()?;
     let _sample_rate = r.read_u32::<LE>()?;
@@ -579,8 +579,8 @@ impl PxtoneService {
 
   fn x3x_tuning_key_event(&mut self) -> Result<(), PxtoneError> {
     use crate::event::EVENT_KIND_KEY;
-    let unit_num = self.units.len().min(self.woices.len());
-    for u in 0..unit_num {
+    let unit_count = self.units.len().min(self.woices.len());
+    for u in 0..unit_count {
       let change = self.woices[u].x3x_basic_key as i32 - EVENT_DEFAULT_BASIC_KEY as i32;
       let has_key = self
         .events
@@ -598,8 +598,8 @@ impl PxtoneService {
   }
 
   fn x3x_add_tuning_event(&mut self) {
-    let unit_num = self.units.len().min(self.woices.len());
-    for u in 0..unit_num {
+    let unit_count = self.units.len().min(self.woices.len());
+    for u in 0..unit_count {
       let tuning = self.woices[u].x3x_tuning;
       if tuning != 0.0 {
         self.events.add_f(0, u as u8, EVENT_KIND_TUNING, tuning);
@@ -727,7 +727,7 @@ impl PxtoneService {
     if tempo == 0.0 {
       return 0;
     }
-    let total_beats = self.master.measure_num * self.master.beats_per_measure as u32;
+    let total_beats = self.master.measure_count * self.master.beats_per_measure as u32;
     (self.dst_sample_rate as f64 * 60.0 * total_beats as f64 / tempo as f64) as u32
   }
 
@@ -742,14 +742,14 @@ impl PxtoneService {
     let woice_idx = woice_idx.min(self.woices.len() - 1);
 
     // Collect voice_flags from the woice
-    let voice_num = self.woices[woice_idx].voices.len();
+    let voice_count = self.woices[woice_idx].voices.len();
     let voice_flags: Vec<u32> = self.woices[woice_idx]
       .voices
       .iter()
       .map(|v| v.voice_flags)
       .collect();
 
-    self.units[unit_idx].set_woice(voice_num, voice_flags);
+    self.units[unit_idx].set_woice(voice_count, voice_flags);
 
     if unit_idx < self.unit_woice_idxs.len() {
       self.unit_woice_idxs[unit_idx] = woice_idx;
@@ -760,7 +760,7 @@ impl PxtoneService {
     let bt_tempo = self.moo_beat_tempo;
     let inst_len = self.woices[woice_idx].instances.len();
 
-    for v in 0..voice_num.min(inst_len) {
+    for v in 0..voice_count.min(inst_len) {
       let vc = &self.woices[woice_idx].voices[v];
       let inst = &self.woices[woice_idx].instances[v];
       let body_frames = inst.body_frames;
@@ -802,8 +802,8 @@ impl PxtoneService {
   /// Synthesizes one sample and writes it into `out[0..channels]`.
   /// Returns `true` while playing, `false` when the end is reached.
   fn moo_pxtone_sample(&mut self, out: &mut [i16; 2]) -> bool {
-    let unit_num = self.units.len();
-    let group_num = self.group_num;
+    let unit_count = self.units.len();
+    let group_count = self.group_count;
     let channel_count = self.dst_channels as usize;
     let samples_per_tick = self.moo_samples_per_tick;
     let sample_count = self.moo_sample_count;
@@ -814,7 +814,7 @@ impl PxtoneService {
     let sample_stride = self.moo_sample_stride;
 
     // ---- 1. Envelope processing ----
-    for u in 0..unit_num {
+    for u in 0..unit_count {
       let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
       if let Some(woice) = self.woices.get(wi) {
         // SAFETY: woices[wi] and units[u] are independent elements
@@ -847,7 +847,7 @@ impl PxtoneService {
     }
 
     // ---- 3. Tone_Sample ----
-    for u in 0..unit_num {
+    for u in 0..unit_count {
       let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
       if let Some(woice) = self.woices.get(wi) {
         let instances = woice.instances.as_slice() as *const [VoiceInstance];
@@ -863,12 +863,12 @@ impl PxtoneService {
     }
 
     // ---- 4. Per-channel group sum → effects → output ----
-    let mut group_smps = vec![0i32; group_num];
+    let mut group_smps = vec![0i32; group_count];
 
     for (ch, out_sample) in out.iter_mut().enumerate().take(channel_count) {
       group_smps.fill(0);
 
-      for u in 0..unit_num {
+      for u in 0..unit_count {
         self.units[u].tone_supple(&mut group_smps, ch, time_pan_idx);
       }
       for od in &self.overdrives {
@@ -897,7 +897,7 @@ impl PxtoneService {
     self.moo_sample_count += 1;
     self.moo_time_pan_index = (self.moo_time_pan_index + 1) & (BUFSIZE_TIMEPAN - 1);
 
-    for u in 0..unit_num {
+    for u in 0..unit_count {
       let key = self.units[u].tone_increment_key();
       let freq = self.frequency.get2(key) * sample_stride;
       let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
@@ -959,9 +959,9 @@ impl PxtoneService {
         self.units[u].tone_key_on();
 
         let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
-        let voice_num = self.woices.get(wi).map(|w| w.voices.len()).unwrap_or(0);
+        let voice_count = self.woices.get(wi).map(|w| w.voices.len()).unwrap_or(0);
 
-        for v in 0..voice_num {
+        for v in 0..voice_count {
           // Read instance data first (immutable borrow of self.woices)
           let envelope_release = self
             .woices
@@ -1056,7 +1056,7 @@ impl PxtoneService {
     if !buf.len().is_multiple_of(byte_per_smp) {
       return false;
     }
-    let _smp_num = buf.len() / byte_per_smp;
+    let _smp_count = buf.len() / byte_per_smp;
 
     let mut smp_written = 0usize;
     for chunk in buf.chunks_exact_mut(byte_per_smp) {

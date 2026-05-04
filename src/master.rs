@@ -14,7 +14,7 @@ pub struct Master {
   pub(crate) beats_per_measure: u8,
   pub(crate) beat_tempo: f32,
   pub(crate) ticks_per_beat: u16,
-  pub(crate) measure_num: u32,
+  pub(crate) measure_count: u32,
   pub(crate) repeat_measure: u32,
   pub(crate) last_measure: u32,
 }
@@ -25,7 +25,7 @@ impl Default for Master {
       beats_per_measure: EVENT_DEFAULT_BEATS_PER_MEASURE,
       beat_tempo: EVENT_DEFAULT_BEAT_TEMPO,
       ticks_per_beat: EVENT_DEFAULT_TICKS_PER_BEAT,
-      measure_num: 1,
+      measure_count: 1,
       repeat_measure: 0,
       last_measure: 0,
     }
@@ -53,8 +53,8 @@ impl Master {
   }
 
   /// Returns the total length of the song in measures.
-  pub fn measure_num(&self) -> u32 {
-    self.measure_num
+  pub fn measure_count(&self) -> u32 {
+    self.measure_count
   }
 
   /// Returns the loop start position in measures. `0` means no loop point is set.
@@ -75,21 +75,21 @@ impl Master {
     if self.last_measure != 0 {
       self.last_measure
     } else {
-      self.measure_num
+      self.measure_count
     }
   }
 
-  pub(crate) fn adjust_measure_num(&mut self, tick: u32) {
-    let b_num = tick.div_ceil(self.ticks_per_beat as u32);
-    let m_num = b_num.div_ceil(self.beats_per_measure as u32);
-    if self.measure_num <= m_num {
-      self.measure_num = m_num;
+  pub(crate) fn adjust_measure_count(&mut self, tick: u32) {
+    let b_count = tick.div_ceil(self.ticks_per_beat as u32);
+    let m_count = b_count.div_ceil(self.beats_per_measure as u32);
+    if self.measure_count <= m_count {
+      self.measure_count = m_count;
     }
-    if self.repeat_measure >= self.measure_num {
+    if self.repeat_measure >= self.measure_count {
       self.repeat_measure = 0;
     }
-    if self.last_measure > self.measure_num {
-      self.last_measure = self.measure_num;
+    if self.last_measure > self.measure_count {
+      self.last_measure = self.measure_count;
     }
   }
 
@@ -132,11 +132,11 @@ impl Master {
   // Reads an x4x-format Master block.
   pub(crate) fn read_x4x<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
-    let data_num = r.read_u16::<LE>()?;
+    let data_count = r.read_u16::<LE>()?;
     let rrr = r.read_u16::<LE>()?;
-    let event_num = r.read_u32::<LE>()?;
+    let event_count = r.read_u32::<LE>()?;
 
-    if data_num != 3 {
+    if data_count != 3 {
       return Err(PxtoneError::UnknownFormat);
     }
     if rrr != 0 {
@@ -150,7 +150,7 @@ impl Master {
     let mut last_tick = 0i32;
     let mut absolute = 0i32;
 
-    for _ in 0..event_num {
+    for _ in 0..event_count {
       let status = r.read_var_u32()?;
       let tick_delta = r.read_var_i32()?;
       let volume = r.read_var_i32()?;

@@ -85,7 +85,10 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
     Value::Integer(m.beats_per_measure() as i64),
   );
   master_table.insert("beat_tempo".into(), Value::Float(m.beat_tempo() as f64));
-  master_table.insert("measure_num".into(), Value::Integer(m.measure_num() as i64));
+  master_table.insert(
+    "measure_count".into(),
+    Value::Integer(m.measure_count() as i64),
+  );
   master_table.insert(
     "repeat_measure".into(),
     Value::Integer(m.repeat_measure() as i64),

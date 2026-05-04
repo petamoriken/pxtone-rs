@@ -12,7 +12,7 @@ import {
   service_get_event_unit_index,
   service_get_event_value,
   service_get_last_measure,
-  service_get_measure_num,
+  service_get_measure_count,
   service_get_repeat_measure,
   service_get_sample_rate,
   service_get_text_comment,
@@ -45,7 +45,7 @@ interface PtcopSnapshot {
     ticks_per_beat: number;
     beats_per_measure: number;
     beat_tempo: number;
-    measure_num: number;
+    measure_count: number;
     repeat_measure: number;
     last_measure: number;
   };
@@ -222,7 +222,7 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       const ticksPerBeat = service_get_ticks_per_beat(svc);
       const beatsPerMeasure = service_get_beats_per_measure(svc);
       const beatTempo = service_get_beat_tempo(svc);
-      const measureNum = service_get_measure_num(svc);
+      const measureCount = service_get_measure_count(svc);
       const repeatMeasure = service_get_repeat_measure(svc);
       const lastMeasure = service_get_last_measure(svc);
       const m = snapshot.master;
@@ -230,7 +230,7 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
         ticksPerBeat !== m.ticks_per_beat ||
         beatsPerMeasure !== m.beats_per_measure ||
         Math.abs(beatTempo - m.beat_tempo) >= 0.001 ||
-        measureNum !== m.measure_num ||
+        measureCount !== m.measure_count ||
         repeatMeasure !== m.repeat_measure ||
         lastMeasure !== m.last_measure
       ) {

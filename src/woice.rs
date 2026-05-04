@@ -39,11 +39,11 @@ pub(crate) struct VoiceEnvelope {
   /// Frames per second of the envelope timeline.
   pub(crate) fps: u32,
   /// Number of points in the attack (head) phase.
-  pub(crate) head_num: u32,
+  pub(crate) head_count: u32,
   /// Number of points in the sustain (body) phase. Always `0` in the current format.
-  pub(crate) body_num: u32,
+  pub(crate) body_count: u32,
   /// Number of points in the release (tail) phase. Always `1` in the current format.
-  pub(crate) tail_num: u32,
+  pub(crate) tail_count: u32,
   /// Envelope points ordered head → body → tail.
   /// Each entry is `(duration in frames, volume 0–100)`.
   pub(crate) points: Vec<(i32, i32)>,
@@ -213,8 +213,8 @@ impl Woice {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let sample_num = data_size * 8 / bits_per_sample as u32 / channels as u32;
-    let mut pcm = Pcm::create(channels, sample_rate, bits_per_sample, sample_num)?;
+    let sample_count = data_size * 8 / bits_per_sample as u32 / channels as u32;
+    let mut pcm = Pcm::create(channels, sample_rate, bits_per_sample, sample_count)?;
     r.read_exact(&mut pcm.samples_mut()[..data_size as usize])?;
 
     let unit = VoiceUnit {
@@ -336,12 +336,12 @@ impl Woice {
     if work1 != 0 || work2 != 0 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let voice_num = r.read_var_u32()?;
+    let voice_count = r.read_var_u32()?;
 
     self.x3x_basic_key = x3x_basic_key;
     self.voices.clear();
 
-    for _ in 0..voice_num {
+    for _ in 0..voice_count {
       let basic_key = r.read_var_u32()?;
       let volume = r.read_var_u32()?;
       let pan = r.read_var_u32()?;
@@ -481,8 +481,8 @@ impl Woice {
         _ => continue,
       };
 
-      if env.head_num > 0 {
-        let size: i32 = env.points[..env.head_num as usize]
+      if env.head_count > 0 {
+        let size: i32 = env.points[..env.head_count as usize]
           .iter()
           .map(|p| p.0)
           .sum();
@@ -494,7 +494,7 @@ impl Woice {
         inst.envelope = vec![0u8; inst.envelope_size as usize];
 
         // Convert points to sample_rate scale
-        let pts: Vec<(i32, i32)> = env.points[..env.head_num as usize]
+        let pts: Vec<(i32, i32)> = env.points[..env.head_count as usize]
           .iter()
           .enumerate()
           .filter(|&(e, p)| e == 0 || p.0 != 0 || p.1 != 0)
@@ -523,8 +523,8 @@ impl Woice {
         }
       }
 
-      if env.tail_num > 0 {
-        let tail_idx = env.head_num as usize;
+      if env.tail_count > 0 {
+        let tail_idx = env.head_count as usize;
         inst.envelope_release =
           (env.points[tail_idx].0 as f64 * sample_rate as f64 / env.fps as f64) as u32;
       }
@@ -584,22 +584,22 @@ fn ptv_read_wave<R: Read>(r: &mut R) -> Result<VoiceData, PxtoneError> {
 
 fn ptv_read_envelope<R: Read>(r: &mut R, envelope: &mut VoiceEnvelope) -> Result<(), PxtoneError> {
   let fps = r.read_var_u32()?;
-  let head_num = r.read_var_u32()?;
-  let body_num = r.read_var_u32()?;
-  let tail_num = r.read_var_u32()?;
-  if body_num != 0 {
+  let head_count = r.read_var_u32()?;
+  let body_count = r.read_var_u32()?;
+  let tail_count = r.read_var_u32()?;
+  if body_count != 0 {
     return Err(PxtoneError::UnknownFormat);
   }
-  if tail_num != 1 {
+  if tail_count != 1 {
     return Err(PxtoneError::UnknownFormat);
   }
 
   envelope.fps = fps;
-  envelope.head_num = head_num;
-  envelope.body_num = body_num;
-  envelope.tail_num = tail_num;
+  envelope.head_count = head_count;
+  envelope.body_count = body_count;
+  envelope.tail_count = tail_count;
 
-  let total = head_num + body_num + tail_num;
+  let total = head_count + body_count + tail_count;
   for _ in 0..total {
     let x = r.read_var_i32()?;
     let y = r.read_var_i32()?;

@@ -2,7 +2,7 @@ use crate::error::PxtoneError;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
-pub(crate) const MAX_GROUP_NUM: usize = 4; // pxtnMAX_TUNEGROUPNUM
+pub(crate) const MAX_GROUP_COUNT: usize = 4; // pxtnMAX_TUNEGROUPNUM
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u16)]
@@ -124,7 +124,7 @@ impl Delay {
     self.unit = DelayUnit::try_from(unit).map_err(|_| PxtoneError::UnknownFormat)?;
     self.frequency = r.read_f32::<LE>()?;
     self.rate = rate;
-    self.group = group.min(MAX_GROUP_NUM - 1);
+    self.group = group.min(MAX_GROUP_COUNT - 1);
     Ok(())
   }
 }

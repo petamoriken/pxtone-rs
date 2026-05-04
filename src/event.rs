@@ -20,7 +20,7 @@ pub const EVENT_KIND_VOICE_NO: u8 = 12;
 pub const EVENT_KIND_GROUP_NO: u8 = 13;
 pub const EVENT_KIND_TUNING: u8 = 14;
 pub const EVENT_KIND_PAN_TIME: u8 = 15;
-pub const EVENT_KIND_NUM: usize = 16;
+pub const EVENT_KIND_COUNT: usize = 16;
 
 // Default values
 pub const EVENT_DEFAULT_VOLUME: u32 = 104;
@@ -45,7 +45,7 @@ pub(crate) fn event_kind_is_tail(kind: u8) -> bool {
 }
 
 // Event priority table
-const PRIORITY_TABLE: [u8; EVENT_KIND_NUM] = [
+const PRIORITY_TABLE: [u8; EVENT_KIND_COUNT] = [
   0,   // NULL
   50,  // ON
   40,  // KEY
@@ -146,11 +146,11 @@ impl EventList {
   // Reads a v5-format event list (equivalent to Linear_Start / Linear_Add / Linear_End)
   pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     let _size = r.read_i32::<LE>()?;
-    let eve_num = r.read_u32::<LE>()?;
+    let eve_count = r.read_u32::<LE>()?;
 
     let mut absolute = 0i32;
 
-    for _ in 0..eve_num {
+    for _ in 0..eve_count {
       let tick_delta = r.read_var_i32()?;
       let unit_index = r.read_u8()?;
       let kind = r.read_u8()?;
@@ -185,14 +185,14 @@ impl EventList {
     let _size = r.read_i32::<LE>()?;
     let unit_index = r.read_u16::<LE>()?;
     let event_kind = r.read_u16::<LE>()? as u8;
-    let data_num = r.read_u16::<LE>()?;
+    let data_count = r.read_u16::<LE>()?;
     let rrr = r.read_u16::<LE>()?;
-    let event_num = r.read_u32::<LE>()?;
+    let event_count = r.read_u32::<LE>()?;
 
-    if data_num != 2 {
+    if data_count != 2 {
       return Err(PxtoneError::UnknownFormat);
     }
-    if (event_kind as usize) >= EVENT_KIND_NUM {
+    if (event_kind as usize) >= EVENT_KIND_COUNT {
       return Err(PxtoneError::UnknownFormat);
     }
     if check_rrr && rrr != 0 {
@@ -201,7 +201,7 @@ impl EventList {
 
     let mut absolute = 0i32;
 
-    for _ in 0..event_num {
+    for _ in 0..event_count {
       let tick_delta = r.read_var_i32()?;
       let value = r.read_var_i32()?;
       absolute += tick_delta;
