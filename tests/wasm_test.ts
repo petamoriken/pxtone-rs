@@ -28,6 +28,8 @@ import {
   service_read,
   service_render_noise,
   service_tones_ready,
+  validate,
+  validate_noise,
 } from "../target/wasm32-unknown-unknown/release-wasm/pxtone.wasm";
 
 import { dirname, join } from "node:path";
@@ -79,6 +81,76 @@ function pcmToWav(
   new Uint8Array(buf, 44).set(samples);
   return new Uint8Array(buf);
 }
+
+Deno.test("validate ptcop (wasm)", async () => {
+  const sampleDir = join(projectRoot, "tests/sample/ptcop");
+
+  const names: string[] = [];
+  for await (const entry of Deno.readDir(sampleDir)) {
+    if (entry.isFile && entry.name.endsWith(".ptcop")) names.push(entry.name);
+  }
+  names.sort();
+
+  if (names.length === 0) {
+    throw new Error("no .ptcop files found in tests/sample/ptcop/");
+  }
+
+  for (const name of names) {
+    const data = await Deno.readFile(join(sampleDir, name));
+    const ptr = alloc(data.length);
+    new Uint8Array(memory.buffer, ptr, data.length).set(data);
+    const result = validate(ptr, data.length);
+    dealloc(ptr, data.length);
+    if (result !== 0) {
+      throw new Error(`${name}: validate returned ${result}, expected 0`);
+    }
+  }
+
+  // invalid data must fail
+  const junk = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]);
+  const junkPtr = alloc(junk.length);
+  new Uint8Array(memory.buffer, junkPtr, junk.length).set(junk);
+  const junkResult = validate(junkPtr, junk.length);
+  dealloc(junkPtr, junk.length);
+  if (junkResult === 0) {
+    throw new Error("validate returned 0 for invalid data");
+  }
+});
+
+Deno.test("validate ptnoise (wasm)", async () => {
+  const sampleDir = join(projectRoot, "tests/sample/ptnoise");
+
+  const names: string[] = [];
+  for await (const entry of Deno.readDir(sampleDir)) {
+    if (entry.isFile && entry.name.endsWith(".ptnoise")) names.push(entry.name);
+  }
+  names.sort();
+
+  if (names.length === 0) {
+    throw new Error("no .ptnoise files found in tests/sample/ptnoise/");
+  }
+
+  for (const name of names) {
+    const data = await Deno.readFile(join(sampleDir, name));
+    const ptr = alloc(data.length);
+    new Uint8Array(memory.buffer, ptr, data.length).set(data);
+    const result = validate_noise(ptr, data.length);
+    dealloc(ptr, data.length);
+    if (result !== 0) {
+      throw new Error(`${name}: validate_noise returned ${result}, expected 0`);
+    }
+  }
+
+  // invalid data must fail
+  const junk = new Uint8Array([0, 1, 2, 3, 4, 5, 6, 7]);
+  const junkPtr = alloc(junk.length);
+  new Uint8Array(memory.buffer, junkPtr, junk.length).set(junk);
+  const junkResult = validate_noise(junkPtr, junk.length);
+  dealloc(junkPtr, junk.length);
+  if (junkResult === 0) {
+    throw new Error("validate_noise returned 0 for invalid data");
+  }
+});
 
 Deno.test("decoded ptcop matches reference (wasm)", async () => {
   const sampleDir = join(projectRoot, "tests/sample/ptcop");

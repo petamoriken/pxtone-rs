@@ -1,3 +1,4 @@
+use crate::pulse::noise::Noise;
 use crate::service::{PxtoneService, StartPos, VomitPrepFlags, VomitPreparation};
 use std::alloc::{Layout, alloc as sys_alloc, dealloc as sys_dealloc};
 use std::io::Cursor;
@@ -74,6 +75,24 @@ pub unsafe extern "C" fn service_read(svc: *mut PxtoneService, data: *const u8, 
   let slice = unsafe { std::slice::from_raw_parts(data, len) };
   let mut cursor = Cursor::new(slice);
   match svc.read(&mut cursor) {
+    Ok(()) => 0,
+    Err(_) => -1,
+  }
+}
+
+/// Validates a `.ptcop`/`.pttune` file from `data[..len]` without creating a persistent service.
+/// Returns 0 if valid, -1 otherwise.
+///
+/// # Safety
+/// `data` must be valid for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn validate(data: *const u8, len: usize) -> i32 {
+  if data.is_null() {
+    return -1;
+  }
+  let slice = unsafe { std::slice::from_raw_parts(data, len) };
+  let mut cursor = Cursor::new(slice);
+  match PxtoneService::new().read(&mut cursor) {
     Ok(()) => 0,
     Err(_) => -1,
   }
@@ -243,6 +262,25 @@ pub unsafe extern "C" fn service_render_noise(
     *out_samples_len = len as u32;
   }
   ptr
+}
+
+/// Validates a `.ptnoise` file from `data[..len]` without using a service.
+/// Returns 0 if valid, -1 otherwise.
+///
+/// # Safety
+/// `data` must be valid for `len` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn validate_noise(data: *const u8, len: usize) -> i32 {
+  if data.is_null() {
+    return -1;
+  }
+  let slice = unsafe { std::slice::from_raw_parts(data, len) };
+  let mut cursor = Cursor::new(slice);
+  let mut noise = Noise::new();
+  match noise.read(&mut cursor) {
+    Ok(()) => 0,
+    Err(_) => -1,
+  }
 }
 
 /// Returns the number of ticks per beat.
