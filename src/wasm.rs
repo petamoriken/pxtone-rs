@@ -1,5 +1,7 @@
 use crate::pulse::noise::Noise;
-use crate::service::{PxtoneService, StartPos, VomitPrepFlags, VomitPreparation};
+use crate::service::{
+  DestinationQuality, PxtoneService, StartPos, VomitPrepFlags, VomitPreparation,
+};
 use std::alloc::{Layout, alloc as sys_alloc, dealloc as sys_dealloc};
 use std::io::Cursor;
 
@@ -43,10 +45,18 @@ pub unsafe extern "C" fn dealloc(ptr: *mut u8, size: usize) {
 }
 
 /// Creates a new [`PxtoneService`] and returns an owning pointer.
+/// `channels` must be `1` (mono) or `2` (stereo); returns null otherwise.
 /// Free with [`service_free`].
 #[unsafe(no_mangle)]
-pub extern "C" fn service_new() -> *mut PxtoneService {
-  Box::into_raw(Box::new(PxtoneService::new()))
+pub extern "C" fn service_new(channels: u32, sample_rate: u32) -> *mut PxtoneService {
+  if channels != 1 && channels != 2 {
+    return std::ptr::null_mut();
+  }
+  let quality = DestinationQuality {
+    channels: channels as u8,
+    sample_rate,
+  };
+  Box::into_raw(Box::new(PxtoneService::new(quality)))
 }
 
 /// Frees a [`PxtoneService`] previously created by [`service_new`].
@@ -92,7 +102,7 @@ pub unsafe extern "C" fn validate(data: *const u8, len: usize) -> i32 {
   }
   let slice = unsafe { std::slice::from_raw_parts(data, len) };
   let mut cursor = Cursor::new(slice);
-  match PxtoneService::new().read(&mut cursor) {
+  match PxtoneService::new(DestinationQuality::default()).read(&mut cursor) {
     Ok(()) => 0,
     Err(_) => -1,
   }

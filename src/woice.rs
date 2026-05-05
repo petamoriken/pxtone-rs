@@ -657,7 +657,7 @@ fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, PxtoneError> {
   use std::io::Cursor;
 
   let cursor = Cursor::new(data);
-  let mut reader = OggStreamReader::new(cursor).map_err(|e| PxtoneError::OggVorbis(e))?;
+  let mut reader = OggStreamReader::new(cursor).map_err(PxtoneError::OggVorbis)?;
 
   let _ch = reader.ident_hdr.audio_channels as usize;
   let _sps = reader.ident_hdr.audio_sample_rate;
@@ -665,7 +665,7 @@ fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, PxtoneError> {
   let mut pcm_i16: Vec<i16> = Vec::new();
   while let Some(pck) = reader
     .read_dec_packet_itl()
-    .map_err(|e| PxtoneError::OggVorbis(e))?
+    .map_err(PxtoneError::OggVorbis)?
   {
     pcm_i16.extend_from_slice(&pck);
   }

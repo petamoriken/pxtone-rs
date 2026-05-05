@@ -141,11 +141,11 @@ impl Default for VomitPreparation {
 /// # Typical usage
 ///
 /// ```no_run
-/// use pxtone::{PxtoneService, VomitPreparation};
+/// use pxtone::{DestinationQuality, PxtoneService, VomitPreparation};
 /// use std::fs::File;
 /// use std::io::BufReader;
 ///
-/// let mut service = PxtoneService::new();
+/// let mut service = PxtoneService::new(DestinationQuality::default());
 /// let mut reader = BufReader::new(File::open("song.ptcop").unwrap());
 /// service.read(&mut reader).unwrap();
 /// service.tones_ready().unwrap();
@@ -204,7 +204,11 @@ pub struct PxtoneService {
 }
 
 impl PxtoneService {
-  pub fn new() -> Self {
+  pub fn new(quality: DestinationQuality) -> Self {
+    assert!(
+      quality.channels == 1 || quality.channels == 2,
+      "channels must be 1 or 2"
+    );
     Self {
       text: Text::new(),
       master: Master::new(),
@@ -216,8 +220,8 @@ impl PxtoneService {
       noise_builder: NoiseBuilder::new(),
       frequency: FrequencyTable::new(),
 
-      dst_channels: 2,
-      dst_sample_rate: 44100,
+      dst_channels: quality.channels,
+      dst_sample_rate: quality.sample_rate,
 
       group_count: MAX_GROUP_COUNT,
       unit_woice_idxs: Vec::new(),
@@ -250,8 +254,11 @@ impl PxtoneService {
   /// Sets the output audio quality. The default is stereo (2 ch) at 44100 Hz.
   ///
   /// Call this before [`tones_ready`](Self::tones_ready).
-  #[inline]
   pub fn set_destination_quality(&mut self, quality: DestinationQuality) {
+    assert!(
+      quality.channels == 1 || quality.channels == 2,
+      "channels must be 1 or 2"
+    );
     self.dst_channels = quality.channels;
     self.dst_sample_rate = quality.sample_rate;
   }
@@ -1138,11 +1145,5 @@ impl PxtoneService {
   #[inline]
   pub fn moo_get_total_sample(&self) -> u32 {
     self.calc_total_sample()
-  }
-}
-
-impl Default for PxtoneService {
-  fn default() -> Self {
-    Self::new()
   }
 }

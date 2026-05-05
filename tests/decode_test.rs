@@ -1,5 +1,5 @@
 use encoding_rs::SHIFT_JIS;
-use pxtone::{PxtoneService, VomitPreparation};
+use pxtone::{DestinationQuality, PxtoneService, VomitPreparation};
 use std::fs::{self, File};
 use std::io::BufReader;
 use std::path::Path;
@@ -151,7 +151,7 @@ fn decoded_ptcop_matches_reference() {
     "no .ptcop files found in tests/sample/ptcop/"
   );
 
-  let mut service = PxtoneService::new();
+  let mut service = PxtoneService::new(DestinationQuality::default());
   let mut failures = Vec::new();
 
   for entry in &entries {
@@ -217,7 +217,7 @@ fn decoded_ptnoise_matches_reference() {
     "no .ptnoise files found in tests/sample/ptnoise/"
   );
 
-  let mut service = PxtoneService::new();
+  let mut service = PxtoneService::new(DestinationQuality::default());
   let mut failures = Vec::new();
 
   for entry in &entries {
