@@ -7,7 +7,7 @@ use crate::pulse::oscillator::{Oscillator, Point};
 use crate::pulse::pcm::Pcm;
 use crate::read_ext::ReadExt;
 use byteorder::{LE, ReadBytesExt};
-use std::io::{Read, Seek};
+use std::io::{Read, Seek, SeekFrom};
 
 // ---- Constants ----
 pub(crate) const BUFSIZE_TIMEPAN: usize = 0x40;
@@ -64,11 +64,11 @@ pub(crate) enum VoiceData {
     envelope: VoiceEnvelope,
   },
   /// Raw PCM sample playback.
-  Sampling(Pcm),
+  Sampling(PcmMeta),
   /// PTN noise generator.
   Noise(Noise),
   /// OGG Vorbis stream.
-  OggVorbis(OggData),
+  OggVorbis(OggMeta),
 }
 
 impl Default for VoiceData {
@@ -112,18 +112,31 @@ impl Default for VoiceUnit {
   }
 }
 
-// ---- OGG data ----
+// ---- Lazy binary data references ----
 
-/// Raw OGG Vorbis data bundled with its decoded stream metadata.
-pub(crate) struct OggData {
-  /// Number of audio channels (`1` = mono, `2` = stereo).
+/// Metadata and file-offset reference for a lazily-loaded PCM sample block.
+///
+/// The actual sample bytes are not loaded during `read()`; they are read from
+/// `raw_data` in `tones_ready()` using `data_offset` and `data_size`.
+pub(crate) struct PcmMeta {
   pub(crate) channels: u8,
-  /// Sample rate in Hz.
+  pub(crate) bits_per_sample: u8,
   pub(crate) sample_rate: u32,
-  /// Total number of sample frames in the decoded stream.
   pub(crate) frame_count: u32,
-  /// Raw OGG Vorbis bitstream bytes.
-  pub(crate) data: Vec<u8>,
+  pub(crate) data_offset: u64,
+  pub(crate) data_size: u32,
+}
+
+/// OGG Vorbis stream metadata and file-offset reference.
+///
+/// The compressed bitstream is not loaded during `read()`; it is read from
+/// `raw_data` in `tones_ready()` using `data_offset` and `data_size`.
+pub(crate) struct OggMeta {
+  pub(crate) channels: u8,
+  pub(crate) sample_rate: u32,
+  pub(crate) frame_count: u32,
+  pub(crate) data_offset: u64,
+  pub(crate) data_size: u32,
 }
 
 // ---- Instance (synthesis buffer) ----
@@ -213,15 +226,25 @@ impl Woice {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let sample_count = data_size * 8 / bits_per_sample as u32 / channels as u32;
-    let mut pcm = Pcm::create(channels, sample_rate, bits_per_sample, sample_count)?;
-    r.read_exact(&mut pcm.samples_mut()[..data_size as usize])?;
+    if bits_per_sample != 8 && bits_per_sample != 16 {
+      return Err(PxtoneError::UnknownFormat);
+    }
+    let frame_count = data_size * 8 / bits_per_sample as u32 / channels as u32;
+    let data_offset = r.stream_position()?;
+    r.seek(SeekFrom::Current(data_size as i64))?;
 
     let unit = VoiceUnit {
       basic_key,
       tuning,
       voice_flags,
-      data: VoiceData::Sampling(pcm),
+      data: VoiceData::Sampling(PcmMeta {
+        channels,
+        bits_per_sample,
+        sample_rate,
+        frame_count,
+        data_offset,
+        data_size,
+      }),
       ..Default::default()
     };
     self.x3x_basic_key = basic_key;
@@ -295,18 +318,19 @@ impl Woice {
     let sample_rate = r.read_u32::<LE>()?;
     let frame_count = r.read_u32::<LE>()?;
     let size = r.read_i32::<LE>()?;
-    let mut data = vec![0u8; size as usize];
-    r.read_exact(&mut data)?;
+    let data_offset = r.stream_position()?;
+    r.seek(SeekFrom::Current(size as i64))?;
 
     let unit = VoiceUnit {
       basic_key,
       tuning,
       voice_flags,
-      data: VoiceData::OggVorbis(OggData {
+      data: VoiceData::OggVorbis(OggMeta {
         channels,
         sample_rate,
         frame_count,
-        data,
+        data_offset,
+        data_size: size as u32,
       }),
       ..Default::default()
     };
@@ -388,6 +412,7 @@ impl Woice {
     &mut self,
     noise_builder: &mut NoiseBuilder,
     frequency: &FrequencyTable,
+    raw_data: &[u8],
   ) -> Result<(), PxtoneError> {
     let channels = 2u8;
     let sample_rate = 44100u32;
@@ -399,16 +424,16 @@ impl Woice {
       let pan = unit.pan;
       let volume = unit.volume;
       match &mut unit.data {
-        VoiceData::Sampling(pcm) => {
+        VoiceData::Sampling(meta) => {
+          let slice = &raw_data[meta.data_offset as usize..][..meta.data_size as usize];
           let mut work = Pcm::create(
-            pcm.channels,
-            pcm.sample_rate,
-            pcm.bits_per_sample,
-            pcm.body_frames,
+            meta.channels,
+            meta.sample_rate,
+            meta.bits_per_sample,
+            meta.frame_count,
           )?;
-          let src = pcm.samples();
-          let copy_len = src.len().min(work.samples().len());
-          work.samples_mut()[..copy_len].copy_from_slice(&src[..copy_len]);
+          let copy_len = slice.len().min(work.samples().len());
+          work.samples_mut()[..copy_len].copy_from_slice(&slice[..copy_len]);
           work.convert(channels, sample_rate, bits_per_sample)?;
           instance.head_frames = work.head_frames;
           instance.body_frames = work.body_frames;
@@ -453,7 +478,8 @@ impl Woice {
           instance.samples = pcm.samples().to_vec();
         }
         VoiceData::OggVorbis(ogg) => {
-          let decoded = decode_ogg(&ogg.data)?;
+          let slice = &raw_data[ogg.data_offset as usize..][..ogg.data_size as usize];
+          let decoded = decode_ogg(slice)?;
           let mut work = Pcm::create(ogg.channels, ogg.sample_rate, 16, ogg.frame_count)?;
           let src = &decoded[..decoded.len().min(work.samples().len())];
           work.samples_mut()[..src.len()].copy_from_slice(src);
@@ -537,8 +563,9 @@ impl Woice {
     noise_builder: &mut NoiseBuilder,
     frequency: &FrequencyTable,
     sample_rate: u32,
+    raw_data: &[u8],
   ) -> Result<(), PxtoneError> {
-    self.tone_ready_sample(noise_builder, frequency)?;
+    self.tone_ready_sample(noise_builder, frequency, raw_data)?;
     self.tone_ready_envelope(sample_rate)?;
     Ok(())
   }

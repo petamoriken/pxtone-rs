@@ -83,8 +83,7 @@ pub unsafe extern "C" fn service_read(svc: *mut PxtoneService, data: *const u8, 
   }
   let svc = unsafe { &mut *svc };
   let slice = unsafe { std::slice::from_raw_parts(data, len) };
-  let mut cursor = Cursor::new(slice);
-  match svc.read(&mut cursor) {
+  match svc.read(slice.to_vec()) {
     Ok(()) => 0,
     Err(_) => -1,
   }
@@ -102,7 +101,7 @@ pub unsafe extern "C" fn validate(data: *const u8, len: usize) -> i32 {
   }
   let slice = unsafe { std::slice::from_raw_parts(data, len) };
   let mut cursor = Cursor::new(slice);
-  match PxtoneService::new(DestinationQuality::default()).read(&mut cursor) {
+  match PxtoneService::new(DestinationQuality::default()).read_metadata(&mut cursor) {
     Ok(()) => 0,
     Err(_) => -1,
   }

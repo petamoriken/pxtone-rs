@@ -142,12 +142,10 @@ impl Default for VomitPreparation {
 ///
 /// ```no_run
 /// use pxtone::{DestinationQuality, PxtoneService, VomitPreparation};
-/// use std::fs::File;
-/// use std::io::BufReader;
 ///
 /// let mut service = PxtoneService::new(DestinationQuality::default());
-/// let mut reader = BufReader::new(File::open("song.ptcop").unwrap());
-/// service.read(&mut reader).unwrap();
+/// let data = std::fs::read("song.ptcop").unwrap();
+/// service.read(data).unwrap();
 /// service.tones_ready().unwrap();
 /// service.moo_preparation(VomitPreparation::default()).unwrap();
 ///
@@ -201,6 +199,9 @@ pub struct PxtoneService {
 
   data_loaded: bool,
   playback_ended: bool,
+
+  // Retained raw file bytes set by read_with_data(); consumed and cleared by tones_ready().
+  raw_data: Vec<u8>,
 }
 
 impl PxtoneService {
@@ -248,6 +249,8 @@ impl PxtoneService {
 
       data_loaded: false,
       playback_ended: true,
+
+      raw_data: Vec::new(),
     }
   }
 
@@ -294,10 +297,24 @@ impl PxtoneService {
 
   // ---- File loading ----
 
-  /// Loads a `.ptcop` or `.pttune` file. Clears any previously loaded data.
+  /// Loads a `.ptcop` or `.pttune` file for playback. Clears any previously loaded data.
+  ///
+  /// The raw bytes are retained internally so that [`tones_ready`](Self::tones_ready) can load
+  /// and decode PCM samples and OGG streams. They are freed automatically after `tones_ready()`
+  /// completes.
   ///
   /// Call [`tones_ready`](Self::tones_ready) after loading.
-  pub fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub fn read(&mut self, data: Vec<u8>) -> Result<(), PxtoneError> {
+    let mut cursor = std::io::Cursor::new(&data);
+    self.read_metadata(&mut cursor)?;
+    self.raw_data = data;
+    Ok(())
+  }
+
+  /// Parses the file structure without retaining the binary data (PCM samples, OGG streams).
+  ///
+  /// Use this for lightweight validation. For playback, use [`read`](Self::read) instead.
+  pub fn read_metadata<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
     self.clear();
 
     let fmt_ver = self.read_version(r)?;
@@ -329,6 +346,7 @@ impl PxtoneService {
     self.overdrives.clear();
     self.unit_woice_idxs.clear();
     self.data_loaded = false;
+    self.raw_data = Vec::new();
   }
 
   /// Reads the version string and returns a FmtVer
@@ -628,12 +646,14 @@ impl PxtoneService {
   pub fn tones_ready(&mut self) -> Result<(), PxtoneError> {
     let sample_rate = self.dst_sample_rate;
 
-    // noise_builder, freq, and woices are independent fields, so simultaneous borrows are OK
+    // noise_builder, freq, woices, and raw_data are independent fields — simultaneous borrows are OK
     let noise_builder = &mut self.noise_builder;
     let freq = &self.frequency;
+    let raw_data: &[u8] = &self.raw_data;
     for w in &mut self.woices {
-      w.tone_ready(noise_builder, freq, sample_rate)?;
+      w.tone_ready(noise_builder, freq, sample_rate, raw_data)?;
     }
+    self.raw_data = Vec::new();
     for d in &mut self.delays {
       d.tone_ready(
         self.master.beats_per_measure,

@@ -10,10 +10,9 @@ fn decode_shift_jis(raw: &[u8]) -> String {
 }
 
 fn load_service(service: &mut PxtoneService, path: &Path) {
-  let file = File::open(path).unwrap_or_else(|e| panic!("{}: {}", path.display(), e));
-  let mut reader = BufReader::new(file);
+  let data = fs::read(path).unwrap_or_else(|e| panic!("{}: {}", path.display(), e));
   service
-    .read(&mut reader)
+    .read(data)
     .unwrap_or_else(|e| panic!("{}: read failed: {:?}", path.display(), e));
   service
     .tones_ready()
