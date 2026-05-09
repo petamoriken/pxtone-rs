@@ -5,7 +5,6 @@ import {
   service_free,
   service_get_beat_tempo,
   service_get_beats_per_measure,
-  service_get_channels,
   service_get_event_count,
   service_get_event_kind,
   service_get_event_tick,
@@ -14,7 +13,6 @@ import {
   service_get_last_measure,
   service_get_measure_count,
   service_get_repeat_measure,
-  service_get_sample_rate,
   service_get_text_comment,
   service_get_text_name,
   service_get_ticks_per_beat,
@@ -289,8 +287,8 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       continue;
     }
 
-    const channels = service_get_channels(svc);
-    const sampleRate = service_get_sample_rate(svc);
+    const channels = 2;
+    const sampleRate = 44100;
     const chunkSize = channels * 2 * 4096;
     const bufPtr = alloc(chunkSize);
 
@@ -348,8 +346,8 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
   const failures: string[] = [];
   const svc = service_new(2, 44100);
 
-  const channels = service_get_channels(svc);
-  const sampleRate = service_get_sample_rate(svc);
+  const channels = 2;
+  const sampleRate = 44100;
   const outSamplesLen = alloc(4);
 
   for (const name of names) {

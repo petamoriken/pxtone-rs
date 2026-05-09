@@ -197,34 +197,6 @@ pub unsafe extern "C" fn service_is_end_vomit(svc: *const PxtoneService) -> i32 
   if svc.is_end_vomit() { 1 } else { 0 }
 }
 
-/// Returns the number of output channels (e.g. 2 for stereo).
-/// Returns 0 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_get_channels(svc: *const PxtoneService) -> u32 {
-  if svc.is_null() {
-    return 0;
-  }
-  let svc = unsafe { &*svc };
-  svc.get_destination_quality().channels as u32
-}
-
-/// Returns the sample rate in Hz.
-/// Returns 0 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_get_sample_rate(svc: *const PxtoneService) -> u32 {
-  if svc.is_null() {
-    return 0;
-  }
-  let svc = unsafe { &*svc };
-  svc.get_destination_quality().sample_rate
-}
-
 /// Renders a `.ptnoise` file and returns a pointer to the allocated PCM samples buffer
 /// (signed 16-bit interleaved). The caller must free it with `dealloc(ptr, *out_samples_len)`.
 /// Writes byte length to `out_samples_len`.
