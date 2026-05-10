@@ -3,19 +3,11 @@ import {
   dealloc,
   memory,
   service_free,
-  service_get_beat_tempo,
-  service_get_beats_per_measure,
+  service_get_event,
   service_get_event_count,
-  service_get_event_kind,
-  service_get_event_tick,
-  service_get_event_unit_index,
-  service_get_event_value,
-  service_get_last_measure,
-  service_get_measure_count,
-  service_get_repeat_measure,
+  service_get_master,
   service_get_text_comment,
   service_get_text_name,
-  service_get_ticks_per_beat,
   service_get_unit_count,
   service_get_unit_name,
   service_get_unit_played,
@@ -193,17 +185,15 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       continue;
     }
 
-    const lenPtr = alloc(4);
-
     // Text
     {
-      const namePtr = service_get_text_name(svc, lenPtr);
-      const nameLen = new Uint32Array(memory.buffer, lenPtr, 1)[0];
+      // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
+      const [namePtr, nameLen] = service_get_text_name(svc);
       const textName = namePtr !== 0
         ? decSjis.decode(new Uint8Array(memory.buffer, namePtr, nameLen))
         : "";
-      const commentPtr = service_get_text_comment(svc, lenPtr);
-      const commentLen = new Uint32Array(memory.buffer, lenPtr, 1)[0];
+      // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
+      const [commentPtr, commentLen] = service_get_text_comment(svc);
       const textComment = commentPtr !== 0
         ? decSjis.decode(new Uint8Array(memory.buffer, commentPtr, commentLen))
         : "";
@@ -217,12 +207,15 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
 
     // Master
     {
-      const ticksPerBeat = service_get_ticks_per_beat(svc);
-      const beatsPerMeasure = service_get_beats_per_measure(svc);
-      const beatTempo = service_get_beat_tempo(svc);
-      const measureCount = service_get_measure_count(svc);
-      const repeatMeasure = service_get_repeat_measure(svc);
-      const lastMeasure = service_get_last_measure(svc);
+      // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
+      const [
+        ticksPerBeat,
+        beatsPerMeasure,
+        beatTempo,
+        measureCount,
+        repeatMeasure,
+        lastMeasure,
+      ] = service_get_master(svc);
       const m = snapshot.master;
       if (
         ticksPerBeat !== m.ticks_per_beat ||
@@ -244,8 +237,8 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       );
     } else {
       for (let i = 0; i < unitCount; i++) {
-        const namePtr = service_get_unit_name(svc, i, lenPtr);
-        const nameLen = new Uint32Array(memory.buffer, lenPtr, 1)[0];
+        // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
+        const [namePtr, nameLen] = service_get_unit_name(svc, i);
         const unitName = dec.decode(
           new Uint8Array(memory.buffer, namePtr, nameLen),
         );
@@ -257,8 +250,6 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       }
     }
 
-    dealloc(lenPtr, 4);
-
     // Events
     const eventCount = service_get_event_count(svc);
     if (eventCount !== snapshot.events.length) {
@@ -267,10 +258,8 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       );
     } else {
       for (let i = 0; i < eventCount; i++) {
-        const tick = service_get_event_tick(svc, i);
-        const unitNo = service_get_event_unit_index(svc, i);
-        const kind = service_get_event_kind(svc, i);
-        const value = service_get_event_value(svc, i);
+        // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
+        const [tick, unitNo, kind, value] = service_get_event(svc, i);
         const expected = snapshot.events[i];
         if (
           tick !== expected.tick || unitNo !== expected.unit_index ||
@@ -348,7 +337,6 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
 
   const channels = 2;
   const sampleRate = 44100;
-  const outSamplesLen = alloc(4);
 
   for (const name of names) {
     const stem = name.slice(0, -8); // remove ".ptnoise"
@@ -359,11 +347,11 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
       ptnoiseData,
     );
 
-    const samplesPtr = service_render_noise(
+    // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
+    const [samplesPtr, samplesLen] = service_render_noise(
       svc,
       dataPtr,
       ptnoiseData.length,
-      outSamplesLen,
     );
     dealloc(dataPtr, ptnoiseData.length);
 
@@ -372,7 +360,6 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
       continue;
     }
 
-    const samplesLen = new Uint32Array(memory.buffer, outSamplesLen, 1)[0];
     const samples = new Uint8Array(memory.buffer, samplesPtr, samplesLen)
       .slice();
     dealloc(samplesPtr, samplesLen);
@@ -388,7 +375,6 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
     }
   }
 
-  dealloc(outSamplesLen, 4);
   service_free(svc);
 
   if (failures.length > 0) {

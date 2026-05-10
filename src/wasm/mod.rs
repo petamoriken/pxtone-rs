@@ -197,23 +197,24 @@ pub unsafe extern "C" fn service_is_end_vomit(svc: *const PxtoneService) -> i32 
   if svc.is_end_vomit() { 1 } else { 0 }
 }
 
-/// Renders a `.ptnoise` file and returns a pointer to the allocated PCM samples buffer
-/// (signed 16-bit interleaved). The caller must free it with `dealloc(ptr, *out_samples_len)`.
-/// Writes byte length to `out_samples_len`.
-/// Returns null on failure. `out_samples_len` must be non-null.
+/// Internal: renders a `.ptnoise` file. Writes byte length to `out_samples_len`.
+/// Returns a pointer to the allocated PCM samples buffer (signed 16-bit interleaved),
+/// or null on failure. `out_samples_len` is always written.
+/// The caller must free the buffer with `dealloc(ptr, *out_samples_len)`.
 ///
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`].
 /// `data` must be valid for `data_len` bytes.
 /// `out_samples_len` must be a valid writable pointer.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_render_noise_impl")]
 pub unsafe extern "C" fn service_render_noise(
   svc: *mut PxtoneService,
   data: *const u8,
   data_len: usize,
   out_samples_len: *mut u32,
 ) -> *mut u8 {
-  if svc.is_null() || data.is_null() || out_samples_len.is_null() {
+  if svc.is_null() || data.is_null() {
+    unsafe { *out_samples_len = 0 };
     return std::ptr::null_mut();
   }
   let svc = unsafe { &mut *svc };
@@ -221,21 +222,26 @@ pub unsafe extern "C" fn service_render_noise(
   let mut cursor = Cursor::new(slice);
   let wave = match svc.render_noise(&mut cursor) {
     Ok(w) => w,
-    Err(_) => return std::ptr::null_mut(),
+    Err(_) => {
+      unsafe { *out_samples_len = 0 };
+      return std::ptr::null_mut();
+    }
   };
   let len = wave.samples.len();
   if len == 0 {
-    unsafe {
-      *out_samples_len = 0;
-    }
+    unsafe { *out_samples_len = 0 };
     return std::ptr::null_mut();
   }
   let layout = match Layout::array::<u8>(len) {
     Ok(l) => l,
-    Err(_) => return std::ptr::null_mut(),
+    Err(_) => {
+      unsafe { *out_samples_len = 0 };
+      return std::ptr::null_mut();
+    }
   };
   let ptr = unsafe { sys_alloc(layout) };
   if ptr.is_null() {
+    unsafe { *out_samples_len = 0 };
     return std::ptr::null_mut();
   }
   unsafe {
@@ -264,12 +270,9 @@ pub unsafe extern "C" fn validate_noise(data: *const u8, len: usize) -> i32 {
   }
 }
 
-/// Returns the number of ticks per beat.
-/// Returns 0 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+// --- Master getters (internal; exported via WAT multi-value wrapper `service_get_master`) ---
+
+#[unsafe(export_name = "_service_get_ticks_per_beat_impl")]
 pub unsafe extern "C" fn service_get_ticks_per_beat(svc: *const PxtoneService) -> u32 {
   if svc.is_null() {
     return 0;
@@ -277,12 +280,7 @@ pub unsafe extern "C" fn service_get_ticks_per_beat(svc: *const PxtoneService) -
   unsafe { &*svc }.master.ticks_per_beat() as u32
 }
 
-/// Returns the number of beats per measure.
-/// Returns 0 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_beats_per_measure_impl")]
 pub unsafe extern "C" fn service_get_beats_per_measure(svc: *const PxtoneService) -> u32 {
   if svc.is_null() {
     return 0;
@@ -290,12 +288,7 @@ pub unsafe extern "C" fn service_get_beats_per_measure(svc: *const PxtoneService
   unsafe { &*svc }.master.beats_per_measure() as u32
 }
 
-/// Returns the tempo in beats per minute.
-/// Returns 0.0 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_beat_tempo_impl")]
 pub unsafe extern "C" fn service_get_beat_tempo(svc: *const PxtoneService) -> f32 {
   if svc.is_null() {
     return 0.0;
@@ -303,12 +296,7 @@ pub unsafe extern "C" fn service_get_beat_tempo(svc: *const PxtoneService) -> f3
   unsafe { &*svc }.master.beat_tempo()
 }
 
-/// Returns the number of measures in the loaded song.
-/// Returns 0 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_measure_count_impl")]
 pub unsafe extern "C" fn service_get_measure_count(svc: *const PxtoneService) -> u32 {
   if svc.is_null() {
     return 0;
@@ -316,12 +304,7 @@ pub unsafe extern "C" fn service_get_measure_count(svc: *const PxtoneService) ->
   unsafe { &*svc }.master.measure_count()
 }
 
-/// Returns the repeat position in measures.
-/// Returns 0 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_repeat_measure_impl")]
 pub unsafe extern "C" fn service_get_repeat_measure(svc: *const PxtoneService) -> u32 {
   if svc.is_null() {
     return 0;
@@ -329,12 +312,7 @@ pub unsafe extern "C" fn service_get_repeat_measure(svc: *const PxtoneService) -
   unsafe { &*svc }.master.repeat_measure()
 }
 
-/// Returns the last measure position.
-/// Returns 0 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_last_measure_impl")]
 pub unsafe extern "C" fn service_get_last_measure(svc: *const PxtoneService) -> u32 {
   if svc.is_null() {
     return 0;
@@ -342,19 +320,22 @@ pub unsafe extern "C" fn service_get_last_measure(svc: *const PxtoneService) -> 
   unsafe { &*svc }.master.last_measure()
 }
 
-/// Returns a pointer to the song title as raw Shift-JIS bytes and writes the byte length to
-/// `*out_len`. The pointer is valid as long as `svc` is alive and unmodified.
-/// Returns null if `svc` is null, `out_len` is null, or no title is set.
+// --- Text getters (internal; exported via WAT multi-value wrappers) ---
+
+/// Internal: returns a pointer to the song title as raw Shift-JIS bytes and writes its byte
+/// length to `out_len`. The pointer is valid as long as `svc` is alive and unmodified.
+/// `out_len` is always written. Returns null if `svc` is null or no title is set.
 ///
 /// # Safety
-/// `svc` must be a valid pointer from [`service_new`].
+/// `svc` must be a valid pointer from [`service_new`] or null.
 /// `out_len` must be a valid writable pointer.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_text_name_impl")]
 pub unsafe extern "C" fn service_get_text_name(
   svc: *const PxtoneService,
   out_len: *mut u32,
 ) -> *const u8 {
-  if svc.is_null() || out_len.is_null() {
+  if svc.is_null() {
+    unsafe { *out_len = 0 };
     return std::ptr::null();
   }
   let svc = unsafe { &*svc };
@@ -370,19 +351,20 @@ pub unsafe extern "C" fn service_get_text_name(
   }
 }
 
-/// Returns a pointer to the song comment as raw Shift-JIS bytes and writes the byte length to
-/// `*out_len`. The pointer is valid as long as `svc` is alive and unmodified.
-/// Returns null if `svc` is null, `out_len` is null, or no comment is set.
+/// Internal: returns a pointer to the song comment as raw Shift-JIS bytes and writes its byte
+/// length to `out_len`. The pointer is valid as long as `svc` is alive and unmodified.
+/// `out_len` is always written. Returns null if `svc` is null or no comment is set.
 ///
 /// # Safety
-/// `svc` must be a valid pointer from [`service_new`].
+/// `svc` must be a valid pointer from [`service_new`] or null.
 /// `out_len` must be a valid writable pointer.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_text_comment_impl")]
 pub unsafe extern "C" fn service_get_text_comment(
   svc: *const PxtoneService,
   out_len: *mut u32,
 ) -> *const u8 {
-  if svc.is_null() || out_len.is_null() {
+  if svc.is_null() {
+    unsafe { *out_len = 0 };
     return std::ptr::null();
   }
   let svc = unsafe { &*svc };
@@ -398,6 +380,8 @@ pub unsafe extern "C" fn service_get_text_comment(
   }
 }
 
+// --- Unit getters ---
+
 /// Returns the number of units in the loaded song.
 /// Returns 0 if `svc` is null.
 ///
@@ -411,20 +395,21 @@ pub unsafe extern "C" fn service_get_unit_count(svc: *const PxtoneService) -> u3
   unsafe { &*svc }.units.len() as u32
 }
 
-/// Returns a pointer to the unit's raw name bytes and writes their byte length to `*out_len`.
-/// The pointer is valid as long as `svc` is alive and unmodified.
-/// Returns null if `svc` is null, `out_len` is null, or `idx` is out of range.
+/// Internal: returns a pointer to the unit's raw name bytes and writes its byte length to
+/// `out_len`. The pointer is valid as long as `svc` is alive and unmodified.
+/// `out_len` is always written. Returns null if `svc` is null or `idx` is out of range.
 ///
 /// # Safety
-/// `svc` must be a valid pointer from [`service_new`].
+/// `svc` must be a valid pointer from [`service_new`] or null.
 /// `out_len` must be a valid writable pointer.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_unit_name_impl")]
 pub unsafe extern "C" fn service_get_unit_name(
   svc: *const PxtoneService,
   idx: u32,
   out_len: *mut u32,
 ) -> *const u8 {
-  if svc.is_null() || out_len.is_null() {
+  if svc.is_null() {
+    unsafe { *out_len = 0 };
     return std::ptr::null();
   }
   let svc = unsafe { &*svc };
@@ -487,6 +472,8 @@ pub unsafe extern "C" fn service_set_unit_played(
   }
 }
 
+// --- Event getters ---
+
 /// Returns the number of events in the loaded song.
 /// Returns 0 if `svc` is null.
 ///
@@ -500,11 +487,7 @@ pub unsafe extern "C" fn service_get_event_count(svc: *const PxtoneService) -> u
   unsafe { &*svc }.events.records().len() as u32
 }
 
-/// Returns the tick position of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_event_tick_impl")]
 pub unsafe extern "C" fn service_get_event_tick(svc: *const PxtoneService, idx: u32) -> i32 {
   if svc.is_null() {
     return 0;
@@ -517,11 +500,7 @@ pub unsafe extern "C" fn service_get_event_tick(svc: *const PxtoneService, idx: 
     .map_or(0, |e| e.tick())
 }
 
-/// Returns the unit index of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_event_unit_index_impl")]
 pub unsafe extern "C" fn service_get_event_unit_index(svc: *const PxtoneService, idx: u32) -> u32 {
   if svc.is_null() {
     return 0;
@@ -534,11 +513,7 @@ pub unsafe extern "C" fn service_get_event_unit_index(svc: *const PxtoneService,
     .map_or(0, |e| e.unit_index() as u32)
 }
 
-/// Returns the kind of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_event_kind_impl")]
 pub unsafe extern "C" fn service_get_event_kind(svc: *const PxtoneService, idx: u32) -> u32 {
   if svc.is_null() {
     return 0;
@@ -551,11 +526,7 @@ pub unsafe extern "C" fn service_get_event_kind(svc: *const PxtoneService, idx: 
     .map_or(0, |e| e.kind() as u32)
 }
 
-/// Returns the value of the event at `idx`, or 0 if `svc` is null or `idx` is out of range.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
+#[unsafe(export_name = "_service_get_event_value_impl")]
 pub unsafe extern "C" fn service_get_event_value(svc: *const PxtoneService, idx: u32) -> i32 {
   if svc.is_null() {
     return 0;

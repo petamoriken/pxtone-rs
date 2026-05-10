@@ -2,12 +2,14 @@
   "tasks": {
     "build": "deno task build:rust && deno task build:wasm",
     "build:rust": "cargo build --release",
-    "build:wasm": "deno task build:wasm:raw && deno task build:wasm:opt",
-    "build:wasm:raw": "RUSTFLAGS=\"--remap-path-prefix $HOME=~\" cargo build --target wasm32-unknown-unknown --profile release-wasm",
-    "build:wasm:opt": "wasm-opt -O3 --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals target/wasm32-unknown-unknown/release-wasm/pxtone.wasm -o target/wasm32-unknown-unknown/release-wasm/pxtone.wasm",
+    "build:wasm": "deno task build:wasm:raw && deno task build:wasm:merge && deno task build:wasm:strip-impl && deno task build:wasm:opt",
+    "build:wasm:raw": "RUSTFLAGS=\"--remap-path-prefix $HOME=~\" cargo build --target wasm32-unknown-unknown --profile release-wasm && cp target/wasm32-unknown-unknown/release-wasm/pxtone.wasm target/wasm32-unknown-unknown/release-wasm/pxtone_raw.wasm",
+    "build:wasm:merge": "wasm-as --enable-multivalue src/wasm/multivalue_wrappers.wat -o target/wasm32-unknown-unknown/release-wasm/helpers.wasm && wasm-merge target/wasm32-unknown-unknown/release-wasm/pxtone_raw.wasm pxtone target/wasm32-unknown-unknown/release-wasm/helpers.wasm helper --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue -o target/wasm32-unknown-unknown/release-wasm/pxtone.wasm",
+    "build:wasm:strip-impl": "deno run --allow-run --allow-read --allow-write --allow-env tools/wasm_strip_impl_exports.ts target/wasm32-unknown-unknown/release-wasm/pxtone.wasm --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue",
+    "build:wasm:opt": "wasm-opt -O3 --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue target/wasm32-unknown-unknown/release-wasm/pxtone.wasm -o target/wasm32-unknown-unknown/release-wasm/pxtone.wasm",
     "test": "deno task test:rust && deno task test:wasm",
     "test:rust": "cargo test",
-    "test:wasm": "test -f target/wasm32-unknown-unknown/release-wasm/pxtone.wasm || deno task build:wasm:raw; deno test --allow-read --no-check tests/wasm_test.ts"
+    "test:wasm": "test -f target/wasm32-unknown-unknown/release-wasm/pxtone_raw.wasm || deno task build:wasm:raw; deno task build:wasm:merge && deno task build:wasm:strip-impl && deno test --allow-read tests/wasm_test.ts"
   },
   "imports": {
     "@std/toml": "jsr:@std/toml@^1.0.11"
