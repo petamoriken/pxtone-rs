@@ -29,8 +29,8 @@ fn bench_moo(c: &mut Criterion) {
         |mut svc| {
           let q = svc.get_destination_quality();
           let mut buf = vec![0u8; q.channels as usize * 2 * 4096];
-          while !svc.is_end_vomit() {
-            if !svc.moo(&mut buf) {
+          loop {
+            if svc.moo(&mut buf) == 0 {
               break;
             }
           }
