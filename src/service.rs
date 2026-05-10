@@ -926,19 +926,19 @@ impl PxtoneService {
     }
 
     // ---- 4. Per-channel group sum → effects → output ----
-    let mut group_smps = vec![0i32; group_count];
-
+    let mut group_smps_buf = [0i32; MAX_GROUP_COUNT];
     for (ch, out_sample) in out.iter_mut().enumerate().take(channel_count) {
+      let group_smps = &mut group_smps_buf[..group_count];
       group_smps.fill(0);
 
       for u in 0..unit_count {
-        self.units[u].tone_supple(&mut group_smps, ch, time_pan_idx);
+        self.units[u].tone_supple(group_smps, ch, time_pan_idx);
       }
       for od in &self.overdrives {
-        od.tone_supple(&mut group_smps);
+        od.tone_supple(group_smps);
       }
       for d in &mut self.delays {
-        d.tone_supple(ch, &mut group_smps);
+        d.tone_supple(ch, group_smps);
       }
 
       let mut work: i32 = group_smps.iter().sum();

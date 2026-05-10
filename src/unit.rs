@@ -227,6 +227,7 @@ impl Unit {
   // Generates samples and writes them into pan_time_bufs.
   // Both channels are processed in a single voice iteration to expose data parallelism
   // to the auto-vectorizer (LLVM can SIMD-pack w0/w1 when simd128 is enabled).
+  #[inline]
   pub(crate) fn tone_sample(
     &mut self,
     mute_by_unit: bool,
@@ -259,18 +260,18 @@ impl Unit {
 
         // For mono output, ch=0 gets the average of both wave channels.
         // ch=1 keeps the raw ch=1 sample (unused when channel_count=1).
-        let (mut w0, mut w1) = if channels == 1 {
+        let (w0, w1) = if channels == 1 {
           ((s0 + s1) / 2, s1)
         } else {
           (s0, s1)
         };
 
-        w0 = w0 * velocity / 128;
-        w1 = w1 * velocity / 128;
-        w0 = w0 * volume / 128;
-        w1 = w1 * volume / 128;
-        w0 = w0 * pan0 / 64;
-        w1 = w1 * pan1 / 64;
+        // Combine velocity × volume × pan into a single i64 division to eliminate
+        // two intermediate i32 truncations.
+        // Max intermediate: 32768 × 128 × 128 × 128 = 68_719_476_736 < i64::MAX ✓
+        let sv = velocity as i64 * volume as i64;
+        let mut w0 = (w0 as i64 * sv * pan0 as i64 / (128 * 128 * 64)) as i32;
+        let mut w1 = (w1 as i64 * sv * pan1 as i64 / (128 * 128 * 64)) as i32;
 
         if vi.envelope_size > 0 {
           w0 = w0 * vt.envelope_volume / 128;
