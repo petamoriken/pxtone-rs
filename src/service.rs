@@ -151,9 +151,10 @@ impl Default for VomitPreparation {
 ///
 /// let q = service.get_destination_quality();
 /// let mut buf = vec![0u8; q.channels as usize * 2 * 4096];
-/// while !service.is_end_vomit() {
-///     service.moo(&mut buf);
-///     // process buf as 16-bit LE PCM...
+/// loop {
+///     let written = service.moo(&mut buf);
+///     if written == 0 { break; }
+///     // process buf[..written] as 16-bit LE PCM...
 /// }
 /// ```
 pub struct PxtoneService {
@@ -1119,17 +1120,20 @@ impl PxtoneService {
   ///
   /// `buf` must be a multiple of `channels * 2` bytes.
   /// Returns `true` while audio is available, `false` after playback ends.
-  pub fn moo(&mut self, buf: &mut [u8]) -> bool {
+  /// Renders samples into `buf`. Returns the number of bytes actually written,
+  /// which may be less than `buf.len()` at the end of the song. Returns 0 when
+  /// playback has already ended or the buffer length is invalid.
+  pub fn moo(&mut self, buf: &mut [u8]) -> usize {
     if !self.data_loaded {
-      return false;
+      return 0;
     }
     if self.playback_ended {
-      return false;
+      return 0;
     }
 
     let byte_per_smp = self.dst_channels as usize * 2;
     if !buf.len().is_multiple_of(byte_per_smp) {
-      return false;
+      return 0;
     }
 
     let total = buf.len() / byte_per_smp;
@@ -1175,13 +1179,7 @@ impl PxtoneService {
       }
     }
 
-    // Zero-fill the remainder
-    let start = pos * byte_per_smp;
-    if start < buf.len() {
-      buf[start..].fill(0);
-    }
-
-    true
+    pos * byte_per_smp
   }
 
   // ---- Getters ----

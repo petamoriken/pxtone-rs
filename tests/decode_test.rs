@@ -70,11 +70,12 @@ fn decode_ptcop_to_wav(service: &mut PxtoneService) -> Vec<u8> {
   let mut chunk = vec![0u8; bytes_per_frame * 4096];
   let mut pcm = Vec::new();
 
-  while !service.is_end_vomit() {
-    if !service.moo(&mut chunk) {
+  loop {
+    let written = service.moo(&mut chunk);
+    if written == 0 {
       break;
     }
-    pcm.extend_from_slice(&chunk);
+    pcm.extend_from_slice(&chunk[..written]);
   }
 
   pcm_to_wav(&pcm, q.channels, q.sample_rate)

@@ -12,6 +12,11 @@ use talc::wasm::{WasmDynamicTalc, new_wasm_dynamic_allocator};
 #[global_allocator]
 static TALC: WasmDynamicTalc = new_wasm_dynamic_allocator();
 
+#[inline(always)]
+fn pack_ptr_len(ptr: *const u8, len: usize) -> u64 {
+  (ptr as u32 as u64) << 32 | len as u32 as u64
+}
+
 /// Allocates `size` bytes on the heap and returns a pointer to the buffer.
 /// Returns null if `size` is 0 or allocation fails.
 /// Free with [`dealloc`].
@@ -167,20 +172,23 @@ pub unsafe extern "C" fn service_moo_preparation(
   }
 }
 
-/// Renders the next chunk of PCM samples into `buf[..len]` (signed 16-bit interleaved).
-/// Returns 1 if samples were written, 0 if playback ended or any pointer is null.
+/// Internal: renders PCM samples into `buf[..len]`.
+/// Returns `(buf, written_len)` packed as `u64` (`buf << 32 | written_len`).
+/// `written_len` may be less than `len` at the end of the song, and 0 when playback
+/// has already ended. Returns `(0, 0)` if any pointer is null.
 ///
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`].
 /// `buf` must be valid for `len` bytes.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_moo(svc: *mut PxtoneService, buf: *mut u8, len: usize) -> i32 {
+#[unsafe(export_name = "_service_moo_impl")]
+pub unsafe extern "C" fn service_moo(svc: *mut PxtoneService, buf: *mut u8, len: usize) -> u64 {
   if svc.is_null() || buf.is_null() {
     return 0;
   }
   let svc = unsafe { &mut *svc };
   let slice = unsafe { std::slice::from_raw_parts_mut(buf, len) };
-  if svc.moo(slice) { 1 } else { 0 }
+  let written = svc.moo(slice);
+  pack_ptr_len(buf, written)
 }
 
 /// Returns 1 if playback has reached the end, 0 otherwise.
@@ -197,58 +205,45 @@ pub unsafe extern "C" fn service_is_end_vomit(svc: *const PxtoneService) -> i32 
   if svc.is_end_vomit() { 1 } else { 0 }
 }
 
-/// Internal: renders a `.ptnoise` file. Writes byte length to `out_samples_len`.
-/// Returns a pointer to the allocated PCM samples buffer (signed 16-bit interleaved),
-/// or null on failure. `out_samples_len` is always written.
-/// The caller must free the buffer with `dealloc(ptr, *out_samples_len)`.
+/// Internal: renders a `.ptnoise` file.
+/// Returns `(ptr, samples_len)` packed as `u64` (`ptr << 32 | samples_len`).
+/// `ptr` points to a heap-allocated buffer of signed 16-bit interleaved PCM samples.
+/// The caller must free it with `dealloc(ptr, samples_len)`.
+/// Returns `(0, 0)` on failure.
 ///
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`].
 /// `data` must be valid for `data_len` bytes.
-/// `out_samples_len` must be a valid writable pointer.
 #[unsafe(export_name = "_service_render_noise_impl")]
 pub unsafe extern "C" fn service_render_noise(
   svc: *mut PxtoneService,
   data: *const u8,
   data_len: usize,
-  out_samples_len: *mut u32,
-) -> *mut u8 {
+) -> u64 {
   if svc.is_null() || data.is_null() {
-    unsafe { *out_samples_len = 0 };
-    return std::ptr::null_mut();
+    return 0;
   }
   let svc = unsafe { &mut *svc };
   let slice = unsafe { std::slice::from_raw_parts(data, data_len) };
   let mut cursor = Cursor::new(slice);
   let wave = match svc.render_noise(&mut cursor) {
     Ok(w) => w,
-    Err(_) => {
-      unsafe { *out_samples_len = 0 };
-      return std::ptr::null_mut();
-    }
+    Err(_) => return 0,
   };
   let len = wave.samples.len();
   if len == 0 {
-    unsafe { *out_samples_len = 0 };
-    return std::ptr::null_mut();
+    return 0;
   }
   let layout = match Layout::array::<u8>(len) {
     Ok(l) => l,
-    Err(_) => {
-      unsafe { *out_samples_len = 0 };
-      return std::ptr::null_mut();
-    }
+    Err(_) => return 0,
   };
   let ptr = unsafe { sys_alloc(layout) };
   if ptr.is_null() {
-    unsafe { *out_samples_len = 0 };
-    return std::ptr::null_mut();
+    return 0;
   }
-  unsafe {
-    std::ptr::copy_nonoverlapping(wave.samples.as_ptr(), ptr, len);
-    *out_samples_len = len as u32;
-  }
-  ptr
+  unsafe { std::ptr::copy_nonoverlapping(wave.samples.as_ptr(), ptr, len) };
+  pack_ptr_len(ptr, len)
 }
 
 /// Validates a `.ptnoise` file from `data[..len]` without using a service.
@@ -322,61 +317,39 @@ pub unsafe extern "C" fn service_get_last_measure(svc: *const PxtoneService) -> 
 
 // --- Text getters (internal; exported via WAT multi-value wrappers) ---
 
-/// Internal: returns a pointer to the song title as raw Shift-JIS bytes and writes its byte
-/// length to `out_len`. The pointer is valid as long as `svc` is alive and unmodified.
-/// `out_len` is always written. Returns null if `svc` is null or no title is set.
+/// Internal: returns `(ptr, len)` for the song title as raw Shift-JIS bytes, packed as
+/// `u64` (`ptr << 32 | len`). The pointer is valid as long as `svc` is alive and unmodified.
+/// Returns `(0, 0)` if `svc` is null or no title is set.
 ///
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`] or null.
-/// `out_len` must be a valid writable pointer.
 #[unsafe(export_name = "_service_get_text_name_impl")]
-pub unsafe extern "C" fn service_get_text_name(
-  svc: *const PxtoneService,
-  out_len: *mut u32,
-) -> *const u8 {
+pub unsafe extern "C" fn service_get_text_name(svc: *const PxtoneService) -> u64 {
   if svc.is_null() {
-    unsafe { *out_len = 0 };
-    return std::ptr::null();
+    return 0;
   }
   let svc = unsafe { &*svc };
   match svc.text.name() {
-    Some(bytes) => {
-      unsafe { *out_len = bytes.len() as u32 };
-      bytes.as_ptr()
-    }
-    None => {
-      unsafe { *out_len = 0 };
-      std::ptr::null()
-    }
+    Some(bytes) => pack_ptr_len(bytes.as_ptr(), bytes.len()),
+    None => 0,
   }
 }
 
-/// Internal: returns a pointer to the song comment as raw Shift-JIS bytes and writes its byte
-/// length to `out_len`. The pointer is valid as long as `svc` is alive and unmodified.
-/// `out_len` is always written. Returns null if `svc` is null or no comment is set.
+/// Internal: returns `(ptr, len)` for the song comment as raw Shift-JIS bytes, packed as
+/// `u64` (`ptr << 32 | len`). The pointer is valid as long as `svc` is alive and unmodified.
+/// Returns `(0, 0)` if `svc` is null or no comment is set.
 ///
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`] or null.
-/// `out_len` must be a valid writable pointer.
 #[unsafe(export_name = "_service_get_text_comment_impl")]
-pub unsafe extern "C" fn service_get_text_comment(
-  svc: *const PxtoneService,
-  out_len: *mut u32,
-) -> *const u8 {
+pub unsafe extern "C" fn service_get_text_comment(svc: *const PxtoneService) -> u64 {
   if svc.is_null() {
-    unsafe { *out_len = 0 };
-    return std::ptr::null();
+    return 0;
   }
   let svc = unsafe { &*svc };
   match svc.text.comment() {
-    Some(bytes) => {
-      unsafe { *out_len = bytes.len() as u32 };
-      bytes.as_ptr()
-    }
-    None => {
-      unsafe { *out_len = 0 };
-      std::ptr::null()
-    }
+    Some(bytes) => pack_ptr_len(bytes.as_ptr(), bytes.len()),
+    None => 0,
   }
 }
 
@@ -395,34 +368,24 @@ pub unsafe extern "C" fn service_get_unit_count(svc: *const PxtoneService) -> u3
   unsafe { &*svc }.units.len() as u32
 }
 
-/// Internal: returns a pointer to the unit's raw name bytes and writes its byte length to
-/// `out_len`. The pointer is valid as long as `svc` is alive and unmodified.
-/// `out_len` is always written. Returns null if `svc` is null or `idx` is out of range.
+/// Internal: returns `(ptr, len)` for the unit's raw name bytes, packed as
+/// `u64` (`ptr << 32 | len`). The pointer is valid as long as `svc` is alive and unmodified.
+/// Returns `(0, 0)` if `svc` is null or `idx` is out of range.
 ///
 /// # Safety
 /// `svc` must be a valid pointer from [`service_new`] or null.
-/// `out_len` must be a valid writable pointer.
 #[unsafe(export_name = "_service_get_unit_name_impl")]
-pub unsafe extern "C" fn service_get_unit_name(
-  svc: *const PxtoneService,
-  idx: u32,
-  out_len: *mut u32,
-) -> *const u8 {
+pub unsafe extern "C" fn service_get_unit_name(svc: *const PxtoneService, idx: u32) -> u64 {
   if svc.is_null() {
-    unsafe { *out_len = 0 };
-    return std::ptr::null();
+    return 0;
   }
   let svc = unsafe { &*svc };
   match svc.units.get(idx as usize) {
     Some(unit) => {
       let name = unit.name();
-      unsafe { *out_len = name.len() as u32 };
-      name.as_ptr()
+      pack_ptr_len(name.as_ptr(), name.len())
     }
-    None => {
-      unsafe { *out_len = 0 };
-      std::ptr::null()
-    }
+    None => 0,
   }
 }
 

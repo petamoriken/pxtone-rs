@@ -1,10 +1,7 @@
 // WASM moo() benchmark
 // Usage: deno run --allow-read tools/bench_wasm.ts <wasm_path> [wasm_path_baseline]
 
-import {
-  dirname,
-  join,
-} from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const projectRoot = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -32,8 +29,7 @@ interface WasmExports {
     meas: number,
     clockDiff: number,
   ) => number;
-  service_moo: (svc: number, ptr: number, len: number) => number;
-  service_is_end_vomit: (svc: number) => number;
+  service_moo: (svc: number, ptr: number, len: number) => [number, number];
 }
 
 async function loadWasm(wasmPath: string): Promise<WasmExports> {
@@ -47,7 +43,17 @@ async function benchFile(
   filePath: string,
 ): Promise<number> {
   const data = await Deno.readFile(join(projectRoot, filePath));
-  const { memory, alloc, dealloc, service_new, service_free, service_read, service_tones_ready, service_moo_preparation, service_moo, service_is_end_vomit } = exports;
+  const {
+    memory,
+    alloc,
+    dealloc,
+    service_new,
+    service_free,
+    service_read,
+    service_tones_ready,
+    service_moo_preparation,
+    service_moo,
+  } = exports;
 
   function run(): number {
     const dataPtr = alloc(data.length);
@@ -63,8 +69,9 @@ async function benchFile(
     const bufPtr = alloc(chunkSize);
 
     const t0 = performance.now();
-    while (service_is_end_vomit(svc) === 0) {
-      if (service_moo(svc, bufPtr, chunkSize) === 0) break;
+    while (true) {
+      const [, written] = service_moo(svc, bufPtr, chunkSize);
+      if (written === 0) break;
     }
     const elapsed = performance.now() - t0;
 
@@ -100,7 +107,9 @@ async function benchWasm(
 
 const [wasmPathA, wasmPathB] = Deno.args;
 if (!wasmPathA) {
-  console.error("Usage: deno run --allow-read tools/bench_wasm.ts <wasm_a> [wasm_b]");
+  console.error(
+    "Usage: deno run --allow-read tools/bench_wasm.ts <wasm_a> [wasm_b]",
+  );
   Deno.exit(1);
 }
 
@@ -113,14 +122,18 @@ if (wasmPathB) {
 
   console.log("\n--- Results (median of 10 runs) ---");
   console.log(
-    `${"file".padEnd(40)} ${"before".padStart(9)} ${"after".padStart(9)} ${"change".padStart(9)}`,
+    `${"file".padEnd(40)} ${"before".padStart(9)} ${"after".padStart(9)} ${
+      "change".padStart(9)
+    }`,
   );
   for (const [stem, msBefore] of resultsB) {
     const msAfter = resultsA.get(stem)!;
     const pct = ((msAfter - msBefore) / msBefore * 100).toFixed(1);
     const sign = msAfter < msBefore ? "" : "+";
     console.log(
-      `${stem.padEnd(40)} ${msBefore.toFixed(1).padStart(8)}ms ${msAfter.toFixed(1).padStart(8)}ms ${(sign + pct + "%").padStart(9)}`,
+      `${stem.padEnd(40)} ${msBefore.toFixed(1).padStart(8)}ms ${
+        msAfter.toFixed(1).padStart(8)
+      }ms ${(sign + pct + "%").padStart(9)}`,
     );
   }
 } else {

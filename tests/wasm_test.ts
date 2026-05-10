@@ -11,7 +11,6 @@ import {
   service_get_unit_count,
   service_get_unit_name,
   service_get_unit_played,
-  service_is_end_vomit,
   service_moo,
   service_moo_preparation,
   service_new,
@@ -305,9 +304,11 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
     const bufPtr = alloc(chunkSize);
 
     const chunks: Uint8Array[] = [];
-    while (service_is_end_vomit(svc) === 0) {
-      if (service_moo(svc, bufPtr, chunkSize) === 0) break;
-      chunks.push(new Uint8Array(memory.buffer, bufPtr, chunkSize).slice());
+    while (true) {
+      // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
+      const [, written] = service_moo(svc, bufPtr, chunkSize);
+      if (written === 0) break;
+      chunks.push(new Uint8Array(memory.buffer, bufPtr, written).slice());
     }
 
     dealloc(bufPtr, chunkSize);
