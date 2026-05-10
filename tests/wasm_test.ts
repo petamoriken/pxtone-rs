@@ -212,12 +212,16 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
       const [namePtr, nameLen] = service_get_text_name(svc);
       const textName = namePtr !== 0
-        ? decSjis.decode(new Uint8Array(memory.buffer, namePtr, nameLen))
+        ? decSjis.decode(
+          new Uint8Array(memory.buffer, namePtr >>> 0, nameLen >>> 0),
+        )
         : "";
       // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
       const [commentPtr, commentLen] = service_get_text_comment(svc);
       const textComment = commentPtr !== 0
-        ? decSjis.decode(new Uint8Array(memory.buffer, commentPtr, commentLen))
+        ? decSjis.decode(
+          new Uint8Array(memory.buffer, commentPtr >>> 0, commentLen >>> 0),
+        )
         : "";
       if (
         textName !== snapshot.text.name ||
@@ -262,7 +266,7 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
         // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
         const [namePtr, nameLen] = service_get_unit_name(svc, i);
         const unitName = dec.decode(
-          new Uint8Array(memory.buffer, namePtr, nameLen),
+          new Uint8Array(memory.buffer, namePtr >>> 0, nameLen >>> 0),
         );
         const played = service_get_unit_played(svc, i) !== 0;
         const expected = snapshot.units[i];
@@ -308,7 +312,7 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
       // @ts-expect-error: Type support for Wasm Multi-Value is not available yet
       const [, written] = service_moo(svc, bufPtr, chunkSize);
       if (written === 0) break;
-      chunks.push(new Uint8Array(memory.buffer, bufPtr, written).slice());
+      chunks.push(new Uint8Array(memory.buffer, bufPtr, written >>> 0).slice());
     }
 
     dealloc(bufPtr, chunkSize);
@@ -383,7 +387,11 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
       continue;
     }
 
-    const samples = new Uint8Array(memory.buffer, samplesPtr, samplesLen)
+    const samples = new Uint8Array(
+      memory.buffer,
+      samplesPtr >>> 0,
+      samplesLen >>> 0,
+    )
       .slice();
     dealloc(samplesPtr, samplesLen);
 
