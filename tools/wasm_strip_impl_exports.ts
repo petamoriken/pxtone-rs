@@ -11,17 +11,11 @@
 
 const [wasmFile, ...extraFlags] = Deno.args;
 
-const { stdout } = await new Deno.Command("wasm-objdump", {
-  args: ["-x", wasmFile],
-}).output();
-
-const names = new TextDecoder()
-  .decode(stdout)
-  .split("\n")
-  .flatMap((line) => {
-    const m = line.match(/-> "([^"]+)"/);
-    return m && !m[1].startsWith("_") ? [m[1]] : [];
-  });
+const wasmBytes = await Deno.readFile(wasmFile);
+const wasmModule = await WebAssembly.compile(wasmBytes);
+const names = WebAssembly.Module.exports(wasmModule)
+  .map(({ name }) => name)
+  .filter((name) => !name.startsWith("_"));
 
 const graph = names.map((name) => ({ name, root: true, export: name }));
 
