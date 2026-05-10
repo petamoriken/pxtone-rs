@@ -156,7 +156,7 @@ impl NoiseBuilder {
       WaveType::Sine => {
         osci.ready_get_sample(vec![Point { x: 1, y: 128 }], 128, SMP_COUNT as u32, 0);
         (0..SMP_COUNT as u32)
-          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
+          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f32) as i16)
           .collect()
       }
       WaveType::Saw => {
@@ -189,7 +189,7 @@ impl NoiseBuilder {
           0,
         );
         (0..SMP_COUNT as u32)
-          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
+          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f32) as i16)
           .collect()
       }
       WaveType::Rect2 => {
@@ -205,7 +205,7 @@ impl NoiseBuilder {
           0,
         );
         (0..SMP_COUNT as u32)
-          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16)
+          .map(|s| (osci.get_one_sample_overtone(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f32) as i16)
           .collect()
       }
       WaveType::Tri => {
@@ -226,7 +226,7 @@ impl NoiseBuilder {
         );
         (0..SMP_COUNT as u32)
           .map(|s| {
-            (osci.get_one_sample_coordinate(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f64) as i16
+            (osci.get_one_sample_coordinate(s).clamp(-1.0, 1.0) * SAMPLING_TOP as f32) as i16
           })
           .collect()
       }

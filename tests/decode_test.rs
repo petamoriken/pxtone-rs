@@ -5,6 +5,26 @@ use std::io::BufReader;
 use std::path::Path;
 use toml::{Table, Value};
 
+const WAV_HEADER_LEN: usize = 44;
+const WAV_PCM_TOLERANCE: i32 = 2;
+
+fn wav_matches(actual: &[u8], expected: &[u8]) -> bool {
+  if actual.len() != expected.len() {
+    return false;
+  }
+  if actual[..WAV_HEADER_LEN] != expected[..WAV_HEADER_LEN] {
+    return false;
+  }
+  actual[WAV_HEADER_LEN..]
+    .chunks_exact(2)
+    .zip(expected[WAV_HEADER_LEN..].chunks_exact(2))
+    .all(|(a, e)| {
+      let av = i16::from_le_bytes([a[0], a[1]]) as i32;
+      let ev = i16::from_le_bytes([e[0], e[1]]) as i32;
+      (av - ev).abs() <= WAV_PCM_TOLERANCE
+    })
+}
+
 fn decode_shift_jis(raw: &[u8]) -> String {
   SHIFT_JIS.decode(raw).0.into_owned()
 }
@@ -173,7 +193,7 @@ fn decoded_ptcop_matches_reference() {
 
     let expected_wav = fs::read(&wav_path)
       .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", wav_path.display(), e));
-    if wav != expected_wav {
+    if !wav_matches(&wav, &expected_wav) {
       failures.push(wav_path.display().to_string());
     }
 
@@ -245,7 +265,7 @@ fn decoded_ptnoise_matches_reference() {
 
     let expected_wav = fs::read(&wav_path)
       .unwrap_or_else(|e| panic!("{}: failed to read snapshot: {}", wav_path.display(), e));
-    if wav != expected_wav {
+    if !wav_matches(&wav, &expected_wav) {
       failures.push(wav_path.display().to_string());
     }
   }

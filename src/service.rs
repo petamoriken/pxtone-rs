@@ -826,9 +826,43 @@ impl PxtoneService {
     }
   }
 
+  /// Returns the number of samples that can be synthesized before the next
+  /// event fires, end-of-stream is reached, or a fade-out completes.
+  /// Processing this many samples is safe without event/boundary checks.
+  fn moo_safe_count(&self) -> u32 {
+    // Samples until the next event would fire.
+    // Event fires when floor(sample_count / samples_per_tick) >= ev_tick,
+    // i.e. sample_count >= ev_tick * samples_per_tick.
+    let event_safe = if self.moo_event_index < self.events.records().len() {
+      let next_ev_tick = self.events.records()[self.moo_event_index].tick as f64;
+      let threshold = (next_ev_tick * self.moo_samples_per_tick) as u32;
+      threshold.saturating_sub(self.moo_sample_count)
+    } else {
+      u32::MAX
+    };
+
+    // Samples until the loop/end boundary (the boundary sample itself must go
+    // through the full path, so subtract 1).
+    let end_safe = self
+      .moo_sample_end
+      .saturating_sub(self.moo_sample_count + 1);
+
+    // Samples until a fade-out returns false (N decrements succeed before the
+    // (N+1)th call returns false at fade_count == 0).
+    let fade_safe = if self.moo_fade_direction < 0 {
+      self.moo_fade_count
+    } else {
+      u32::MAX
+    };
+
+    event_safe.min(end_safe).min(fade_safe)
+  }
+
   /// Synthesizes one sample and writes it into `out[0..channels]`.
   /// Returns `true` while playing, `false` when the end is reached.
-  fn moo_pxtone_sample(&mut self, out: &mut [i16; 2]) -> bool {
+  /// When `process_events` is `false`, the event-dispatch step is skipped;
+  /// callers must guarantee (via `moo_safe_count`) that no events would fire.
+  fn moo_pxtone_sample_impl(&mut self, out: &mut [i16; 2], process_events: bool) -> bool {
     let unit_count = self.units.len();
     let group_count = self.group_count;
     let channel_count = self.dst_channels as usize;
@@ -852,25 +886,27 @@ impl PxtoneService {
     }
 
     // ---- 2. Event processing ----
-    let tick = (sample_count as f64 / samples_per_tick) as i32;
-    let event_count = self.events.records().len();
+    if process_events {
+      let tick = (sample_count as f64 / samples_per_tick) as i32;
+      let event_count = self.events.records().len();
 
-    while self.moo_event_index < event_count {
-      let ev_tick = self.events.records()[self.moo_event_index].tick;
-      if ev_tick > tick {
-        break;
+      while self.moo_event_index < event_count {
+        let ev_tick = self.events.records()[self.moo_event_index].tick;
+        if ev_tick > tick {
+          break;
+        }
+
+        // Clone the event before advancing the index
+        let ev: EventRecord = self.events.records()[self.moo_event_index].clone();
+        self.moo_event_index += 1;
+
+        let u = ev.unit_index as usize;
+        if u >= self.units.len() {
+          continue;
+        }
+
+        self.process_event(&ev, u, tick, sample_end, samples_per_tick);
       }
-
-      // Clone the event before advancing the index
-      let ev: EventRecord = self.events.records()[self.moo_event_index].clone();
-      self.moo_event_index += 1;
-
-      let u = ev.unit_index as usize;
-      if u >= self.units.len() {
-        continue;
-      }
-
-      self.process_event(&ev, u, tick, sample_end, samples_per_tick);
     }
 
     // ---- 3. Tone_Sample ----
@@ -965,6 +1001,18 @@ impl PxtoneService {
     }
 
     true
+  }
+
+  #[inline]
+  fn moo_pxtone_sample(&mut self, out: &mut [i16; 2]) -> bool {
+    self.moo_pxtone_sample_impl(out, true)
+  }
+
+  /// Like `moo_pxtone_sample` but skips event dispatch.
+  /// Only call when `moo_safe_count() > 0`.
+  #[inline]
+  fn moo_pxtone_sample_fast(&mut self, out: &mut [i16; 2]) -> bool {
+    self.moo_pxtone_sample_impl(out, false)
   }
 
   /// Processes one event
@@ -1083,23 +1131,52 @@ impl PxtoneService {
     if !buf.len().is_multiple_of(byte_per_smp) {
       return false;
     }
-    let _smp_count = buf.len() / byte_per_smp;
 
-    let mut smp_written = 0usize;
-    for chunk in buf.chunks_exact_mut(byte_per_smp) {
-      let mut sample = [0i16; 2];
-      if !self.moo_pxtone_sample(&mut sample) {
-        self.playback_ended = true;
-        break;
+    let total = buf.len() / byte_per_smp;
+    let mut pos = 0usize;
+
+    'outer: while pos < total {
+      // Compute how many consecutive samples need no event/boundary check.
+      let safe = (self.moo_safe_count() as usize).min(total - pos);
+
+      // Fast inner loop: event dispatch is skipped.
+      let safe_end = pos + safe;
+      while pos < safe_end {
+        let mut sample = [0i16; 2];
+        if !self.moo_pxtone_sample_fast(&mut sample) {
+          self.playback_ended = true;
+          break 'outer;
+        }
+        let offset = pos * byte_per_smp;
+        for (ch_bytes, &s) in buf[offset..offset + byte_per_smp]
+          .chunks_exact_mut(2)
+          .zip(sample.iter())
+        {
+          ch_bytes.copy_from_slice(&s.to_le_bytes());
+        }
+        pos += 1;
       }
-      for (ch_bytes, &s) in chunk.chunks_exact_mut(2).zip(sample.iter()) {
-        ch_bytes.copy_from_slice(&s.to_le_bytes());
+
+      // Boundary sample: run with full event dispatch.
+      if pos < total {
+        let mut sample = [0i16; 2];
+        if !self.moo_pxtone_sample(&mut sample) {
+          self.playback_ended = true;
+          break;
+        }
+        let offset = pos * byte_per_smp;
+        for (ch_bytes, &s) in buf[offset..offset + byte_per_smp]
+          .chunks_exact_mut(2)
+          .zip(sample.iter())
+        {
+          ch_bytes.copy_from_slice(&s.to_le_bytes());
+        }
+        pos += 1;
       }
-      smp_written += 1;
     }
 
     // Zero-fill the remainder
-    let start = smp_written * byte_per_smp;
+    let start = pos * byte_per_smp;
     if start < buf.len() {
       buf[start..].fill(0);
     }

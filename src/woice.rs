@@ -663,7 +663,7 @@ fn update_wave_ptv(
       osci.get_one_sample_coordinate(s)
     };
     for (c, &pv) in pan_vol.iter().enumerate().take(channels as usize) {
-      let raw = osc * pv as f64 / 64.0;
+      let raw = osc * pv as f32 / 64.0;
       if raw.abs() > 1.0 {
         instance.clipped = true;
       }

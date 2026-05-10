@@ -41,18 +41,18 @@ impl Oscillator {
   }
 
   /// Gets one sample via overtone synthesis
-  pub(crate) fn get_one_sample_overtone(&self, index: u32) -> f64 {
-    use std::f64::consts::PI;
-    let mut work = 0.0f64;
+  pub(crate) fn get_one_sample_overtone(&self, index: u32) -> f32 {
+    use std::f32::consts::PI;
+    let mut work = 0.0f32;
     for p in &self.points {
-      let sss = 2.0 * PI * p.x as f64 * index as f64 / self.sample_count as f64;
-      work += sss.sin() * p.y as f64 / p.x as f64 / 128.0;
+      let sss = 2.0 * PI * p.x as f32 * index as f32 / self.sample_count as f32;
+      work += sss.sin() * p.y as f32 / p.x as f32 / 128.0;
     }
-    work * self.volume as f64 / 128.0
+    work * self.volume as f32 / 128.0
   }
 
   /// Gets one sample via coordinate interpolation
-  pub(crate) fn get_one_sample_coordinate(&self, index: u32) -> f64 {
+  pub(crate) fn get_one_sample_coordinate(&self, index: u32) -> f32 {
     let i = self.point_reso * index / self.sample_count;
 
     // Find the two surrounding points
@@ -81,11 +81,11 @@ impl Oscillator {
     let h = y2 - y1;
 
     let work = if ii != 0 {
-      y1 as f64 + h as f64 * ii as f64 / w as f64
+      y1 as f32 + h as f32 * ii as f32 / w as f32
     } else {
-      y1 as f64
+      y1 as f32
     };
 
-    work * self.volume as f64 / 128.0 / 128.0
+    work * self.volume as f32 / 128.0 / 128.0
   }
 }

@@ -45,6 +45,29 @@ interface PtcopSnapshot {
   >;
 }
 
+const WAV_HEADER_LEN = 44;
+const WAV_PCM_TOLERANCE = 2;
+
+function wavMatches(
+  actual: Uint8Array,
+  expected: Uint8Array,
+): { ok: boolean; maxDiff: number } {
+  if (actual.length !== expected.length) return { ok: false, maxDiff: -1 };
+  for (let i = 0; i < WAV_HEADER_LEN; i++) {
+    if (actual[i] !== expected[i]) return { ok: false, maxDiff: -1 };
+  }
+  let maxDiff = 0;
+  for (let i = WAV_HEADER_LEN; i + 1 < actual.length; i += 2) {
+    let a = actual[i] | (actual[i + 1] << 8);
+    let e = expected[i] | (expected[i + 1] << 8);
+    if (a >= 0x8000) a -= 0x10000;
+    if (e >= 0x8000) e -= 0x10000;
+    const diff = Math.abs(a - e);
+    if (diff > maxDiff) maxDiff = diff;
+  }
+  return { ok: maxDiff <= WAV_PCM_TOLERANCE, maxDiff };
+}
+
 function pcmToWav(
   samples: Uint8Array,
   channels: number,
@@ -302,10 +325,9 @@ Deno.test("decoded ptcop matches reference (wasm)", async () => {
     const wavPath = join(snapshotDir, `${stem}.wav`);
     const expected = await Deno.readFile(wavPath);
 
-    if (
-      wav.length !== expected.length || wav.some((b, i) => b !== expected[i])
-    ) {
-      failures.push(wavPath);
+    const { ok, maxDiff } = wavMatches(wav, expected);
+    if (!ok) {
+      failures.push(`${wavPath} (maxDiff=${maxDiff})`);
     }
   }
 
@@ -368,10 +390,9 @@ Deno.test("decoded ptnoise matches reference (wasm)", async () => {
     const wavPath = join(snapshotDir, `${stem}.wav`);
     const expected = await Deno.readFile(wavPath);
 
-    if (
-      wav.length !== expected.length || wav.some((b, i) => b !== expected[i])
-    ) {
-      failures.push(wavPath);
+    const { ok, maxDiff } = wavMatches(wav, expected);
+    if (!ok) {
+      failures.push(`${wavPath} (maxDiff=${maxDiff})`);
     }
   }
 

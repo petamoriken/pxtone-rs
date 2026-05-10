@@ -224,7 +224,9 @@ impl Unit {
     }
   }
 
-  // Generates samples and writes them into pan_time_bufs
+  // Generates samples and writes them into pan_time_bufs.
+  // Both channels are processed in a single voice iteration to expose data parallelism
+  // to the auto-vectorizer (LLVM can SIMD-pack w0/w1 when simd128 is enabled).
   pub(crate) fn tone_sample(
     &mut self,
     mute_by_unit: bool,
@@ -240,38 +242,57 @@ impl Unit {
       return;
     }
 
-    for ch in 0..MAX_CHANNEL {
-      let mut buf = 0i32;
-      for (v, vi) in instances.iter().enumerate().take(self.voice_count) {
-        let vt = &self.tones[v];
-        if vt.life_count > 0 {
-          let pos = vt.sample_pos as usize;
-          let mut work = vi.get_sample_i16(pos, ch) as i32;
+    let velocity = self.velocity as i32;
+    let volume = self.volume as i32;
+    let pan0 = self.pan_volumes[0] as i32;
+    let pan1 = self.pan_volumes[1] as i32;
 
-          if channels == 1 {
-            work += vi.get_sample_i16(pos, 1) as i32;
-            work /= 2;
-          }
+    let mut buf0 = 0i32;
+    let mut buf1 = 0i32;
 
-          work = work * self.velocity as i32 / 128;
-          work = work * self.volume as i32 / 128;
-          work = work * self.pan_volumes[ch] as i32 / 64;
+    for (v, vi) in instances.iter().enumerate().take(self.voice_count) {
+      let vt = &self.tones[v];
+      if vt.life_count > 0 {
+        let pos = vt.sample_pos as usize;
+        let s0 = vi.get_sample_i16(pos, 0) as i32;
+        let s1 = vi.get_sample_i16(pos, 1) as i32;
 
-          if vi.envelope_size > 0 {
-            work = work * vt.envelope_volume / 128;
-          }
+        // For mono output, ch=0 gets the average of both wave channels.
+        // ch=1 keeps the raw ch=1 sample (unused when channel_count=1).
+        let (mut w0, mut w1) = if channels == 1 {
+          ((s0 + s1) / 2, s1)
+        } else {
+          (s0, s1)
+        };
 
-          // smooth tail
-          if self.voice_flags.get(v).copied().unwrap_or(0) & VOICE_FLAG_SMOOTH != 0
-            && vt.life_count < smooth_smp
-          {
-            work = work * vt.life_count as i32 / smooth_smp as i32;
-          }
-          buf += work;
+        w0 = w0 * velocity / 128;
+        w1 = w1 * velocity / 128;
+        w0 = w0 * volume / 128;
+        w1 = w1 * volume / 128;
+        w0 = w0 * pan0 / 64;
+        w1 = w1 * pan1 / 64;
+
+        if vi.envelope_size > 0 {
+          w0 = w0 * vt.envelope_volume / 128;
+          w1 = w1 * vt.envelope_volume / 128;
         }
+
+        if self.voice_flags.get(v).copied().unwrap_or(0) & VOICE_FLAG_SMOOTH != 0
+          && vt.life_count < smooth_smp
+        {
+          let lc = vt.life_count as i32;
+          let sm = smooth_smp as i32;
+          w0 = w0 * lc / sm;
+          w1 = w1 * lc / sm;
+        }
+
+        buf0 += w0;
+        buf1 += w1;
       }
-      self.pan_delay_buffers[ch][time_pan_index] = buf;
     }
+
+    self.pan_delay_buffers[0][time_pan_index] = buf0;
+    self.pan_delay_buffers[1][time_pan_index] = buf1;
   }
 
   // Adds pan_delay_buffers values to group samples
