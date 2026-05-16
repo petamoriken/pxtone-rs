@@ -8,6 +8,7 @@ use crate::pulse::pcm::Pcm;
 use crate::read_ext::ReadExt;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek, SeekFrom};
+use tinyvec::TinyVec;
 
 // ---- Constants ----
 pub(crate) const BUFSIZE_TIMEPAN: usize = 0x40;
@@ -30,7 +31,7 @@ pub(crate) struct VoiceWave {
   pub(crate) resolution: u32,
   /// Waveform points. In `Coordinate` mode each entry is `(position 0..reso, amplitude -128..127)`;
   /// in `Overtone` mode each entry is `(harmonic number, amplitude)`.
-  pub(crate) points: Vec<(i32, i32)>,
+  pub(crate) points: TinyVec<[(i32, i32); 8]>,
 }
 
 /// Amplitude envelope definition attached to a voice layer.
@@ -46,7 +47,7 @@ pub(crate) struct VoiceEnvelope {
   pub(crate) tail_count: u32,
   /// Envelope points ordered head → body → tail.
   /// Each entry is `(duration in frames, volume 0–100)`.
-  pub(crate) points: Vec<(i32, i32)>,
+  pub(crate) points: TinyVec<[(i32, i32); 8]>,
 }
 
 // ---- Voice data ----
@@ -580,7 +581,7 @@ fn ptv_read_wave<R: Read>(r: &mut R) -> Result<VoiceData, PxtoneError> {
       let reso = r.read_var_u32()?;
       let mut wave = VoiceWave {
         resolution: reso,
-        points: Vec::new(),
+        points: TinyVec::new(),
       };
       for _ in 0..num {
         let x = r.read_u8()? as i32;

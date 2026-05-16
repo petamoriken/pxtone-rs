@@ -1,6 +1,7 @@
 use crate::error::PxtoneError;
 use crate::read_ext::ReadExt;
 use std::io::Read;
+use tinyvec::ArrayVec;
 
 // ---- Wave type ----
 
@@ -68,7 +69,7 @@ pub(crate) struct NoiseOscillator {
 
 // ---- Noise unit design ----
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub(crate) struct NoisePoint {
   pub(crate) x: u32,
   pub(crate) y: u32,
@@ -77,7 +78,7 @@ pub(crate) struct NoisePoint {
 #[derive(Clone, Debug, Default)]
 pub(crate) struct NoiseUnit {
   pub(crate) enabled: bool,
-  pub(crate) envelopes: Vec<NoisePoint>,
+  pub(crate) envelopes: ArrayVec<[NoisePoint; MAX_ENVELOPE_COUNT]>,
   pub(crate) pan: i8,
   pub(crate) main: NoiseOscillator,
   pub(crate) frequency: NoiseOscillator,
@@ -111,7 +112,7 @@ const LIMIT_ENVE_Y: u32 = 100;
 #[derive(Debug, Default)]
 pub(crate) struct Noise {
   pub(crate) frame_count_44k: u32,
-  pub(crate) units: Vec<NoiseUnit>,
+  pub(crate) units: ArrayVec<[NoiseUnit; MAX_UNIT_COUNT]>,
 }
 
 impl Noise {

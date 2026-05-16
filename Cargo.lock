@@ -408,6 +408,7 @@ dependencies = [
  "encoding_rs",
  "lewton",
  "talc",
+ "tinyvec",
  "toml",
 ]
 

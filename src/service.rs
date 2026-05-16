@@ -12,10 +12,11 @@ use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
 use crate::text::Text;
-use crate::unit::Unit;
+use crate::unit::{MAX_UNIT_CONTROL_VOICE, Unit};
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VoiceInstance, Woice};
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
+use tinyvec::ArrayVec;
 
 // ---- Constants ----
 const MAX_UNIT_COUNT: usize = 50;
@@ -163,8 +164,8 @@ pub struct PxtoneService {
   pub events: EventList,
   pub units: Vec<Unit>,
 
-  pub(crate) delays: Vec<Delay>,
-  pub(crate) overdrives: Vec<OverDrive>,
+  pub(crate) delays: ArrayVec<[Delay; MAX_DELAY_COUNT]>,
+  pub(crate) overdrives: ArrayVec<[OverDrive; MAX_OVERDRIVE_COUNT]>,
   pub(crate) woices: Vec<Woice>,
 
   noise_builder: NoiseBuilder,
@@ -217,8 +218,8 @@ impl PxtoneService {
       events: EventList::new(),
       woices: Vec::new(),
       units: Vec::new(),
-      delays: Vec::new(),
-      overdrives: Vec::new(),
+      delays: ArrayVec::new(),
+      overdrives: ArrayVec::new(),
       noise_builder: NoiseBuilder::new(),
       frequency: FrequencyTable::new(),
 
@@ -771,7 +772,7 @@ impl PxtoneService {
 
     // Collect voice_flags from the woice
     let voice_count = self.woices[woice_idx].voices.len();
-    let voice_flags: Vec<u32> = self.woices[woice_idx]
+    let voice_flags: ArrayVec<[u32; MAX_UNIT_CONTROL_VOICE]> = self.woices[woice_idx]
       .voices
       .iter()
       .map(|v| v.voice_flags)

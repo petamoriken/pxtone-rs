@@ -3,6 +3,7 @@ use crate::event::{
   EVENT_DEFAULT_VOLUME,
 };
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, VoiceInstance};
+use tinyvec::ArrayVec;
 
 pub const MAX_CHANNEL: usize = 2;
 pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
@@ -46,7 +47,7 @@ pub struct Unit {
 
   // Voice references (one per instance)
   pub(crate) voice_count: usize,
-  pub(crate) voice_flags: Vec<u32>,
+  pub(crate) voice_flags: ArrayVec<[u32; MAX_UNIT_CONTROL_VOICE]>,
   pub(crate) tones: [VoiceTone; MAX_UNIT_CONTROL_VOICE],
 }
 
@@ -68,7 +69,7 @@ impl Default for Unit {
       group_index: EVENT_DEFAULT_GROUP_NO,
       tuning: EVENT_DEFAULT_TUNING,
       voice_count: 0,
-      voice_flags: Vec::new(),
+      voice_flags: ArrayVec::new(),
       tones: Default::default(),
     }
   }
@@ -129,7 +130,11 @@ impl Unit {
     t.offset_frequency = offset_frequency;
   }
 
-  pub(crate) fn set_woice(&mut self, voice_count: usize, voice_flags: Vec<u32>) {
+  pub(crate) fn set_woice(
+    &mut self,
+    voice_count: usize,
+    voice_flags: ArrayVec<[u32; MAX_UNIT_CONTROL_VOICE]>,
+  ) {
     self.voice_count = voice_count;
     self.voice_flags = voice_flags;
     self.key = EVENT_DEFAULT_KEY;
