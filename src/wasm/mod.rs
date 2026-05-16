@@ -191,20 +191,6 @@ pub unsafe extern "C" fn service_moo(svc: *mut PxtoneService, buf: *mut u8, len:
   pack_ptr_len(buf, written)
 }
 
-/// Returns 1 if playback has reached the end, 0 otherwise.
-/// Returns 1 if `svc` is null.
-///
-/// # Safety
-/// `svc` must be a valid pointer from [`service_new`] or null.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn service_is_end_vomit(svc: *const PxtoneService) -> i32 {
-  if svc.is_null() {
-    return 1;
-  }
-  let svc = unsafe { &*svc };
-  if svc.is_end_vomit() { 1 } else { 0 }
-}
-
 /// Internal: renders a `.ptnoise` file.
 /// Returns `(ptr, samples_len)` packed as `u64` (`ptr << 32 | samples_len`).
 /// `ptr` points to a heap-allocated buffer of signed 16-bit interleaved PCM samples.

@@ -104,7 +104,6 @@ returns. Memory management uses explicit `alloc`/`dealloc` exports. See
 | `service_tones_ready`     | `(svc) → i32`                                | Prepare synthesizer tones; 0=OK, -1=error       |
 | `service_moo_preparation` | `(svc, start_sample, unit_mute, loop) → i32` | Prepare playback; 0=OK, -1=error                |
 | `service_moo`             | `(svc, buf, len) → i32`                      | Render next PCM chunk; 1=wrote samples, 0=done  |
-| `service_is_end_vomit`    | `(svc) → i32`                                | 1 if playback ended, 0 otherwise                |
 
 **Metadata**
 
