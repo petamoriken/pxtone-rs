@@ -13,7 +13,9 @@ use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
 use crate::text::Text;
 use crate::unit::{MAX_UNIT_CONTROL_VOICE, Unit};
-use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VoiceInstance, Woice};
+use crate::woice::{
+  BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VOICE_FLAG_WAVELOOP, VoiceInstance, Woice,
+};
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 use tinyvec::ArrayVec;
@@ -1035,6 +1037,13 @@ impl PxtoneService {
         }
         self.units[u].tone_key_on();
 
+        // Pre-compute values needed for mid-note seek sample_pos correction.
+        // elapsed > 0 means we started playback after this note's ON tick.
+        let elapsed = tick - ev.tick;
+        let unit_key = self.units[u].key;
+        let unit_tuning = self.units[u].tuning;
+        let unit_freq = self.frequency.get2(unit_key) * self.moo_sample_stride;
+
         let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
         let voice_count = self.woices.get(wi).map(|w| w.voices.len()).unwrap_or(0);
 
@@ -1052,6 +1061,18 @@ impl PxtoneService {
             .and_then(|w| w.instances.get(v))
             .map(|i| i.envelope_size)
             .unwrap_or(0);
+          let body_frames = self
+            .woices
+            .get(wi)
+            .and_then(|w| w.instances.get(v))
+            .map(|i| i.body_frames)
+            .unwrap_or(0);
+          let wave_loop = self
+            .woices
+            .get(wi)
+            .and_then(|w| w.voices.get(v))
+            .map(|vc| vc.voice_flags & VOICE_FLAG_WAVELOOP != 0)
+            .unwrap_or(false);
 
           // Read tone's envelope release (in ticks) for life calculation
           let tone_rls_ticks = self.units[u]
@@ -1082,7 +1103,28 @@ impl PxtoneService {
             && let Some(tone) = self.units[u].tones.get_mut(v)
           {
             tone.on_count = on_count as u32;
-            tone.sample_pos = 0.0;
+
+            // When seeking into the middle of a note, advance sample_pos by the
+            // number of samples that would have elapsed since the note's ON tick.
+            // This keeps PCM/OGG voices in sync with the song position.
+            if elapsed > 0 {
+              let step = tone.offset_frequency as f64 * unit_tuning as f64 * unit_freq as f64;
+              let initial_pos = elapsed as f64 * samples_per_tick * step;
+              let body = body_frames as f64;
+              if body > 0.0 && !wave_loop && initial_pos >= body {
+                // Non-looping voice whose sample data is already exhausted.
+                tone.life_count = 0;
+                continue;
+              }
+              tone.sample_pos = if wave_loop && body > 0.0 {
+                initial_pos % body
+              } else {
+                initial_pos
+              };
+            } else {
+              tone.sample_pos = 0.0;
+            }
+
             tone.envelope_pos = 0;
             if envelope_size > 0 {
               tone.envelope_volume = 0;

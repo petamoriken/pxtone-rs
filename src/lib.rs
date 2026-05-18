@@ -14,4 +14,6 @@ pub(crate) mod woice;
 pub mod wasm;
 
 pub use error::PxtoneError;
-pub use service::{DestinationQuality, NoiseWave, PxtoneService, VomitPrepFlags, VomitPreparation};
+pub use service::{
+  DestinationQuality, NoiseWave, PxtoneService, StartPos, VomitPrepFlags, VomitPreparation,
+};

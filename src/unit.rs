@@ -341,6 +341,12 @@ impl Unit {
       if vt.life_count > 0 {
         if vt.on_count > 0 {
           vt.on_count -= 1;
+          // Trigger release phase exactly once, when on_count first reaches 0.
+          // (C++ uses int32_t which goes negative, so this condition fires only once.)
+          if vt.on_count == 0 && vi.envelope_size > 0 {
+            vt.envelope_start = vt.envelope_volume;
+            vt.envelope_pos = 0;
+          }
         }
         vt.sample_pos += vt.offset_frequency as f64 * self.tuning as f64 * frequency as f64;
 
@@ -354,11 +360,6 @@ impl Unit {
           } else {
             vt.life_count = 0;
           }
-        }
-
-        if vt.on_count == 0 && vi.envelope_size > 0 {
-          vt.envelope_start = vt.envelope_volume;
-          vt.envelope_pos = 0;
         }
       }
     }
