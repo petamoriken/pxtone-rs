@@ -72,7 +72,7 @@ fn compare_priority(kind1: u8, kind2: u8) -> i16 {
 }
 
 /// A single automation event in a pxtone song.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct EventRecord {
   pub(crate) kind: u8,
   pub(crate) unit_index: u8,
@@ -150,6 +150,7 @@ impl EventList {
 
     let mut absolute = 0i32;
 
+    self.events.reserve(eve_count as usize);
     for _ in 0..eve_count {
       let tick_delta = r.read_var_i32()?;
       let unit_index = r.read_u8()?;

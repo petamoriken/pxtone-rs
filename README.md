@@ -25,32 +25,31 @@ pxtone = { git = "https://github.com/petamoriken/pxtone" }
 Decode a `.ptcop` or `.pttune` file and render it to raw PCM:
 
 ```rust
-use pxtone::{PxtoneService, VomitPreparation};
-use std::fs::File;
-use std::io::BufReader;
+use pxtone::{DestinationQuality, PxtoneService, VomitPreparation};
 
-let mut service = PxtoneService::new();
-let mut reader = BufReader::new(File::open("song.ptcop").unwrap());
-service.read(&mut reader).unwrap();
+let mut service = PxtoneService::new(DestinationQuality::default()).unwrap();
+let data = std::fs::read("song.ptcop").unwrap();
+service.read(data).unwrap();
 service.tones_ready().unwrap();
 service.moo_preparation(VomitPreparation::default()).unwrap();
 
 let q = service.get_destination_quality();
 let mut buf = vec![0u8; q.channels as usize * 2 * 4096];
-while !service.is_end_vomit() {
-    service.moo(&mut buf);
-    // buf contains 16-bit little-endian interleaved PCM samples
+loop {
+    let written = service.moo(&mut buf);
+    if written == 0 { break; }
+    // buf[..written] contains 16-bit little-endian interleaved PCM samples
 }
 ```
 
 Decode a `.ptnoise` file:
 
 ```rust
-use pxtone::PxtoneService;
+use pxtone::{DestinationQuality, PxtoneService};
 use std::fs::File;
 use std::io::BufReader;
 
-let mut service = PxtoneService::new();
+let mut service = PxtoneService::new(DestinationQuality::default()).unwrap();
 let mut reader = BufReader::new(File::open("instrument.ptnoise").unwrap());
 let wave = service.render_noise(&mut reader).unwrap();
 // wave.samples: Vec<u8> of 16-bit LE PCM

@@ -82,8 +82,8 @@ fn decode_ptcop_to_wav(service: &mut PxtoneService) -> Vec<u8> {
 }
 
 fn decode_to_metadata(service: &PxtoneService) -> String {
-  let m = &service.master;
-  let t = &service.text;
+  let m = service.master();
+  let t = service.text();
   let mut table = Table::new();
   let mut text_table = Table::new();
   text_table.insert(
@@ -121,7 +121,7 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
 
   let units_array = Value::Array(
     service
-      .units
+      .units()
       .iter()
       .map(|u| {
         let mut t = Table::new();
@@ -135,7 +135,7 @@ fn decode_to_metadata(service: &PxtoneService) -> String {
 
   let events_array = Value::Array(
     service
-      .events
+      .events()
       .records()
       .iter()
       .map(|e| {
@@ -171,7 +171,7 @@ fn decoded_ptcop_matches_reference() {
     "no .ptcop files found in tests/sample/ptcop/"
   );
 
-  let mut service = PxtoneService::new(DestinationQuality::default());
+  let mut service = PxtoneService::new(DestinationQuality::default()).unwrap();
   let mut failures = Vec::new();
 
   for entry in &entries {
@@ -237,7 +237,7 @@ fn decoded_ptnoise_matches_reference() {
     "no .ptnoise files found in tests/sample/ptnoise/"
   );
 
-  let mut service = PxtoneService::new(DestinationQuality::default());
+  let mut service = PxtoneService::new(DestinationQuality::default()).unwrap();
   let mut failures = Vec::new();
 
   for entry in &entries {

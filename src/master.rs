@@ -9,7 +9,7 @@ use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
 /// Song-level timing parameters loaded from the file.
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Master {
   pub(crate) beats_per_measure: u8,
   pub(crate) beat_tempo: f32,
@@ -158,36 +158,17 @@ impl Master {
       let tick = absolute;
 
       match status as u8 {
-        EVENT_KIND_TICKS_PER_BEAT => {
-          if tick != 0 {
-            return Err(PxtoneError::BrokenFile);
-          }
-          ticks_per_beat = volume;
+        EVENT_KIND_TICKS_PER_BEAT | EVENT_KIND_BEAT_TEMPO | EVENT_KIND_BEATS_PER_MEASURE
+          if tick != 0 =>
+        {
+          return Err(PxtoneError::BrokenFile);
         }
-        EVENT_KIND_BEAT_TEMPO => {
-          if tick != 0 {
-            return Err(PxtoneError::BrokenFile);
-          }
-          beat_tempo = f32::from_bits(volume as u32);
-        }
-        EVENT_KIND_BEATS_PER_MEASURE => {
-          if tick != 0 {
-            return Err(PxtoneError::BrokenFile);
-          }
-          beats_per_measure = volume as u8;
-        }
-        EVENT_KIND_REPEAT => {
-          if volume != 0 {
-            return Err(PxtoneError::BrokenFile);
-          }
-          repeat_tick = tick;
-        }
-        EVENT_KIND_LAST => {
-          if volume != 0 {
-            return Err(PxtoneError::BrokenFile);
-          }
-          last_tick = tick;
-        }
+        EVENT_KIND_REPEAT | EVENT_KIND_LAST if volume != 0 => return Err(PxtoneError::BrokenFile),
+        EVENT_KIND_TICKS_PER_BEAT => ticks_per_beat = volume,
+        EVENT_KIND_BEAT_TEMPO => beat_tempo = f32::from_bits(volume as u32),
+        EVENT_KIND_BEATS_PER_MEASURE => beats_per_measure = volume as u8,
+        EVENT_KIND_REPEAT => repeat_tick = tick,
+        EVENT_KIND_LAST => last_tick = tick,
         _ => return Err(PxtoneError::UnknownFormat),
       }
     }

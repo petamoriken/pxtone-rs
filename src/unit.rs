@@ -9,7 +9,7 @@ pub const MAX_CHANNEL: usize = 2;
 pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
 
 /// Runtime playback state for a single voice layer within a unit.
-#[derive(Clone, Default)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct VoiceTone {
   pub(crate) sample_pos: f64,
   pub(crate) offset_frequency: f32,
@@ -23,6 +23,7 @@ pub struct VoiceTone {
 }
 
 /// A single track (channel) in the song, with its current playback state.
+#[derive(Clone)]
 pub struct Unit {
   pub(crate) played: bool,
   pub(crate) name: Vec<u8>,

@@ -61,7 +61,10 @@ pub extern "C" fn service_new(channels: u32, sample_rate: u32) -> *mut PxtoneSer
     channels: channels as u8,
     sample_rate,
   };
-  Box::into_raw(Box::new(PxtoneService::new(quality)))
+  match PxtoneService::new(quality) {
+    Ok(svc) => Box::into_raw(Box::new(svc)),
+    Err(_) => std::ptr::null_mut(),
+  }
 }
 
 /// Frees a [`PxtoneService`] previously created by [`service_new`].
@@ -106,7 +109,10 @@ pub unsafe extern "C" fn validate(data: *const u8, len: usize) -> i32 {
   }
   let slice = unsafe { std::slice::from_raw_parts(data, len) };
   let mut cursor = Cursor::new(slice);
-  match PxtoneService::new(DestinationQuality::default()).read_metadata(&mut cursor) {
+  let Ok(mut svc) = PxtoneService::new(DestinationQuality::default()) else {
+    return -1;
+  };
+  match svc.read_metadata(&mut cursor) {
     Ok(()) => 0,
     Err(_) => -1,
   }
@@ -258,7 +264,7 @@ pub unsafe extern "C" fn service_get_ticks_per_beat(svc: *const PxtoneService) -
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.master.ticks_per_beat() as u32
+  unsafe { &*svc }.master().ticks_per_beat() as u32
 }
 
 #[unsafe(export_name = "_service_get_beats_per_measure_impl")]
@@ -266,7 +272,7 @@ pub unsafe extern "C" fn service_get_beats_per_measure(svc: *const PxtoneService
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.master.beats_per_measure() as u32
+  unsafe { &*svc }.master().beats_per_measure() as u32
 }
 
 #[unsafe(export_name = "_service_get_beat_tempo_impl")]
@@ -274,7 +280,7 @@ pub unsafe extern "C" fn service_get_beat_tempo(svc: *const PxtoneService) -> f3
   if svc.is_null() {
     return 0.0;
   }
-  unsafe { &*svc }.master.beat_tempo()
+  unsafe { &*svc }.master().beat_tempo()
 }
 
 #[unsafe(export_name = "_service_get_measure_count_impl")]
@@ -282,7 +288,7 @@ pub unsafe extern "C" fn service_get_measure_count(svc: *const PxtoneService) ->
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.master.measure_count()
+  unsafe { &*svc }.master().measure_count()
 }
 
 #[unsafe(export_name = "_service_get_repeat_measure_impl")]
@@ -290,7 +296,7 @@ pub unsafe extern "C" fn service_get_repeat_measure(svc: *const PxtoneService) -
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.master.repeat_measure()
+  unsafe { &*svc }.master().repeat_measure()
 }
 
 #[unsafe(export_name = "_service_get_last_measure_impl")]
@@ -298,7 +304,7 @@ pub unsafe extern "C" fn service_get_last_measure(svc: *const PxtoneService) -> 
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.master.last_measure()
+  unsafe { &*svc }.master().last_measure()
 }
 
 // --- Text getters (internal; exported via WAT multi-value wrappers) ---
@@ -315,7 +321,7 @@ pub unsafe extern "C" fn service_get_text_name(svc: *const PxtoneService) -> u64
     return 0;
   }
   let svc = unsafe { &*svc };
-  match svc.text.name() {
+  match svc.text().name() {
     Some(bytes) => pack_ptr_len(bytes.as_ptr(), bytes.len()),
     None => 0,
   }
@@ -333,7 +339,7 @@ pub unsafe extern "C" fn service_get_text_comment(svc: *const PxtoneService) -> 
     return 0;
   }
   let svc = unsafe { &*svc };
-  match svc.text.comment() {
+  match svc.text().comment() {
     Some(bytes) => pack_ptr_len(bytes.as_ptr(), bytes.len()),
     None => 0,
   }
@@ -351,7 +357,7 @@ pub unsafe extern "C" fn service_get_unit_count(svc: *const PxtoneService) -> u3
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.units.len() as u32
+  unsafe { &*svc }.units().len() as u32
 }
 
 /// Internal: returns `(ptr, len)` for the unit's raw name bytes, packed as
@@ -366,7 +372,7 @@ pub unsafe extern "C" fn service_get_unit_name(svc: *const PxtoneService, idx: u
     return 0;
   }
   let svc = unsafe { &*svc };
-  match svc.units.get(idx as usize) {
+  match svc.units().get(idx as usize) {
     Some(unit) => {
       let name = unit.name();
       pack_ptr_len(name.as_ptr(), name.len())
@@ -385,7 +391,7 @@ pub unsafe extern "C" fn service_get_unit_played(svc: *const PxtoneService, idx:
     return -1;
   }
   let svc = unsafe { &*svc };
-  match svc.units.get(idx as usize) {
+  match svc.units().get(idx as usize) {
     Some(u) => {
       if u.played() {
         1
@@ -412,7 +418,7 @@ pub unsafe extern "C" fn service_set_unit_played(
     return -1;
   }
   let svc = unsafe { &mut *svc };
-  match svc.units.get_mut(idx as usize) {
+  match svc.units_mut().get_mut(idx as usize) {
     Some(u) => {
       u.set_played(played != 0);
       0
@@ -433,7 +439,7 @@ pub unsafe extern "C" fn service_get_event_count(svc: *const PxtoneService) -> u
   if svc.is_null() {
     return 0;
   }
-  unsafe { &*svc }.events.records().len() as u32
+  unsafe { &*svc }.events().records().len() as u32
 }
 
 #[unsafe(export_name = "_service_get_event_tick_impl")]
@@ -443,7 +449,7 @@ pub unsafe extern "C" fn service_get_event_tick(svc: *const PxtoneService, idx: 
   }
   let svc = unsafe { &*svc };
   svc
-    .events
+    .events()
     .records()
     .get(idx as usize)
     .map_or(0, |e| e.tick())
@@ -456,7 +462,7 @@ pub unsafe extern "C" fn service_get_event_unit_index(svc: *const PxtoneService,
   }
   let svc = unsafe { &*svc };
   svc
-    .events
+    .events()
     .records()
     .get(idx as usize)
     .map_or(0, |e| e.unit_index() as u32)
@@ -469,7 +475,7 @@ pub unsafe extern "C" fn service_get_event_kind(svc: *const PxtoneService, idx: 
   }
   let svc = unsafe { &*svc };
   svc
-    .events
+    .events()
     .records()
     .get(idx as usize)
     .map_or(0, |e| e.kind() as u32)
@@ -482,7 +488,7 @@ pub unsafe extern "C" fn service_get_event_value(svc: *const PxtoneService, idx:
   }
   let svc = unsafe { &*svc };
   svc
-    .events
+    .events()
     .records()
     .get(idx as usize)
     .map_or(0, |e| e.value())

@@ -13,9 +13,7 @@ use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
 use crate::text::Text;
 use crate::unit::{MAX_UNIT_CONTROL_VOICE, Unit};
-use crate::woice::{
-  BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VOICE_FLAG_WAVELOOP, VoiceInstance, Woice,
-};
+use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VOICE_FLAG_WAVELOOP, Woice};
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 use tinyvec::ArrayVec;
@@ -28,6 +26,7 @@ const MAX_DELAY_COUNT: usize = 4;
 const MAX_OVERDRIVE_COUNT: usize = 2;
 const MAX_WOICE_NAME: usize = 16;
 const MAX_UNIT_NAME: usize = 16;
+const MAX_OUTPUT_AMPLITUDE: i32 = 0x7fff;
 
 const VERSION_SIZE: usize = 16;
 const CODE_SIZE: usize = 8;
@@ -146,7 +145,7 @@ impl Default for VomitPreparation {
 /// ```no_run
 /// use pxtone::{DestinationQuality, PxtoneService, VomitPreparation};
 ///
-/// let mut service = PxtoneService::new(DestinationQuality::default());
+/// let mut service = PxtoneService::new(DestinationQuality::default()).unwrap();
 /// let data = std::fs::read("song.ptcop").unwrap();
 /// service.read(data).unwrap();
 /// service.tones_ready().unwrap();
@@ -161,10 +160,10 @@ impl Default for VomitPreparation {
 /// }
 /// ```
 pub struct PxtoneService {
-  pub text: Text,
-  pub master: Master,
-  pub events: EventList,
-  pub units: Vec<Unit>,
+  text: Text,
+  master: Master,
+  events: EventList,
+  units: Vec<Unit>,
 
   pub(crate) delays: ArrayVec<[Delay; MAX_DELAY_COUNT]>,
   pub(crate) overdrives: ArrayVec<[OverDrive; MAX_OVERDRIVE_COUNT]>,
@@ -209,12 +208,11 @@ pub struct PxtoneService {
 }
 
 impl PxtoneService {
-  pub fn new(quality: DestinationQuality) -> Self {
-    assert!(
-      quality.channels == 1 || quality.channels == 2,
-      "channels must be 1 or 2"
-    );
-    Self {
+  pub fn new(quality: DestinationQuality) -> Result<Self, PxtoneError> {
+    if quality.channels != 1 && quality.channels != 2 {
+      return Err(PxtoneError::Init);
+    }
+    Ok(Self {
       text: Text::new(),
       master: Master::new(),
       events: EventList::new(),
@@ -238,7 +236,7 @@ impl PxtoneService {
       moo_sample_repeat: 0,
       moo_sample_start: 0,
       moo_sample_smooth: 0,
-      moo_output_clip: 0x7fff,
+      moo_output_clip: MAX_OUTPUT_AMPLITUDE,
       moo_ticks_per_beat: 0,
       moo_beats_per_measure: 0,
       moo_beat_tempo: 0.0,
@@ -255,19 +253,52 @@ impl PxtoneService {
       playback_ended: true,
 
       raw_data: Vec::new(),
-    }
+    })
   }
 
   /// Sets the output audio quality. The default is stereo (2 ch) at 44100 Hz.
   ///
   /// Call this before [`tones_ready`](Self::tones_ready).
-  pub fn set_destination_quality(&mut self, quality: DestinationQuality) {
-    assert!(
-      quality.channels == 1 || quality.channels == 2,
-      "channels must be 1 or 2"
-    );
+  pub fn set_destination_quality(
+    &mut self,
+    quality: DestinationQuality,
+  ) -> Result<(), PxtoneError> {
+    if quality.channels != 1 && quality.channels != 2 {
+      return Err(PxtoneError::Init);
+    }
     self.dst_channels = quality.channels;
     self.dst_sample_rate = quality.sample_rate;
+    Ok(())
+  }
+
+  /// Returns a reference to the song text metadata.
+  #[inline]
+  pub fn text(&self) -> &Text {
+    &self.text
+  }
+
+  /// Returns a reference to the song timing parameters.
+  #[inline]
+  pub fn master(&self) -> &Master {
+    &self.master
+  }
+
+  /// Returns a reference to the event list.
+  #[inline]
+  pub fn events(&self) -> &EventList {
+    &self.events
+  }
+
+  /// Returns a slice of the units (tracks).
+  #[inline]
+  pub fn units(&self) -> &[Unit] {
+    &self.units
+  }
+
+  /// Returns a mutable slice of the units (tracks).
+  #[inline]
+  pub fn units_mut(&mut self) -> &mut [Unit] {
+    &mut self.units
   }
 
   /// Returns the current output audio quality.
@@ -410,7 +441,9 @@ impl PxtoneService {
           if num > MAX_UNIT_COUNT {
             return Err(PxtoneError::UnknownFormat);
           }
-          self.units = (0..num).map(|_| Unit::new()).collect();
+          let mut units = Vec::with_capacity(num);
+          units.resize_with(num, Unit::new);
+          self.units = units;
           self.unit_woice_idxs = vec![0usize; num];
         }
         b"MasterV5" => self.master.read_v5(r)?,
@@ -882,10 +915,7 @@ impl PxtoneService {
     for u in 0..unit_count {
       let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
       if let Some(woice) = self.woices.get(wi) {
-        // SAFETY: woices[wi] and units[u] are independent elements
-        let instances = woice.instances.as_slice() as *const [VoiceInstance];
-        let instances = unsafe { &*instances };
-        self.units[u].tone_envelope(instances);
+        self.units[u].tone_envelope(&woice.instances);
       }
     }
 
@@ -900,8 +930,7 @@ impl PxtoneService {
           break;
         }
 
-        // Clone the event before advancing the index
-        let ev: EventRecord = self.events.records()[self.moo_event_index].clone();
+        let ev: EventRecord = self.events.records()[self.moo_event_index];
         self.moo_event_index += 1;
 
         let u = ev.unit_index as usize;
@@ -917,14 +946,12 @@ impl PxtoneService {
     for u in 0..unit_count {
       let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
       if let Some(woice) = self.woices.get(wi) {
-        let instances = woice.instances.as_slice() as *const [VoiceInstance];
-        let instances = unsafe { &*instances };
         self.units[u].tone_sample(
           mute_by_unit,
           self.dst_channels,
           time_pan_idx,
           smooth_samples,
-          instances,
+          &woice.instances,
         );
       }
     }
@@ -969,9 +996,7 @@ impl PxtoneService {
       let freq = self.frequency.get2(key) * sample_stride;
       let wi = self.unit_woice_idxs.get(u).copied().unwrap_or(0);
       if let Some(woice) = self.woices.get(wi) {
-        let instances = woice.instances.as_slice() as *const [VoiceInstance];
-        let instances = unsafe { &*instances };
-        self.units[u].tone_increment_sample(freq, instances);
+        self.units[u].tone_increment_sample(freq, &woice.instances);
       }
     }
 

@@ -13,6 +13,14 @@ use tinyvec::TinyVec;
 // ---- Constants ----
 pub(crate) const BUFSIZE_TIMEPAN: usize = 0x40;
 
+/// Channels, sample rate, and bit depth used when rendering voice buffers.
+const RENDER_CHANNELS: u8 = 2;
+const RENDER_SAMPLE_RATE: u32 = 44100;
+const RENDER_BITS_PER_SAMPLE: u8 = 16;
+
+/// Frame count for one cycle of a coordinate/overtone oscillator voice.
+const PTV_BODY_FRAMES: u32 = 400;
+
 pub(crate) const VOICE_FLAG_WAVELOOP: u32 = 0x00000001;
 pub(crate) const VOICE_FLAG_SMOOTH: u32 = 0x00000002;
 pub(crate) const VOICE_FLAG_BEATFIT: u32 = 0x00000004;
@@ -119,6 +127,7 @@ impl Default for VoiceUnit {
 ///
 /// The actual sample bytes are not loaded during `read()`; they are read from
 /// `raw_data` in `tones_ready()` using `data_offset` and `data_size`.
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct PcmMeta {
   pub(crate) channels: u8,
   pub(crate) bits_per_sample: u8,
@@ -132,6 +141,7 @@ pub(crate) struct PcmMeta {
 ///
 /// The compressed bitstream is not loaded during `read()`; it is read from
 /// `raw_data` in `tones_ready()` using `data_offset` and `data_size`.
+#[derive(Clone, Copy, Debug)]
 pub(crate) struct OggMeta {
   pub(crate) channels: u8,
   pub(crate) sample_rate: u32,
@@ -415,9 +425,9 @@ impl Woice {
     frequency: &FrequencyTable,
     raw_data: &[u8],
   ) -> Result<(), PxtoneError> {
-    let channels = 2u8;
-    let sample_rate = 44100u32;
-    let bits_per_sample = 16u8;
+    let channels = RENDER_CHANNELS;
+    let sample_rate = RENDER_SAMPLE_RATE;
+    let bits_per_sample = RENDER_BITS_PER_SAMPLE;
 
     self.instances.clear();
     for unit in &mut self.voices {
@@ -442,7 +452,7 @@ impl Woice {
           instance.samples = work.samples().to_vec();
         }
         VoiceData::Coordinate { wave, .. } => {
-          let body_frames = 400u32;
+          let body_frames = PTV_BODY_FRAMES;
           let size = (body_frames * channels as u32 * bits_per_sample as u32 / 8) as usize;
           instance.body_frames = body_frames;
           instance.samples = vec![0u8; size];
@@ -457,7 +467,7 @@ impl Woice {
           );
         }
         VoiceData::Overtone { wave, .. } => {
-          let body_frames = 400u32;
+          let body_frames = PTV_BODY_FRAMES;
           let size = (body_frames * channels as u32 * bits_per_sample as u32 / 8) as usize;
           instance.body_frames = body_frames;
           instance.samples = vec![0u8; size];
