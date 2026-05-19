@@ -20,7 +20,7 @@ fn bench_moo(c: &mut Criterion) {
     c.bench_function(name, |b| {
       b.iter_batched(
         || {
-          let mut svc = PxtoneService::new(DestinationQuality::default());
+          let mut svc = PxtoneService::new(DestinationQuality::default()).unwrap();
           svc.read(data.clone()).unwrap();
           svc.tones_ready().unwrap();
           svc.moo_preparation(VomitPreparation::default()).unwrap();
