@@ -1,0 +1,49 @@
+name: Test
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test-rust:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Run Rust tests
+        run: cargo test
+
+  test-wasm:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Binaryen
+        run: |
+          TAG=$(curl -sL https://api.github.com/repos/WebAssembly/binaryen/releases/latest | jq -r .tag_name)
+          curl -sL "https://github.com/WebAssembly/binaryen/releases/download/${TAG}/binaryen-${TAG}-x86_64-linux.tar.gz" | tar xz
+          echo "$PWD/binaryen-${TAG}/bin" >> $GITHUB_PATH
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2
+
+      - name: Run WASM tests
+        run: deno task test:wasm
