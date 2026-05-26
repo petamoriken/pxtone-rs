@@ -66,8 +66,8 @@
     (i32.wrap_i64 (local.get $r))
   )
 
-  ;; Returns (ticks_per_beat, beats_per_measure, beat_tempo, measure_count,
-  ;;          repeat_measure, last_measure).
+  ;; Returns (ticks_per_beat: i32, beats_per_measure: i32, beat_tempo: f32,
+  ;;          measure_count: i32, repeat_measure: i32, last_measure: i32).
   (func (export "service_get_master")
     (param $svc i32)
     (result i32 i32 f32 i32 i32 i32)
@@ -109,7 +109,7 @@
     (i32.wrap_i64 (local.get $r))
   )
 
-  ;; Returns (tick, unit_index, kind, value) for the event at `idx`.
+  ;; Returns (tick: i32, unit_index: i32, kind: i32, value: i32) for the event at `idx`.
   (func (export "service_get_event")
     (param $svc i32) (param $idx i32)
     (result i32 i32 i32 i32)
