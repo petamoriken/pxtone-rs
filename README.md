@@ -95,36 +95,36 @@ returns. Memory management uses explicit `alloc`/`dealloc` exports. See
 
 **Service lifecycle**
 
-| Export                    | Signature                                    | Description                                     |
-| ------------------------- | -------------------------------------------- | ----------------------------------------------- |
-| `service_new`             | `(channels: i32, sample_rate: i32) → i32`    | Create service; returns pointer (null on error) |
-| `service_free`            | `(svc: i32) → void`                          | Free the service                                |
-| `service_read`            | `(svc, data, len) → i32`                     | Load `.ptcop`/`.pttune` data; 0=OK, -1=error    |
-| `service_tones_ready`     | `(svc) → i32`                                | Prepare synthesizer tones; 0=OK, -1=error       |
-| `service_moo_preparation` | `(svc, start_sample, unit_mute, loop) → i32` | Prepare playback; 0=OK, -1=error                |
-| `service_moo`             | `(svc, buf, len) → i32`                      | Render next PCM chunk; 1=wrote samples, 0=done  |
+| Export                    | Signature                                                        | Description                                                    |
+| ------------------------- | ---------------------------------------------------------------- | -------------------------------------------------------------- |
+| `service_new`             | `(channels: i32, sample_rate: i32) → i32`                        | Create service; returns pointer (null on error)                |
+| `service_free`            | `(svc: i32) → void`                                              | Free the service                                               |
+| `service_read`            | `(svc: i32, data: i32, len: i32) → i32`                          | Load `.ptcop`/`.pttune` data; 0=OK, -1=error                   |
+| `service_tones_ready`     | `(svc: i32) → i32`                                               | Prepare synthesizer tones; 0=OK, -1=error                      |
+| `service_moo_preparation` | `(svc: i32, start_sample: i32, unit_mute: i32, loop: i32) → i32` | Prepare playback; 0=OK, -1=error                               |
+| `service_moo`             | `(svc: i32, buf: i32, len: i32) → (ptr: i32, written_len: i32)`  | Render next PCM chunk; ptr=0 on error, written_len=0 when done |
 
 **Metadata**
 
-| Export                     | Signature                                                                                                   | Description                           |
-| -------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `service_get_text_name`    | `(svc) → (ptr: i32, len: i32)`                                                                              | Song title as raw Shift-JIS bytes     |
-| `service_get_text_comment` | `(svc) → (ptr: i32, len: i32)`                                                                              | Song comment as raw Shift-JIS bytes   |
-| `service_get_master`       | `(svc) → (ticks_per_beat, beats_per_measure, beat_tempo: f32, measure_count, repeat_measure, last_measure)` | Master settings                       |
-| `service_get_unit_count`   | `(svc) → i32`                                                                                               | Number of units                       |
-| `service_get_unit_name`    | `(svc, idx) → (ptr: i32, len: i32)`                                                                         | Unit name bytes                       |
-| `service_get_unit_played`  | `(svc, idx) → i32`                                                                                          | 1=active, 0=muted, -1=error           |
-| `service_set_unit_played`  | `(svc, idx, played) → i32`                                                                                  | Set unit active state; 0=OK, -1=error |
-| `service_get_event_count`  | `(svc) → i32`                                                                                               | Number of events                      |
-| `service_get_event`        | `(svc, idx) → (tick, unit_index, kind, value: i32)`                                                         | Event fields                          |
+| Export                     | Signature                                                                                                                                 | Description                           |
+| -------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
+| `service_get_text_name`    | `(svc: i32) → (ptr: i32, len: i32)`                                                                                                       | Song title as raw Shift-JIS bytes     |
+| `service_get_text_comment` | `(svc: i32) → (ptr: i32, len: i32)`                                                                                                       | Song comment as raw Shift-JIS bytes   |
+| `service_get_master`       | `(svc: i32) → (ticks_per_beat: i32, beats_per_measure: i32, beat_tempo: f32, measure_count: i32, repeat_measure: i32, last_measure: i32)` | Master settings                       |
+| `service_get_unit_count`   | `(svc: i32) → i32`                                                                                                                        | Number of units                       |
+| `service_get_unit_name`    | `(svc: i32, idx: i32) → (ptr: i32, len: i32)`                                                                                             | Unit name bytes                       |
+| `service_get_unit_played`  | `(svc: i32, idx: i32) → i32`                                                                                                              | 1=active, 0=muted, -1=error           |
+| `service_set_unit_played`  | `(svc: i32, idx: i32, played: i32) → i32`                                                                                                 | Set unit active state; 0=OK, -1=error |
+| `service_get_event_count`  | `(svc: i32) → i32`                                                                                                                        | Number of events                      |
+| `service_get_event`        | `(svc: i32, idx: i32) → (tick: i32, unit_index: i32, kind: i32, value: i32)`                                                              | Event fields                          |
 
 **Stateless**
 
-| Export                 | Signature                                         | Description                                   |
-| ---------------------- | ------------------------------------------------- | --------------------------------------------- |
-| `validate`             | `(data, len) → i32`                               | Validate `.ptcop`/`.pttune`; 0=OK, -1=invalid |
-| `validate_noise`       | `(data, len) → i32`                               | Validate `.ptnoise`; 0=OK, -1=invalid         |
-| `service_render_noise` | `(svc, data, len) → (ptr: i32, samples_len: i32)` | Render `.ptnoise` to PCM; ptr=0 on error      |
+| Export                 | Signature                                                        | Description                                   |
+| ---------------------- | ---------------------------------------------------------------- | --------------------------------------------- |
+| `validate`             | `(data: i32, len: i32) → i32`                                    | Validate `.ptcop`/`.pttune`; 0=OK, -1=invalid |
+| `validate_noise`       | `(data: i32, len: i32) → i32`                                    | Validate `.ptnoise`; 0=OK, -1=invalid         |
+| `service_render_noise` | `(svc: i32, data: i32, len: i32) → (ptr: i32, samples_len: i32)` | Render `.ptnoise` to PCM; ptr=0 on error      |
 
 ## Running Tests
 
