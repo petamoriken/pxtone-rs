@@ -43,7 +43,7 @@ jobs:
           echo "$PWD/binaryen-${TAG}/bin" >> $GITHUB_PATH
 
       - name: Setup Deno
-        uses: denoland/setup-deno@v2
+        uses: denoland/setup-deno@v2.0.4
 
       - name: Run WASM tests
         run: deno task test:wasm
