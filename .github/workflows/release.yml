@@ -28,7 +28,7 @@ jobs:
           echo "$PWD/binaryen-${TAG}/bin" >> $GITHUB_PATH
 
       - name: Setup Deno
-        uses: denoland/setup-deno@v2.0.4
+        uses: denoland/setup-deno@v2.0.5
 
       - name: Build WASM
         run: deno task build:wasm
