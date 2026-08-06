@@ -162,7 +162,7 @@ fn decoded_ptcop_matches_reference() {
   let mut entries: Vec<_> = fs::read_dir(sample_dir)
     .expect("tests/sample/ptcop directory not found")
     .filter_map(|e| e.ok())
-    .filter(|e| e.path().extension().map_or(false, |ext| ext == "ptcop"))
+    .filter(|e| e.path().extension().is_some_and(|ext| ext == "ptcop"))
     .collect();
   entries.sort_by_key(|e| e.file_name());
 
@@ -228,7 +228,7 @@ fn decoded_ptnoise_matches_reference() {
   let mut entries: Vec<_> = fs::read_dir(sample_dir)
     .expect("tests/sample/ptnoise directory not found")
     .filter_map(|e| e.ok())
-    .filter(|e| e.path().extension().map_or(false, |ext| ext == "ptnoise"))
+    .filter(|e| e.path().extension().is_some_and(|ext| ext == "ptnoise"))
     .collect();
   entries.sort_by_key(|e| e.file_name());
 
