@@ -1,8 +1,9 @@
 use crate::error::PxtoneError;
+use crate::unit::MAX_CHANNEL;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
-pub(crate) const MAX_GROUP_COUNT: usize = 4; // pxtnMAX_TUNEGROUPNUM
+const MAX_TUNE_GROUP_COUNT: usize = 4; // pxtnMAX_TUNEGROUPNUM
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u16)]
@@ -90,24 +91,40 @@ impl Delay {
     }
   }
 
-  /// Applies delay to group samples
-  pub(crate) fn tone_supple(&mut self, ch: usize, group_smps: &mut [i32]) {
+  /// Applies the delay to every channel's group samples and advances the ring
+  /// buffer. Both channels share the same `offset`, `rate` and `group`, so
+  /// handling them together loads that state once per sample.
+  #[inline(always)]
+  pub(crate) fn tone_supple<const GROUPS: usize>(
+    &mut self,
+    group_smps: &mut [[i32; GROUPS]; MAX_CHANNEL],
+    channels: usize,
+  ) {
     if self.buffer_size == 0 {
       return;
     }
-    let slot = &mut self.bufs[ch][self.offset];
-    let a = *slot * self.rate_s32 / 100;
-    if self.played {
-      group_smps[self.group] += a;
-    }
-    *slot = group_smps[self.group];
-  }
+    let offset = self.offset;
+    let rate = self.rate_s32;
+    // `PxtoneService::calc_group_count` sizes GROUPS so that every effect's
+    // group is in range; spelling that out lets GROUPS == 1 fold to index 0.
+    let group = if GROUPS == 1 { 0 } else { self.group };
+    let played = self.played;
 
-  pub(crate) fn tone_increment(&mut self) {
-    if self.buffer_size == 0 {
-      return;
+    for (buf, groups) in self
+      .bufs
+      .iter_mut()
+      .zip(group_smps.iter_mut())
+      .take(channels)
+    {
+      let slot = &mut buf[offset];
+      let a = *slot * rate / 100;
+      if played {
+        groups[group] += a;
+      }
+      *slot = groups[group];
     }
-    let next = self.offset + 1;
+
+    let next = offset + 1;
     self.offset = if next < self.buffer_size { next } else { 0 };
   }
 
@@ -126,7 +143,7 @@ impl Delay {
     self.unit = DelayUnit::try_from(unit).map_err(|_| PxtoneError::UnknownFormat)?;
     self.frequency = r.read_f32::<LE>()?;
     self.rate = rate;
-    self.group = group.min(MAX_GROUP_COUNT - 1);
+    self.group = group.min(MAX_TUNE_GROUP_COUNT - 1);
     Ok(())
   }
 }

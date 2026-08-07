@@ -943,8 +943,10 @@ impl PxtoneService {
   /// With `PROCESS_EVENTS == false` the event-dispatch step is skipped and the
   /// per-unit stages are fused into a single pass over the units; callers must
   /// guarantee (via `moo_safe_count`) that no events would fire.
-  fn moo_pxtone_sample_impl<const PROCESS_EVENTS: bool>(&mut self, out: &mut [i16; 2]) -> bool {
-    let group_count = self.moo_group_count;
+  fn moo_pxtone_sample_impl<const PROCESS_EVENTS: bool, const GROUPS: usize>(
+    &mut self,
+    out: &mut [i16; 2],
+  ) -> bool {
     let channel_count = self.dst_channels as usize;
     let channels = self.dst_channels;
     let samples_per_tick = self.moo_samples_per_tick;
@@ -954,7 +956,7 @@ impl PxtoneService {
     let sample_end = self.moo_sample_end;
     let sample_stride = self.moo_sample_stride;
 
-    let mut group_smps = [[0i32; MAX_GROUP_COUNT]; MAX_CHANNEL];
+    let mut group_smps = [[0i32; GROUPS]; MAX_CHANNEL];
 
     if PROCESS_EVENTS {
       // ---- 1. Envelope processing ----
@@ -991,16 +993,20 @@ impl PxtoneService {
         self.process_event(&ev, u, tick, sample_end, samples_per_tick);
       }
 
-      // ---- 3. Tone_Sample → group accumulation ----
+      // ---- 3. Mix + advance → group accumulation ----
       let woices = &self.woices;
+      let frequency = &self.frequency;
       for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
         if let Some(woice) = woices.get(wi) {
           if unit.is_sounding() {
-            unit.tone_sample(
+            let key = unit.tone_increment_key();
+            let freq = frequency.get2(key) * sample_stride;
+            unit.tone_sample::<false>(
               mute_by_unit,
               channels,
               time_pan_idx,
               smooth_samples,
+              freq,
               &woice.instances,
             );
           } else {
@@ -1008,33 +1014,32 @@ impl PxtoneService {
           }
         }
         if !unit.is_flushed() {
-          unit.tone_supple(&mut group_smps, channel_count, group_count, time_pan_idx);
+          unit.tone_supple(&mut group_smps, channel_count, time_pan_idx);
         }
       }
     } else {
-      // Fused per-unit pass: envelope → sample → group accumulation → increment.
-      // Units never read each other's state, so collapsing the four separate
-      // passes into one is equivalent as long as no event fires in between.
+      // Fused per-unit pass: envelope → mix → advance → group accumulation.
+      // Units never read each other's state, so collapsing the separate passes
+      // into one is equivalent as long as no event fires in between.
       let woices = &self.woices;
       let frequency = &self.frequency;
       for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
         if let Some(woice) = woices.get(wi) {
           let instances = &woice.instances;
           if unit.is_sounding() {
-            unit.tone_envelope(instances);
-            unit.tone_sample(
+            let key = unit.tone_increment_key();
+            let freq = frequency.get2(key) * sample_stride;
+            unit.tone_sample::<true>(
               mute_by_unit,
               channels,
               time_pan_idx,
               smooth_samples,
+              freq,
               instances,
             );
             if !unit.is_flushed() {
-              unit.tone_supple(&mut group_smps, channel_count, group_count, time_pan_idx);
+              unit.tone_supple(&mut group_smps, channel_count, time_pan_idx);
             }
-            let key = unit.tone_increment_key();
-            let freq = frequency.get2(key) * sample_stride;
-            unit.tone_increment_sample(freq, instances);
             continue;
           }
           unit.tone_silence(time_pan_idx);
@@ -1042,27 +1047,26 @@ impl PxtoneService {
         // Silent unit: the key only matters again at the next note-on, which
         // recomputes it from key_start/key_delta, so the increment is skippable.
         if !unit.is_flushed() {
-          unit.tone_supple(&mut group_smps, channel_count, group_count, time_pan_idx);
+          unit.tone_supple(&mut group_smps, channel_count, time_pan_idx);
         }
       }
     }
 
-    // ---- 4. Per-channel effects → output ----
-    for (ch, (groups, out_sample)) in group_smps
-      .iter_mut()
-      .zip(out.iter_mut())
-      .enumerate()
-      .take(channel_count)
-    {
-      let groups = &mut groups[..group_count];
-
+    // ---- 4. Effects → output ----
+    // Overdrive is per-channel and stateless; each delay walks both channels in
+    // one call so its buffer/rate/group state is loaded once per sample instead
+    // of once per channel. Within a channel the overdrive → delay order is
+    // unchanged, and neither effect reads the other channel's groups.
+    for groups in group_smps.iter_mut().take(channel_count) {
       for od in &self.overdrives {
         od.tone_supple(groups);
       }
-      for d in &mut self.delays {
-        d.tone_supple(ch, groups);
-      }
+    }
+    for d in &mut self.delays {
+      d.tone_supple(&mut group_smps, channel_count);
+    }
 
+    for (groups, out_sample) in group_smps.iter().zip(out.iter_mut()).take(channel_count) {
       let mut work: i32 = groups.iter().sum();
 
       // Fade
@@ -1081,25 +1085,6 @@ impl PxtoneService {
     // ---- 5. Increment ----
     self.moo_sample_count += 1;
     self.moo_time_pan_index = (time_pan_idx + 1) & (BUFSIZE_TIMEPAN - 1);
-
-    if PROCESS_EVENTS {
-      let woices = &self.woices;
-      let frequency = &self.frequency;
-      for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
-        if !unit.is_sounding() {
-          continue;
-        }
-        let key = unit.tone_increment_key();
-        let freq = frequency.get2(key) * sample_stride;
-        if let Some(woice) = woices.get(wi) {
-          unit.tone_increment_sample(freq, &woice.instances);
-        }
-      }
-    }
-
-    for d in &mut self.delays {
-      d.tone_increment();
-    }
 
     // ---- 6. Fade processing ----
     if self.moo_fade_direction < 0 {
@@ -1131,14 +1116,16 @@ impl PxtoneService {
 
   #[inline]
   fn moo_pxtone_sample(&mut self, out: &mut [i16; 2]) -> bool {
-    self.moo_pxtone_sample_impl::<true>(out)
+    // The event path runs once per event boundary, so it always takes the
+    // full-width accumulator rather than adding another monomorphization.
+    self.moo_pxtone_sample_impl::<true, MAX_GROUP_COUNT>(out)
   }
 
   /// Like `moo_pxtone_sample` but skips event dispatch.
   /// Only call when `moo_safe_count() > 0`.
   #[inline]
-  fn moo_pxtone_sample_fast(&mut self, out: &mut [i16; 2]) -> bool {
-    self.moo_pxtone_sample_impl::<false>(out)
+  fn moo_pxtone_sample_fast<const GROUPS: usize>(&mut self, out: &mut [i16; 2]) -> bool {
+    self.moo_pxtone_sample_impl::<false, GROUPS>(out)
   }
 
   /// Processes one event
@@ -1301,6 +1288,21 @@ impl PxtoneService {
       return 0;
     }
 
+    // Songs that route everything through group 0 get a one-element mixer
+    // accumulator. That makes the group index a constant, so the backend can
+    // keep the accumulator in registers instead of on the stack — worth a
+    // separate instantiation because the accumulator is touched by every unit
+    // and every effect on every sample.
+    if self.moo_group_count == 1 {
+      self.moo_run::<1>(buf, byte_per_smp)
+    } else {
+      self.moo_run::<MAX_GROUP_COUNT>(buf, byte_per_smp)
+    }
+  }
+
+  /// Body of [`PxtoneService::moo`], specialised on the width of the mixer
+  /// accumulator. `GROUPS` must be at least [`PxtoneService::calc_group_count`].
+  fn moo_run<const GROUPS: usize>(&mut self, buf: &mut [u8], byte_per_smp: usize) -> usize {
     let total = buf.len() / byte_per_smp;
     let mut pos = 0usize;
 
@@ -1312,7 +1314,7 @@ impl PxtoneService {
       let safe_end = pos + safe;
       while pos < safe_end {
         let mut sample = [0i16; 2];
-        if !self.moo_pxtone_sample_fast(&mut sample) {
+        if !self.moo_pxtone_sample_fast::<GROUPS>(&mut sample) {
           self.playback_ended = true;
           break 'outer;
         }
