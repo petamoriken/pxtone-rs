@@ -2,6 +2,7 @@ use crate::event::{
   EVENT_DEFAULT_GROUP_NO, EVENT_DEFAULT_KEY, EVENT_DEFAULT_TUNING, EVENT_DEFAULT_VELOCITY,
   EVENT_DEFAULT_VOLUME,
 };
+use crate::pulse::frequency::FrequencyTable;
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, VoiceInstance};
 
 pub const MAX_CHANNEL: usize = 2;
@@ -375,6 +376,54 @@ impl Unit {
 
     self.pan_delay_buffers[0][time_pan_index] = buf0;
     self.pan_delay_buffers[1][time_pan_index] = buf1;
+  }
+
+  /// Renders one block of samples for this unit, accumulating into `mix`.
+  ///
+  /// `mix[i]` is the group accumulator for the `i`-th sample of the block and
+  /// `time_pan_index` is the pan-delay ring slot of `mix[0]`. Keeping the sample
+  /// loop inside the unit lets the mixing parameters and the voice-layer state
+  /// stay in registers across the whole block.
+  ///
+  /// Only valid when no event fires during the block: a unit that is idle at the
+  /// start then stays idle, so the whole block can be skipped for it.
+  #[allow(clippy::too_many_arguments)]
+  pub(crate) fn tone_block<const GROUPS: usize>(
+    &mut self,
+    mix: &mut [[[i32; GROUPS]; MAX_CHANNEL]],
+    mute_by_unit: bool,
+    channels: u8,
+    channel_count: usize,
+    time_pan_index: usize,
+    smooth_smp: u32,
+    frequency: &FrequencyTable,
+    sample_stride: f32,
+    instances: &[VoiceInstance],
+  ) {
+    if !self.is_sounding() && self.is_flushed() {
+      return;
+    }
+
+    for (i, groups) in mix.iter_mut().enumerate() {
+      let time_pan_index = (time_pan_index + i) & (BUFSIZE_TIMEPAN - 1);
+      if self.is_sounding() {
+        let key = self.tone_increment_key();
+        let freq = frequency.get2(key) * sample_stride;
+        self.tone_sample::<true>(
+          mute_by_unit,
+          channels,
+          time_pan_index,
+          smooth_smp,
+          freq,
+          instances,
+        );
+      } else {
+        self.tone_silence(time_pan_index);
+      }
+      if !self.is_flushed() {
+        self.tone_supple(groups, channel_count, time_pan_index);
+      }
+    }
   }
 
   // Adds this unit's pan_delay_buffers values to the per-channel group samples.

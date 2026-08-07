@@ -19,6 +19,10 @@ use std::io::{Read, Seek};
 use tinyvec::ArrayVec;
 
 // ---- Constants ----
+/// Samples rendered per pass of the block mixer. Bounded by the pan-delay ring
+/// so the scratch accumulator stays small enough to sit in L1.
+const MOO_BLOCK: usize = 128;
+
 const MAX_UNIT_COUNT: usize = 50;
 const MAX_WOICE_COUNT: usize = 100;
 const MAX_DELAY_COUNT: usize = 4;
@@ -937,16 +941,10 @@ impl PxtoneService {
     event_safe.min(end_safe).min(fade_safe)
   }
 
-  /// Synthesizes one sample and writes it into `out[0..channels]`.
-  /// Returns `true` while playing, `false` when the end is reached.
-  ///
-  /// With `PROCESS_EVENTS == false` the event-dispatch step is skipped and the
-  /// per-unit stages are fused into a single pass over the units; callers must
-  /// guarantee (via `moo_safe_count`) that no events would fire.
-  fn moo_pxtone_sample_impl<const PROCESS_EVENTS: bool, const GROUPS: usize>(
-    &mut self,
-    out: &mut [i16; 2],
-  ) -> bool {
+  /// Synthesizes the single sample on which events fire, writing it into
+  /// `out[0..channels]`. Returns `true` while playing, `false` when the end is
+  /// reached. Event-free stretches go through [`PxtoneService::moo_block`].
+  fn moo_pxtone_sample(&mut self, out: &mut [i16; 2]) -> bool {
     let channel_count = self.dst_channels as usize;
     let channels = self.dst_channels;
     let samples_per_tick = self.moo_samples_per_tick;
@@ -956,44 +954,48 @@ impl PxtoneService {
     let sample_end = self.moo_sample_end;
     let sample_stride = self.moo_sample_stride;
 
-    let mut group_smps = [[0i32; GROUPS]; MAX_CHANNEL];
+    // Runs once per event boundary, so it always takes the full-width
+    // accumulator rather than being monomorphized over the group count.
+    let mut group_smps = [[0i32; MAX_GROUP_COUNT]; MAX_CHANNEL];
 
-    if PROCESS_EVENTS {
-      // ---- 1. Envelope processing ----
-      {
-        let woices = &self.woices;
-        for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
-          if !unit.is_sounding() {
-            continue;
-          }
-          if let Some(woice) = woices.get(wi) {
-            unit.tone_envelope(&woice.instances);
-          }
-        }
-      }
-
-      // ---- 2. Event processing ----
-      let tick = (self.moo_sample_count as f64 / samples_per_tick) as i32;
-      let event_count = self.events.records().len();
-
-      while self.moo_event_index < event_count {
-        let ev_tick = self.events.records()[self.moo_event_index].tick;
-        if ev_tick > tick {
-          break;
-        }
-
-        let ev: EventRecord = self.events.records()[self.moo_event_index];
-        self.moo_event_index += 1;
-
-        let u = ev.unit_index as usize;
-        if u >= self.units.len() {
+    // ---- 1. Envelope processing ----
+    // Every unit's envelope has to be up to date before events are dispatched,
+    // so this stage cannot be folded into the mixing pass below.
+    {
+      let woices = &self.woices;
+      for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
+        if !unit.is_sounding() {
           continue;
         }
+        if let Some(woice) = woices.get(wi) {
+          unit.tone_envelope(&woice.instances);
+        }
+      }
+    }
 
-        self.process_event(&ev, u, tick, sample_end, samples_per_tick);
+    // ---- 2. Event processing ----
+    let tick = (self.moo_sample_count as f64 / samples_per_tick) as i32;
+    let event_count = self.events.records().len();
+
+    while self.moo_event_index < event_count {
+      let ev_tick = self.events.records()[self.moo_event_index].tick;
+      if ev_tick > tick {
+        break;
       }
 
-      // ---- 3. Mix + advance → group accumulation ----
+      let ev: EventRecord = self.events.records()[self.moo_event_index];
+      self.moo_event_index += 1;
+
+      let u = ev.unit_index as usize;
+      if u >= self.units.len() {
+        continue;
+      }
+
+      self.process_event(&ev, u, tick, sample_end, samples_per_tick);
+    }
+
+    // ---- 3. Mix + advance → group accumulation ----
+    {
       let woices = &self.woices;
       let frequency = &self.frequency;
       for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
@@ -1017,70 +1019,11 @@ impl PxtoneService {
           unit.tone_supple(&mut group_smps, channel_count, time_pan_idx);
         }
       }
-    } else {
-      // Fused per-unit pass: envelope → mix → advance → group accumulation.
-      // Units never read each other's state, so collapsing the separate passes
-      // into one is equivalent as long as no event fires in between.
-      let woices = &self.woices;
-      let frequency = &self.frequency;
-      for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
-        if let Some(woice) = woices.get(wi) {
-          let instances = &woice.instances;
-          if unit.is_sounding() {
-            let key = unit.tone_increment_key();
-            let freq = frequency.get2(key) * sample_stride;
-            unit.tone_sample::<true>(
-              mute_by_unit,
-              channels,
-              time_pan_idx,
-              smooth_samples,
-              freq,
-              instances,
-            );
-            if !unit.is_flushed() {
-              unit.tone_supple(&mut group_smps, channel_count, time_pan_idx);
-            }
-            continue;
-          }
-          unit.tone_silence(time_pan_idx);
-        }
-        // Silent unit: the key only matters again at the next note-on, which
-        // recomputes it from key_start/key_delta, so the increment is skippable.
-        if !unit.is_flushed() {
-          unit.tone_supple(&mut group_smps, channel_count, time_pan_idx);
-        }
-      }
     }
 
     // ---- 4. Effects → output ----
-    // Overdrive is per-channel and stateless; each delay walks both channels in
-    // one call so its buffer/rate/group state is loaded once per sample instead
-    // of once per channel. Within a channel the overdrive → delay order is
-    // unchanged, and neither effect reads the other channel's groups.
-    for groups in group_smps.iter_mut().take(channel_count) {
-      for od in &self.overdrives {
-        od.tone_supple(groups);
-      }
-    }
-    for d in &mut self.delays {
-      d.tone_supple(&mut group_smps, channel_count);
-    }
-
-    for (groups, out_sample) in group_smps.iter().zip(out.iter_mut()).take(channel_count) {
-      let mut work: i32 = groups.iter().sum();
-
-      // Fade
-      if self.moo_fade_direction != 0 && self.moo_fade_max != 0 {
-        work = work * (self.moo_fade_count >> 8) as i32 / self.moo_fade_max as i32;
-      }
-
-      // Master volume
-      work = (work as f32 * self.moo_master_volume) as i32;
-
-      // Clip
-      work = work.clamp(-self.moo_output_clip, self.moo_output_clip);
-      *out_sample = work as i16;
-    }
+    self.moo_effects(&mut group_smps, channel_count);
+    self.moo_output(&group_smps, channel_count, out);
 
     // ---- 5. Increment ----
     self.moo_sample_count += 1;
@@ -1094,11 +1037,7 @@ impl PxtoneService {
         return false;
       }
     } else if self.moo_fade_direction > 0 {
-      if self.moo_fade_count < (self.moo_fade_max << 8) {
-        self.moo_fade_count += 1;
-      } else {
-        self.moo_fade_direction = 0;
-      }
+      self.moo_fade_step_in();
     }
 
     // ---- 7. Loop / end-of-stream check ----
@@ -1114,18 +1053,121 @@ impl PxtoneService {
     true
   }
 
-  #[inline]
-  fn moo_pxtone_sample(&mut self, out: &mut [i16; 2]) -> bool {
-    // The event path runs once per event boundary, so it always takes the
-    // full-width accumulator rather than adding another monomorphization.
-    self.moo_pxtone_sample_impl::<true, MAX_GROUP_COUNT>(out)
+  /// Runs the overdrives and delays over one sample's group accumulator.
+  /// Overdrive is per-channel and stateless; each delay walks both channels in
+  /// one call so its buffer/rate/group state is loaded once per sample instead
+  /// of once per channel. Within a channel the overdrive -> delay order is
+  /// unchanged, and neither effect reads the other channel's groups.
+  #[inline(always)]
+  fn moo_effects<const GROUPS: usize>(
+    &mut self,
+    group_smps: &mut [[i32; GROUPS]; MAX_CHANNEL],
+    channel_count: usize,
+  ) {
+    for groups in group_smps.iter_mut().take(channel_count) {
+      for od in &self.overdrives {
+        od.tone_supple(groups);
+      }
+    }
+    for d in &mut self.delays {
+      d.tone_supple(group_smps, channel_count);
+    }
   }
 
-  /// Like `moo_pxtone_sample` but skips event dispatch.
-  /// Only call when `moo_safe_count() > 0`.
-  #[inline]
-  fn moo_pxtone_sample_fast<const GROUPS: usize>(&mut self, out: &mut [i16; 2]) -> bool {
-    self.moo_pxtone_sample_impl::<false, GROUPS>(out)
+  /// Sums one sample's groups and applies fade, master volume and clipping.
+  #[inline(always)]
+  fn moo_output<const GROUPS: usize>(
+    &self,
+    group_smps: &[[i32; GROUPS]; MAX_CHANNEL],
+    channel_count: usize,
+    out: &mut [i16; 2],
+  ) {
+    for (groups, out_sample) in group_smps.iter().zip(out.iter_mut()).take(channel_count) {
+      let mut work: i32 = groups.iter().sum();
+
+      // Fade
+      if self.moo_fade_direction != 0 && self.moo_fade_max != 0 {
+        work = work * (self.moo_fade_count >> 8) as i32 / self.moo_fade_max as i32;
+      }
+
+      // Master volume
+      work = (work as f32 * self.moo_master_volume) as i32;
+
+      // Clip
+      work = work.clamp(-self.moo_output_clip, self.moo_output_clip);
+      *out_sample = work as i16;
+    }
+  }
+
+  /// One step of a fade-in. Fade-outs are handled by the caller because they
+  /// can end playback.
+  #[inline(always)]
+  fn moo_fade_step_in(&mut self) {
+    if self.moo_fade_count < (self.moo_fade_max << 8) {
+      self.moo_fade_count += 1;
+    } else {
+      self.moo_fade_direction = 0;
+    }
+  }
+
+  /// Synthesizes `count` samples that need no event dispatch into `buf`.
+  ///
+  /// The whole block is rendered unit by unit rather than sample by sample:
+  /// walking the samples inside the per-unit loop lets the backend hoist the
+  /// unit's mixing parameters and its voice-layer state out of the loop, which
+  /// measurements show costs far more than the arithmetic itself. Units are
+  /// independent, and integer accumulation is order-insensitive, so the mix is
+  /// identical to rendering sample by sample.
+  ///
+  /// The caller must guarantee (via `moo_safe_count`) that no event fires and
+  /// that neither the fade-out nor the end of the song lands inside the block.
+  fn moo_block<const GROUPS: usize>(&mut self, buf: &mut [u8], byte_per_smp: usize, count: usize) {
+    let mut mix = [[[0i32; GROUPS]; MAX_CHANNEL]; MOO_BLOCK];
+    let mix = &mut mix[..count];
+
+    let channel_count = self.dst_channels as usize;
+    let channels = self.dst_channels;
+    let mute_by_unit = self.moo_mute_by_unit;
+    let smooth_samples = self.moo_sample_smooth;
+    let sample_stride = self.moo_sample_stride;
+    let time_pan_idx = self.moo_time_pan_index;
+
+    {
+      let woices = &self.woices;
+      let frequency = &self.frequency;
+      for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
+        if let Some(woice) = woices.get(wi) {
+          unit.tone_block(
+            mix,
+            mute_by_unit,
+            channels,
+            channel_count,
+            time_pan_idx,
+            smooth_samples,
+            frequency,
+            sample_stride,
+            &woice.instances,
+          );
+        }
+      }
+    }
+
+    for (i, groups) in mix.iter_mut().enumerate() {
+      self.moo_effects(groups, channel_count);
+
+      let mut sample = [0i16; 2];
+      self.moo_output(groups, channel_count, &mut sample);
+      write_frame(buf, i, byte_per_smp, sample);
+
+      if self.moo_fade_direction < 0 {
+        self.moo_fade_count -= 1;
+      } else if self.moo_fade_direction > 0 {
+        self.moo_fade_step_in();
+      }
+    }
+
+    self.moo_sample_count += count as u32;
+    self.moo_time_pan_index = (time_pan_idx + count) & (BUFSIZE_TIMEPAN - 1);
   }
 
   /// Processes one event
@@ -1306,20 +1348,15 @@ impl PxtoneService {
     let total = buf.len() / byte_per_smp;
     let mut pos = 0usize;
 
-    'outer: while pos < total {
-      // Compute how many consecutive samples need no event/boundary check.
-      let safe = (self.moo_safe_count() as usize).min(total - pos);
+    while pos < total {
+      // Number of consecutive samples that need no event/boundary check.
+      let mut safe = (self.moo_safe_count() as usize).min(total - pos);
 
-      // Fast inner loop: event dispatch is skipped.
-      let safe_end = pos + safe;
-      while pos < safe_end {
-        let mut sample = [0i16; 2];
-        if !self.moo_pxtone_sample_fast::<GROUPS>(&mut sample) {
-          self.playback_ended = true;
-          break 'outer;
-        }
-        write_frame(buf, pos, byte_per_smp, sample);
-        pos += 1;
+      while safe > 0 {
+        let count = safe.min(MOO_BLOCK);
+        self.moo_block::<GROUPS>(&mut buf[pos * byte_per_smp..], byte_per_smp, count);
+        pos += count;
+        safe -= count;
       }
 
       // Boundary sample: run with full event dispatch.
