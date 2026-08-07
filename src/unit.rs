@@ -3,10 +3,10 @@ use crate::event::{
   EVENT_DEFAULT_VOLUME,
 };
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, VoiceInstance};
-use tinyvec::ArrayVec;
 
 pub const MAX_CHANNEL: usize = 2;
 pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
+pub(crate) const MAX_GROUP_COUNT: usize = 7;
 
 /// Runtime playback state for a single voice layer within a unit.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -48,8 +48,13 @@ pub struct Unit {
 
   // Voice references (one per instance)
   pub(crate) voice_count: usize,
-  pub(crate) voice_flags: ArrayVec<[u32; MAX_UNIT_CONTROL_VOICE]>,
+  pub(crate) voice_flags: [u32; MAX_UNIT_CONTROL_VOICE],
   pub(crate) tones: [VoiceTone; MAX_UNIT_CONTROL_VOICE],
+
+  /// Consecutive silent samples already flushed into `pan_delay_buffers`.
+  /// Once it reaches `BUFSIZE_TIMEPAN` the buffers hold nothing but zeros, so
+  /// the unit contributes nothing and can be skipped entirely.
+  quiet_run: u32,
 }
 
 impl Default for Unit {
@@ -70,8 +75,9 @@ impl Default for Unit {
       group_index: EVENT_DEFAULT_GROUP_NO,
       tuning: EVENT_DEFAULT_TUNING,
       voice_count: 0,
-      voice_flags: ArrayVec::new(),
+      voice_flags: [0; MAX_UNIT_CONTROL_VOICE],
       tones: Default::default(),
+      quiet_run: BUFSIZE_TIMEPAN as u32,
     }
   }
 }
@@ -114,6 +120,32 @@ impl Unit {
     for buf in &mut self.pan_delay_buffers {
       buf.fill(0);
     }
+    self.quiet_run = BUFSIZE_TIMEPAN as u32;
+  }
+
+  /// `true` while at least one voice layer is still alive.
+  #[inline]
+  pub(crate) fn is_sounding(&self) -> bool {
+    let n = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
+    self.tones[..n].iter().any(|t| t.life_count > 0)
+  }
+
+  /// `true` once the pan-delay buffers contain nothing but zeros, i.e. the unit
+  /// can no longer contribute to the mix.
+  #[inline]
+  pub(crate) fn is_flushed(&self) -> bool {
+    self.quiet_run >= BUFSIZE_TIMEPAN as u32
+  }
+
+  /// Writes one silent frame into the pan-delay buffers, stopping once they are
+  /// fully drained.
+  #[inline]
+  pub(crate) fn tone_silence(&mut self, time_pan_index: usize) {
+    if self.quiet_run < BUFSIZE_TIMEPAN as u32 {
+      self.pan_delay_buffers[0][time_pan_index] = 0;
+      self.pan_delay_buffers[1][time_pan_index] = 0;
+      self.quiet_run += 1;
+    }
   }
 
   pub(crate) fn tone_reset_and_2prm(
@@ -134,9 +166,9 @@ impl Unit {
   pub(crate) fn set_woice(
     &mut self,
     voice_count: usize,
-    voice_flags: ArrayVec<[u32; MAX_UNIT_CONTROL_VOICE]>,
+    voice_flags: [u32; MAX_UNIT_CONTROL_VOICE],
   ) {
-    self.voice_count = voice_count;
+    self.voice_count = voice_count.min(MAX_UNIT_CONTROL_VOICE);
     self.voice_flags = voice_flags;
     self.key = EVENT_DEFAULT_KEY;
     self.key_delta = 0;
@@ -211,13 +243,15 @@ impl Unit {
     self.tuning = val;
   }
 
+  #[inline(always)]
   pub(crate) fn tone_envelope(&mut self, instances: &[VoiceInstance]) {
-    for (v, vi) in instances.iter().enumerate().take(self.voice_count) {
+    let voice_count = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
+    for (v, vi) in instances.iter().enumerate().take(voice_count) {
       let vt = &mut self.tones[v];
       if vt.life_count > 0 && vi.envelope_size > 0 {
         if vt.on_count > 0 {
-          if vt.envelope_pos < vi.envelope_size {
-            vt.envelope_volume = vi.envelope[vt.envelope_pos as usize] as i32;
+          if let Some(&e) = vi.envelope.get(vt.envelope_pos as usize) {
+            vt.envelope_volume = e as i32;
             vt.envelope_pos += 1;
           }
         } else {
@@ -233,7 +267,7 @@ impl Unit {
   // Generates samples and writes them into pan_time_bufs.
   // Both channels are processed in a single voice iteration to expose data parallelism
   // to the auto-vectorizer (LLVM can SIMD-pack w0/w1 when simd128 is enabled).
-  #[inline]
+  #[inline(always)]
   pub(crate) fn tone_sample(
     &mut self,
     mute_by_unit: bool,
@@ -243,26 +277,27 @@ impl Unit {
     instances: &[VoiceInstance],
   ) {
     if mute_by_unit && !self.played {
-      for ch in 0..channels as usize {
-        self.pan_delay_buffers[ch][time_pan_index] = 0;
-      }
+      self.tone_silence(time_pan_index);
       return;
     }
+    self.quiet_run = 0;
 
-    let velocity = self.velocity as i32;
-    let volume = self.volume as i32;
-    let pan0 = self.pan_volumes[0] as i32;
-    let pan1 = self.pan_volumes[1] as i32;
+    // velocity × volume × pan folded into one factor per channel so the voice
+    // loop needs a single i64 multiply/divide.
+    // Max intermediate: 32768 × 128 × 128 × 128 = 68_719_476_736 < i64::MAX ✓
+    let sv = self.velocity as i64 * self.volume as i64;
+    let f0 = sv * self.pan_volumes[0] as i64;
+    let f1 = sv * self.pan_volumes[1] as i64;
 
     let mut buf0 = 0i32;
     let mut buf1 = 0i32;
 
-    for (v, vi) in instances.iter().enumerate().take(self.voice_count) {
+    let voice_count = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
+    for (v, vi) in instances.iter().enumerate().take(voice_count) {
       let vt = &self.tones[v];
       if vt.life_count > 0 {
-        let pos = vt.sample_pos as usize;
-        let s0 = vi.get_sample_i16(pos, 0) as i32;
-        let s1 = vi.get_sample_i16(pos, 1) as i32;
+        let [s0, s1] = vi.get_frame(vt.sample_pos as usize);
+        let (s0, s1) = (s0 as i32, s1 as i32);
 
         // For mono output, ch=0 gets the average of both wave channels.
         // ch=1 keeps the raw ch=1 sample (unused when channel_count=1).
@@ -272,21 +307,15 @@ impl Unit {
           (s0, s1)
         };
 
-        // Combine velocity × volume × pan into a single i64 division to eliminate
-        // two intermediate i32 truncations.
-        // Max intermediate: 32768 × 128 × 128 × 128 = 68_719_476_736 < i64::MAX ✓
-        let sv = velocity as i64 * volume as i64;
-        let mut w0 = (w0 as i64 * sv * pan0 as i64 / (128 * 128 * 64)) as i32;
-        let mut w1 = (w1 as i64 * sv * pan1 as i64 / (128 * 128 * 64)) as i32;
+        let mut w0 = (w0 as i64 * f0 / (128 * 128 * 64)) as i32;
+        let mut w1 = (w1 as i64 * f1 / (128 * 128 * 64)) as i32;
 
         if vi.envelope_size > 0 {
           w0 = w0 * vt.envelope_volume / 128;
           w1 = w1 * vt.envelope_volume / 128;
         }
 
-        if self.voice_flags.get(v).copied().unwrap_or(0) & VOICE_FLAG_SMOOTH != 0
-          && vt.life_count < smooth_smp
-        {
+        if self.voice_flags[v] & VOICE_FLAG_SMOOTH != 0 && vt.life_count < smooth_smp {
           let lc = vt.life_count as i32;
           let sm = smooth_smp as i32;
           w0 = w0 * lc / sm;
@@ -302,13 +331,23 @@ impl Unit {
     self.pan_delay_buffers[1][time_pan_index] = buf1;
   }
 
-  // Adds pan_delay_buffers values to group samples
+  // Adds this unit's pan_delay_buffers values to the per-channel group samples.
+  // Both channels are handled in one call so the caller only walks the unit list once.
   #[inline]
-  pub(crate) fn tone_supple(&self, group_smps: &mut [i32], ch: usize, time_pan_index: usize) {
-    let idx =
-      (time_pan_index + BUFSIZE_TIMEPAN - self.pan_delays[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
-    if self.group_index < group_smps.len() {
-      group_smps[self.group_index] += self.pan_delay_buffers[ch][idx];
+  pub(crate) fn tone_supple(
+    &self,
+    group_smps: &mut [[i32; MAX_GROUP_COUNT]; MAX_CHANNEL],
+    channels: usize,
+    group_count: usize,
+    time_pan_index: usize,
+  ) {
+    if self.group_index >= group_count {
+      return;
+    }
+    for (ch, groups) in group_smps.iter_mut().enumerate().take(channels) {
+      let idx =
+        (time_pan_index + BUFSIZE_TIMEPAN - self.pan_delays[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
+      groups[self.group_index] += self.pan_delay_buffers[ch][idx];
     }
   }
 
@@ -333,8 +372,10 @@ impl Unit {
   }
 
   // Advances the sample position
+  #[inline(always)]
   pub(crate) fn tone_increment_sample(&mut self, frequency: f32, instances: &[VoiceInstance]) {
-    for (v, vi) in instances.iter().enumerate().take(self.voice_count) {
+    let voice_count = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
+    for (v, vi) in instances.iter().enumerate().take(voice_count) {
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
         vt.life_count -= 1;
@@ -353,7 +394,7 @@ impl Unit {
 
         let body = vi.body_frames as f64;
         if vt.sample_pos >= body {
-          if self.voice_flags.get(v).copied().unwrap_or(0) & VOICE_FLAG_WAVELOOP != 0 {
+          if self.voice_flags[v] & VOICE_FLAG_WAVELOOP != 0 {
             vt.sample_pos -= body;
             if vt.sample_pos >= body {
               vt.sample_pos = 0.0;

@@ -162,8 +162,8 @@ pub(crate) struct VoiceInstance {
   pub(crate) body_frames: u32,
   /// Sample frames in the release (post-loop) section.
   pub(crate) tail_frames: u32,
-  /// Rendered waveform as stereo 16-bit little-endian interleaved PCM at 44100 Hz.
-  pub(crate) samples: Vec<u8>,
+  /// Rendered waveform as stereo 16-bit frames at 44100 Hz.
+  pub(crate) samples: Vec<[i16; 2]>,
   /// Amplitude envelope table; one byte per frame, range 0–128.
   pub(crate) envelope: Vec<u8>,
   /// Number of valid frames in `envelope`.
@@ -175,16 +175,25 @@ pub(crate) struct VoiceInstance {
 }
 
 impl VoiceInstance {
-  /// Gets one sample from an interleaved stereo 16-bit buffer
+  /// Gets one stereo frame, or silence when `frame` is out of range.
   #[inline]
-  pub(crate) fn get_sample_i16(&self, frame: usize, ch: usize) -> i16 {
-    let offset = frame * 4 + ch * 2;
-    self
-      .samples
-      .get(offset..offset + 2)
-      .map(|b| i16::from_le_bytes([b[0], b[1]]))
-      .unwrap_or(0)
+  pub(crate) fn get_frame(&self, frame: usize) -> [i16; 2] {
+    self.samples.get(frame).copied().unwrap_or([0, 0])
   }
+}
+
+/// Reinterprets an interleaved stereo 16-bit little-endian PCM byte buffer as frames.
+/// A trailing partial frame (if any) is dropped.
+fn frames_from_le_bytes(bytes: &[u8]) -> Vec<[i16; 2]> {
+  bytes
+    .chunks_exact(4)
+    .map(|f| {
+      [
+        i16::from_le_bytes([f[0], f[1]]),
+        i16::from_le_bytes([f[2], f[3]]),
+      ]
+    })
+    .collect()
 }
 
 // ---- Woice ----
@@ -449,44 +458,26 @@ impl Woice {
           instance.head_frames = work.head_frames;
           instance.body_frames = work.body_frames;
           instance.tail_frames = work.tail_frames;
-          instance.samples = work.samples().to_vec();
+          instance.samples = frames_from_le_bytes(work.samples());
         }
         VoiceData::Coordinate { wave, .. } => {
           let body_frames = PTV_BODY_FRAMES;
-          let size = (body_frames * channels as u32 * bits_per_sample as u32 / 8) as usize;
           instance.body_frames = body_frames;
-          instance.samples = vec![0u8; size];
-          update_wave_ptv(
-            pan,
-            volume,
-            false,
-            wave,
-            &mut instance,
-            channels,
-            bits_per_sample,
-          );
+          instance.samples = vec![[0i16; 2]; body_frames as usize];
+          update_wave_ptv(pan, volume, false, wave, &mut instance, channels);
         }
         VoiceData::Overtone { wave, .. } => {
           let body_frames = PTV_BODY_FRAMES;
-          let size = (body_frames * channels as u32 * bits_per_sample as u32 / 8) as usize;
           instance.body_frames = body_frames;
-          instance.samples = vec![0u8; size];
-          update_wave_ptv(
-            pan,
-            volume,
-            true,
-            wave,
-            &mut instance,
-            channels,
-            bits_per_sample,
-          );
+          instance.samples = vec![[0i16; 2]; body_frames as usize];
+          update_wave_ptv(pan, volume, true, wave, &mut instance, channels);
         }
         VoiceData::Noise(noise) => {
           let body_frames = noise.frame_count_44k;
           let pcm =
             noise_builder.build_noise(noise, channels, sample_rate, bits_per_sample, frequency)?;
           instance.body_frames = body_frames;
-          instance.samples = pcm.samples().to_vec();
+          instance.samples = frames_from_le_bytes(pcm.samples());
         }
         VoiceData::OggVorbis(ogg) => {
           let slice = &raw_data[ogg.data_offset as usize..][..ogg.data_size as usize];
@@ -498,7 +489,7 @@ impl Woice {
           instance.head_frames = work.head_frames;
           instance.body_frames = work.body_frames;
           instance.tail_frames = work.tail_frames;
-          instance.samples = work.samples().to_vec();
+          instance.samples = frames_from_le_bytes(work.samples());
         }
       }
       self.instances.push(instance);
@@ -654,7 +645,6 @@ fn update_wave_ptv(
   wave: &VoiceWave,
   instance: &mut VoiceInstance,
   channels: u8,
-  bits_per_sample: u8,
 ) {
   let pan_vol: [i32; 2] = match (channels, pan) {
     (2, p) if p > 64 => [128 - p as i32, 64],
@@ -666,27 +656,24 @@ fn update_wave_ptv(
   let mut osci = Oscillator::new();
   osci.ready_get_sample(pts, volume, instance.body_frames, wave.resolution);
 
-  instance.clipped = false;
+  let mut clipped = false;
   for s in 0..instance.body_frames {
     let osc = if is_overtone {
       osci.get_one_sample_overtone(s)
     } else {
       osci.get_one_sample_coordinate(s)
     };
+    let frame = &mut instance.samples[s as usize];
     for (c, &pv) in pan_vol.iter().enumerate().take(channels as usize) {
       let raw = osc * pv as f32 / 64.0;
       if raw.abs() > 1.0 {
-        instance.clipped = true;
+        clipped = true;
       }
       let work = raw.clamp(-1.0, 1.0);
-      if bits_per_sample == 8 {
-        instance.samples[s as usize * channels as usize + c] = ((work * 127.0) as i32 + 128) as u8;
-      } else {
-        let bytes = ((work * 32767.0) as i16).to_le_bytes();
-        instance.samples[(s as usize * channels as usize + c) * 2..][..2].copy_from_slice(&bytes);
-      }
+      frame[c] = (work * 32767.0) as i16;
     }
   }
+  instance.clipped = clipped;
 }
 
 // ---- OGG Vorbis decode (lewton) ----

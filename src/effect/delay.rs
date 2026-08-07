@@ -95,18 +95,20 @@ impl Delay {
     if self.buffer_size == 0 {
       return;
     }
-    let a = self.bufs[ch][self.offset] * self.rate_s32 / 100;
+    let slot = &mut self.bufs[ch][self.offset];
+    let a = *slot * self.rate_s32 / 100;
     if self.played {
       group_smps[self.group] += a;
     }
-    self.bufs[ch][self.offset] = group_smps[self.group];
+    *slot = group_smps[self.group];
   }
 
   pub(crate) fn tone_increment(&mut self) {
     if self.buffer_size == 0 {
       return;
     }
-    self.offset = (self.offset + 1) % self.buffer_size;
+    let next = self.offset + 1;
+    self.offset = if next < self.buffer_size { next } else { 0 };
   }
 
   pub(crate) fn tone_clear(&mut self) {
