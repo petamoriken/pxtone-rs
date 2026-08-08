@@ -2,11 +2,28 @@ use crate::event::{
   EVENT_DEFAULT_GROUP_NO, EVENT_DEFAULT_KEY, EVENT_DEFAULT_TUNING, EVENT_DEFAULT_VELOCITY,
   EVENT_DEFAULT_VOLUME,
 };
+use crate::pulse::frequency::FrequencyTable;
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, VoiceInstance};
 
 pub const MAX_CHANNEL: usize = 2;
 pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
 pub(crate) const MAX_GROUP_COUNT: usize = 7;
+
+/// `x / 2^SHIFT`, truncating toward zero, written out as shifts.
+///
+/// Native backends strength-reduce `/` to exactly this, but the wasm backend
+/// emits `i64.div_s` and leaves the reduction to the engine. Spelling it out
+/// keeps the hot path free of a division instruction on every target.
+#[inline(always)]
+fn div_pow2_i64<const SHIFT: u32>(x: i64) -> i64 {
+  (x + ((x >> 63) & ((1i64 << SHIFT) - 1))) >> SHIFT
+}
+
+/// `x / 2^SHIFT`, truncating toward zero. See [`div_pow2_i64`].
+#[inline(always)]
+fn div_pow2_i32<const SHIFT: u32>(x: i32) -> i32 {
+  (x + ((x >> 31) & ((1i32 << SHIFT) - 1))) >> SHIFT
+}
 
 /// Runtime playback state for a single voice layer within a unit.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -243,40 +260,62 @@ impl Unit {
     self.tuning = val;
   }
 
+  /// Advances one voice layer's envelope by a sample. `vi.envelope_size > 0`
+  /// and `vt.life_count > 0` must already hold.
+  #[inline(always)]
+  fn step_envelope(vt: &mut VoiceTone, vi: &VoiceInstance) {
+    if vt.on_count > 0 {
+      if let Some(&e) = vi.envelope.get(vt.envelope_pos as usize) {
+        vt.envelope_volume = e as i32;
+        vt.envelope_pos += 1;
+      }
+    } else {
+      // release
+      vt.envelope_volume = vt.envelope_start
+        + (0 - vt.envelope_start) * vt.envelope_pos as i32 / vi.envelope_release.max(1) as i32;
+      vt.envelope_pos += 1;
+    }
+  }
+
   #[inline(always)]
   pub(crate) fn tone_envelope(&mut self, instances: &[VoiceInstance]) {
     let voice_count = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
     for (v, vi) in instances.iter().enumerate().take(voice_count) {
       let vt = &mut self.tones[v];
       if vt.life_count > 0 && vi.envelope_size > 0 {
-        if vt.on_count > 0 {
-          if let Some(&e) = vi.envelope.get(vt.envelope_pos as usize) {
-            vt.envelope_volume = e as i32;
-            vt.envelope_pos += 1;
-          }
-        } else {
-          // release
-          vt.envelope_volume = vt.envelope_start
-            + (0 - vt.envelope_start) * vt.envelope_pos as i32 / vi.envelope_release.max(1) as i32;
-          vt.envelope_pos += 1;
-        }
+        Self::step_envelope(vt, vi);
       }
     }
   }
 
-  // Generates samples and writes them into pan_time_bufs.
-  // Both channels are processed in a single voice iteration to expose data parallelism
-  // to the auto-vectorizer (LLVM can SIMD-pack w0/w1 when simd128 is enabled).
+  /// Runs one sample for this unit: envelope, mixing into `pan_delay_buffers`,
+  /// and lifetime/position advance. All three stages share a single pass over
+  /// the voice layers, since the loop scaffolding costs more than the arithmetic.
+  ///
+  /// Both channels are handled in one voice iteration to expose data parallelism
+  /// to the auto-vectorizer (LLVM can SIMD-pack w0/w1 when simd128 is enabled).
+  ///
+  /// `ENVELOPE` selects whether the envelope stage runs here. The event path has
+  /// to update every unit's envelope before dispatching events, so it passes
+  /// `false` and calls [`Unit::tone_envelope`] up front instead.
+  ///
+  /// `frequency` is the unit's current playback rate, i.e. the result of
+  /// [`Unit::tone_increment_key`] fed through the frequency table.
   #[inline(always)]
-  pub(crate) fn tone_sample(
+  pub(crate) fn tone_sample<const ENVELOPE: bool>(
     &mut self,
     mute_by_unit: bool,
     channels: u8,
     time_pan_index: usize,
     smooth_smp: u32,
+    frequency: f32,
     instances: &[VoiceInstance],
   ) {
     if mute_by_unit && !self.played {
+      if ENVELOPE {
+        self.tone_envelope(instances);
+      }
+      self.tone_increment_sample(frequency, instances);
       self.tone_silence(time_pan_index);
       return;
     }
@@ -288,14 +327,19 @@ impl Unit {
     let sv = self.velocity as i64 * self.volume as i64;
     let f0 = sv * self.pan_volumes[0] as i64;
     let f1 = sv * self.pan_volumes[1] as i64;
+    let tuning = self.tuning;
 
     let mut buf0 = 0i32;
     let mut buf1 = 0i32;
 
     let voice_count = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
     for (v, vi) in instances.iter().enumerate().take(voice_count) {
-      let vt = &self.tones[v];
+      let voice_flags = self.voice_flags[v];
+      let vt = &mut self.tones[v];
       if vt.life_count > 0 {
+        if ENVELOPE && vi.envelope_size > 0 {
+          Self::step_envelope(vt, vi);
+        }
         let [s0, s1] = vi.get_frame(vt.sample_pos as usize);
         let (s0, s1) = (s0 as i32, s1 as i32);
 
@@ -307,15 +351,16 @@ impl Unit {
           (s0, s1)
         };
 
-        let mut w0 = (w0 as i64 * f0 / (128 * 128 * 64)) as i32;
-        let mut w1 = (w1 as i64 * f1 / (128 * 128 * 64)) as i32;
+        // / (128 * 128 * 64) == >> 20
+        let mut w0 = div_pow2_i64::<20>(w0 as i64 * f0) as i32;
+        let mut w1 = div_pow2_i64::<20>(w1 as i64 * f1) as i32;
 
         if vi.envelope_size > 0 {
-          w0 = w0 * vt.envelope_volume / 128;
-          w1 = w1 * vt.envelope_volume / 128;
+          w0 = div_pow2_i32::<7>(w0 * vt.envelope_volume);
+          w1 = div_pow2_i32::<7>(w1 * vt.envelope_volume);
         }
 
-        if self.voice_flags[v] & VOICE_FLAG_SMOOTH != 0 && vt.life_count < smooth_smp {
+        if voice_flags & VOICE_FLAG_SMOOTH != 0 && vt.life_count < smooth_smp {
           let lc = vt.life_count as i32;
           let sm = smooth_smp as i32;
           w0 = w0 * lc / sm;
@@ -324,6 +369,8 @@ impl Unit {
 
         buf0 += w0;
         buf1 += w1;
+
+        Self::step_advance(vt, vi, voice_flags, tuning, frequency);
       }
     }
 
@@ -331,17 +378,64 @@ impl Unit {
     self.pan_delay_buffers[1][time_pan_index] = buf1;
   }
 
+  /// Renders one block of samples for this unit, accumulating into `mix`.
+  ///
+  /// `mix[i]` is the group accumulator for the `i`-th sample of the block and
+  /// `time_pan_index` is the pan-delay ring slot of `mix[0]`. Keeping the sample
+  /// loop inside the unit lets the mixing parameters and the voice-layer state
+  /// stay in registers across the whole block.
+  ///
+  /// Only valid when no event fires during the block: a unit that is idle at the
+  /// start then stays idle, so the whole block can be skipped for it.
+  #[allow(clippy::too_many_arguments)]
+  pub(crate) fn tone_block<const GROUPS: usize>(
+    &mut self,
+    mix: &mut [[[i32; GROUPS]; MAX_CHANNEL]],
+    mute_by_unit: bool,
+    channels: u8,
+    channel_count: usize,
+    time_pan_index: usize,
+    smooth_smp: u32,
+    frequency: &FrequencyTable,
+    sample_stride: f32,
+    instances: &[VoiceInstance],
+  ) {
+    if !self.is_sounding() && self.is_flushed() {
+      return;
+    }
+
+    for (i, groups) in mix.iter_mut().enumerate() {
+      let time_pan_index = (time_pan_index + i) & (BUFSIZE_TIMEPAN - 1);
+      if self.is_sounding() {
+        let key = self.tone_increment_key();
+        let freq = frequency.get2(key) * sample_stride;
+        self.tone_sample::<true>(
+          mute_by_unit,
+          channels,
+          time_pan_index,
+          smooth_smp,
+          freq,
+          instances,
+        );
+      } else {
+        self.tone_silence(time_pan_index);
+      }
+      if !self.is_flushed() {
+        self.tone_supple(groups, channel_count, time_pan_index);
+      }
+    }
+  }
+
   // Adds this unit's pan_delay_buffers values to the per-channel group samples.
   // Both channels are handled in one call so the caller only walks the unit list once.
   #[inline]
-  pub(crate) fn tone_supple(
+  pub(crate) fn tone_supple<const GROUPS: usize>(
     &self,
-    group_smps: &mut [[i32; MAX_GROUP_COUNT]; MAX_CHANNEL],
+    group_smps: &mut [[i32; GROUPS]; MAX_CHANNEL],
     channels: usize,
-    group_count: usize,
     time_pan_index: usize,
   ) {
-    if self.group_index >= group_count {
+    if self.group_index >= GROUPS {
       return;
     }
     for (ch, groups) in group_smps.iter_mut().enumerate().take(channels) {
@@ -371,38 +465,54 @@ impl Unit {
     self.key
   }
 
-  // Advances the sample position
+  /// Advances one voice layer's lifetime and sample position by a sample.
+  /// `vt.life_count > 0` must already hold.
+  #[inline(always)]
+  fn step_advance(
+    vt: &mut VoiceTone,
+    vi: &VoiceInstance,
+    voice_flags: u32,
+    tuning: f32,
+    frequency: f32,
+  ) {
+    vt.life_count -= 1;
+    if vt.life_count == 0 {
+      return;
+    }
+    if vt.on_count > 0 {
+      vt.on_count -= 1;
+      // Trigger release phase exactly once, when on_count first reaches 0.
+      // (C++ uses int32_t which goes negative, so this condition fires only once.)
+      if vt.on_count == 0 && vi.envelope_size > 0 {
+        vt.envelope_start = vt.envelope_volume;
+        vt.envelope_pos = 0;
+      }
+    }
+    vt.sample_pos += vt.offset_frequency as f64 * tuning as f64 * frequency as f64;
+
+    let body = vi.body_frames as f64;
+    if vt.sample_pos >= body {
+      if voice_flags & VOICE_FLAG_WAVELOOP != 0 {
+        vt.sample_pos -= body;
+        if vt.sample_pos >= body {
+          vt.sample_pos = 0.0;
+        }
+      } else {
+        vt.life_count = 0;
+      }
+    }
+  }
+
+  // Advances the sample position of every live voice layer.
   #[inline(always)]
   pub(crate) fn tone_increment_sample(&mut self, frequency: f32, instances: &[VoiceInstance]) {
+    let tuning = self.tuning;
     let voice_count = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
     for (v, vi) in instances.iter().enumerate().take(voice_count) {
+      let voice_flags = self.voice_flags[v];
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
-        vt.life_count -= 1;
-      }
-      if vt.life_count > 0 {
-        if vt.on_count > 0 {
-          vt.on_count -= 1;
-          // Trigger release phase exactly once, when on_count first reaches 0.
-          // (C++ uses int32_t which goes negative, so this condition fires only once.)
-          if vt.on_count == 0 && vi.envelope_size > 0 {
-            vt.envelope_start = vt.envelope_volume;
-            vt.envelope_pos = 0;
-          }
-        }
-        vt.sample_pos += vt.offset_frequency as f64 * self.tuning as f64 * frequency as f64;
-
-        let body = vi.body_frames as f64;
-        if vt.sample_pos >= body {
-          if self.voice_flags[v] & VOICE_FLAG_WAVELOOP != 0 {
-            vt.sample_pos -= body;
-            if vt.sample_pos >= body {
-              vt.sample_pos = 0.0;
-            }
-          } else {
-            vt.life_count = 0;
-          }
-        }
+        Self::step_advance(vt, vi, voice_flags, tuning, frequency);
       }
     }
   }

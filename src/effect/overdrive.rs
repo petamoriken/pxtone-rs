@@ -37,12 +37,15 @@ impl OverDrive {
     self.cut_16bit_top = (32767.0 * (100.0 - self.cut) / 100.0) as i32;
   }
 
-  pub(crate) fn tone_supple(&self, group_smps: &mut [i32]) {
+  pub(crate) fn tone_supple<const GROUPS: usize>(&self, group_smps: &mut [i32; GROUPS]) {
     if !self.played {
       return;
     }
-    let work = group_smps[self.group].clamp(-self.cut_16bit_top, self.cut_16bit_top);
-    group_smps[self.group] = (work as f32 * self.amp) as i32;
+    // `PxtoneService::calc_group_count` sizes GROUPS so that every effect's
+    // group is in range; spelling that out lets GROUPS == 1 fold to index 0.
+    let group = if GROUPS == 1 { 0 } else { self.group };
+    let work = group_smps[group].clamp(-self.cut_16bit_top, self.cut_16bit_top);
+    group_smps[group] = (work as f32 * self.amp) as i32;
   }
 
   /// Reads a (20-byte) overdrive structure
