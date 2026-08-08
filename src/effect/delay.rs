@@ -1,9 +1,7 @@
 use crate::error::PxtoneError;
-use crate::unit::MAX_CHANNEL;
+use crate::unit::{MAX_CHANNEL, MAX_GROUP_COUNT};
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
-
-const MAX_TUNE_GROUP_COUNT: usize = 4; // pxtnMAX_TUNEGROUPNUM
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u16)]
@@ -107,6 +105,7 @@ impl Delay {
     let rate = self.rate_s32;
     // `PxtoneService::calc_group_count` sizes GROUPS so that every effect's
     // group is in range; spelling that out lets GROUPS == 1 fold to index 0.
+    debug_assert!(self.group < GROUPS);
     let group = if GROUPS == 1 { 0 } else { self.group };
     let played = self.played;
 
@@ -143,7 +142,8 @@ impl Delay {
     self.unit = DelayUnit::try_from(unit).map_err(|_| PxtoneError::UnknownFormat)?;
     self.frequency = r.read_f32::<LE>()?;
     self.rate = rate;
-    self.group = group.min(MAX_TUNE_GROUP_COUNT - 1);
+    // pxtnDelay::Read falls back to group 0 when the stored group is out of range
+    self.group = if group < MAX_GROUP_COUNT { group } else { 0 };
     Ok(())
   }
 }
