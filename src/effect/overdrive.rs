@@ -1,4 +1,5 @@
 use crate::error::PxtoneError;
+use crate::unit::MAX_GROUP_COUNT;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
@@ -43,6 +44,7 @@ impl OverDrive {
     }
     // `PxtoneService::calc_group_count` sizes GROUPS so that every effect's
     // group is in range; spelling that out lets GROUPS == 1 fold to index 0.
+    debug_assert!(self.group < GROUPS);
     let group = if GROUPS == 1 { 0 } else { self.group };
     let work = group_smps[group].clamp(-self.cut_16bit_top, self.cut_16bit_top);
     group_smps[group] = (work as f32 * self.amp) as i32;
@@ -67,6 +69,9 @@ impl OverDrive {
       return Err(PxtoneError::UnknownFormat);
     }
     if !(AMP_MIN..=AMP_MAX).contains(&amp) {
+      return Err(PxtoneError::UnknownFormat);
+    }
+    if group >= MAX_GROUP_COUNT {
       return Err(PxtoneError::UnknownFormat);
     }
 
