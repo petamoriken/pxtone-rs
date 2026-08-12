@@ -26,6 +26,14 @@ inherits = "release"
 panic = "abort"
 strip = true
 
+# The vorbis decoder only runs once per OGGV material while loading a file, so
+# trade its code size against speed. This is worth about 11KB of wasm.
+[profile.release-wasm.package.lewton]
+opt-level = "z"
+
+[profile.release-wasm.package.ogg]
+opt-level = "z"
+
 [dev-dependencies]
 encoding_rs = "0.8.35"
 toml = { version = "1.1.2", features = ["preserve_order"] }
