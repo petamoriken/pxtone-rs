@@ -26,7 +26,7 @@ use crate::huffman_tree::{HuffmanError, VorbisHuffmanTree};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::error;
 use std::fmt;
-use std::io::{Cursor, Error, ErrorKind, Read};
+use std::io::{Cursor, Error, ErrorKind};
 use std::string::FromUtf8Error;
 
 /// Errors that can occur during Header decoding
@@ -172,8 +172,10 @@ fn test_read_hdr_begin() {
 	assert_eq!(read_header_begin(&mut rdr), Err(HeaderReadError::NotVorbisHeader));
 }
 
-/// The set of the three Vorbis headers
-pub type HeaderSet = (IdentHeader, CommentHeader, SetupHeader);
+/// The two Vorbis headers that carry decoding parameters
+///
+/// The comment header in between is only validated, see [`read_header_comment`].
+pub type HeaderSet = (IdentHeader, SetupHeader);
 
 /**
 Representation for the identification header
@@ -282,83 +284,51 @@ fn test_read_header_ident() {
 }
 
 /**
-Representation of the comment header
-
-The comment header is the second of the three
-headers inside each vorbis stream.
-
-It contains text comment metadata
-about the stream, encoded as key-value pairs,
-and the vendor name.
-*/
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct CommentHeader {
-	/// An identification string of the
-	/// software/library that encoded
-	/// the stream.
-	pub vendor: String,
-	/// A key-value list of the comments
-	/// attached to the stream.
-	pub comment_list: Vec<(String, String)>,
-}
-
-/**
-Reading the Comment header
+Checking the Comment header
 
 You should call this function with the second packet in the stream.
+
+Unlike upstream lewton, this fork does not hand the comment metadata to
+the caller: pxtone has no use for the vendor string or for the key-value
+comments, and skipping them keeps the UTF-8 decoding and the allocations
+out of the binary. The packet is still walked over to make sure that it
+is a structurally valid comment header.
 
 The function does not check whether the comment field names consist
 of characters `0x20` through `0x7D` (`0x3D` excluded), as the vorbis
 spec requires.
 */
-pub fn read_header_comment(packet: &[u8]) -> Result<CommentHeader, HeaderReadError> {
+pub fn read_header_comment(packet: &[u8]) -> Result<(), HeaderReadError> {
 	let mut rdr = Cursor::new(packet);
 	let hd_id = try_from!(read_header_begin_cursor(&mut rdr));
 	if hd_id != 3 {
 		try_from!(Err(HeaderReadError::HeaderBadType(hd_id)));
 	}
-	// First read the vendor string
-	let vendor_length = try_from!(rdr.read_u32::<LittleEndian>()) as usize;
-	let mut vendor_buf = vec![0; vendor_length]; // TODO fix this, we initialize memory for NOTHING!!! Out of some reason, this is seen as "unsafe" by rustc.
-	try_from!(rdr.read_exact(&mut vendor_buf));
-	let vendor = try_from!(String::from_utf8(vendor_buf));
+	// Skip over the vendor string
+	let vendor_length = try_from!(rdr.read_u32::<LittleEndian>());
+	try_from!(skip_bytes(&mut rdr, vendor_length));
 
-	// Now read the comments
-	let comment_count = try_from!(rdr.read_u32::<LittleEndian>()) as usize;
-	let mut comment_list = Vec::with_capacity(comment_count);
+	// Skip over the comments
+	let comment_count = try_from!(rdr.read_u32::<LittleEndian>());
 	for _ in 0..comment_count {
-		let comment_length = try_from!(rdr.read_u32::<LittleEndian>()) as usize;
-		let mut comment_buf = vec![0; comment_length]; // TODO fix this, we initialize memory for NOTHING!!! Out of some reason, this is seen as "unsafe" by rustc.
-		try_from!(rdr.read_exact(&mut comment_buf));
-		let comment = match String::from_utf8(comment_buf) {
-			Ok(comment) => comment,
-			// Uncomment for closer compliance with the spec.
-			// The spec explicitly states that the comment entries
-			// should be UTF-8 formatted, however it seems that other
-			// decoder libraries tolerate non-UTF-8 formatted strings
-			// in comments. This has led to some files circulating
-			// with such errors inside. If we deny to decode such files,
-			// lewton would be the odd one out. Thus we just
-			// gracefully ignore them.
-			Err(_) => continue,
-		};
-		let eq_idx = match comment.find("=") {
-			Some(k) => k,
-			// Uncomment for closer compliance with the spec.
-			// It appears that some ogg files have fields without a = sign in the comments.
-			// Well there is not much we can do but gracefully ignore their stuff.
-			None => continue, // try_from!(Err(HeaderReadError::HeaderBadFormat))
-		};
-		let (key_eq, val) = comment.split_at(eq_idx + 1);
-		let (key, _) = key_eq.split_at(eq_idx);
-		comment_list.push((String::from(key), String::from(val)));
+		let comment_length = try_from!(rdr.read_u32::<LittleEndian>());
+		try_from!(skip_bytes(&mut rdr, comment_length));
 	}
 	let framing = try_from!(rdr.read_u8());
 	if framing != 1 {
 		try_from!(Err(HeaderReadError::HeaderBadFormat));
 	}
-	let hdr: CommentHeader = CommentHeader { vendor, comment_list };
-	return Ok(hdr);
+	return Ok(());
+}
+
+/// Advances the cursor by `len` bytes, erroring out if the packet is too short
+fn skip_bytes(rdr: &mut Cursor<&[u8]>, len: u32) -> Result<(), HeaderReadError> {
+	let end = rdr.position() + len as u64;
+	if end > rdr.get_ref().len() as u64 {
+		return Err(HeaderReadError::EndOfPacket);
+	}
+	rdr.set_position(end);
+	return Ok(());
 }
 
 #[derive(Clone)]

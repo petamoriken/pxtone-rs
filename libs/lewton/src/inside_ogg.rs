@@ -21,7 +21,7 @@ use crate::samples::{InterleavedSamples, Samples};
 use ogg::{Packet, PacketReader};
 use std::io::{Read, Seek};
 
-/// Reads the three vorbis headers from an ogg stream as well as stream serial information
+/// Reads the vorbis headers from an ogg stream as well as stream serial information
 pub fn read_headers<'a, T: Read + Seek + 'a>(rdr: &mut PacketReader<T>) -> Result<(HeaderSet, u32), VorbisError> {
 	let pck: Packet = try_from!(rdr.read_packet_expected());
 	let ident_hdr = try_from!(read_header_ident(&pck.data));
@@ -31,7 +31,7 @@ pub fn read_headers<'a, T: Read + Seek + 'a>(rdr: &mut PacketReader<T>) -> Resul
 	while pck.stream_serial() != stream_serial {
 		pck = try_from!(rdr.read_packet_expected());
 	}
-	let comment_hdr = try_from!(read_header_comment(&pck.data));
+	try_from!(read_header_comment(&pck.data));
 
 	let mut pck: Packet = try_from!(rdr.read_packet_expected());
 	while pck.stream_serial() != stream_serial {
@@ -44,7 +44,7 @@ pub fn read_headers<'a, T: Read + Seek + 'a>(rdr: &mut PacketReader<T>) -> Resul
 	));
 
 	rdr.delete_unread_packets();
-	return Ok(((ident_hdr, comment_hdr, setup_hdr), pck.stream_serial()));
+	return Ok(((ident_hdr, setup_hdr), pck.stream_serial()));
 }
 
 /**
@@ -67,7 +67,6 @@ pub struct OggStreamReader<T: Read + Seek> {
 	stream_serial: u32,
 
 	pub ident_hdr: IdentHeader,
-	pub comment_hdr: CommentHeader,
 	pub setup_hdr: SetupHeader,
 
 	cur_absgp: Option<u64>,
@@ -83,12 +82,11 @@ impl<T: Read + Seek> OggStreamReader<T> {
 	/// The `new` function is a nice wrapper around this function that
 	/// also creates the ogg reader.
 	pub fn from_ogg_reader(mut rdr: PacketReader<T>) -> Result<Self, VorbisError> {
-		let ((ident_hdr, comment_hdr, setup_hdr), stream_serial) = try_from!(read_headers(&mut rdr));
+		let ((ident_hdr, setup_hdr), stream_serial) = try_from!(read_headers(&mut rdr));
 		return Ok(OggStreamReader {
 			rdr,
 			pwr: PreviousWindowRight::new(),
 			ident_hdr,
-			comment_hdr,
 			setup_hdr,
 			stream_serial,
 			cur_absgp: None,
@@ -110,7 +108,7 @@ impl<T: Read + Seek> OggStreamReader<T> {
 					let ident_hdr = try_from!(read_header_ident(&pck.data));
 
 					let pck: Packet = try_from!(self.rdr.read_packet_expected());
-					let comment_hdr = try_from!(read_header_comment(&pck.data));
+					try_from!(read_header_comment(&pck.data));
 
 					let pck: Packet = try_from!(self.rdr.read_packet_expected());
 					let setup_hdr = try_from!(read_header_setup(
@@ -122,7 +120,6 @@ impl<T: Read + Seek> OggStreamReader<T> {
 					// Update the context
 					self.pwr = PreviousWindowRight::new();
 					self.ident_hdr = ident_hdr;
-					self.comment_hdr = comment_hdr;
 					self.setup_hdr = setup_hdr;
 					self.stream_serial = pck.stream_serial();
 					self.cur_absgp = None;
