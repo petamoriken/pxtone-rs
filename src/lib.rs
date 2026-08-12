@@ -8,6 +8,7 @@ pub mod unit;
 pub(crate) mod effect;
 pub(crate) mod pulse;
 pub(crate) mod read_ext;
+pub(crate) mod sort;
 pub(crate) mod woice;
 
 #[cfg(target_family = "wasm")]

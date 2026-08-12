@@ -1,5 +1,6 @@
 use crate::error::PxtoneError;
 use crate::read_ext::ReadExt;
+use crate::sort::stable_sort_by;
 use byteorder::{LE, ReadBytesExt};
 use std::io::{Read, Seek};
 
@@ -167,10 +168,8 @@ impl EventList {
 
     // Sort in chronological order (priority is used as a tiebreaker).
     // Lower numeric priority values should come first for same-tick events.
-    self.events.sort_by(|a, b| {
-      a.tick
-        .cmp(&b.tick)
-        .then_with(|| compare_priority(a.kind, b.kind).cmp(&0))
+    stable_sort_by(&mut self.events, |a, b| {
+      a.tick < b.tick || (a.tick == b.tick && compare_priority(a.kind, b.kind) <= 0)
     });
 
     Ok(())

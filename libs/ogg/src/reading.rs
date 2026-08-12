@@ -34,7 +34,11 @@ pub enum OggReadError {
 	/// Mismatch of the hash value with (expected, calculated) value.
 	HashMismatch(u32, u32),
 	/// I/O error occured.
-	ReadError(io::Error),
+	///
+	/// Unlike upstream ogg, the `io::Error` is not carried along: keeping it
+	/// would pull the `Debug`/`Display` implementations of `io::Error` (and with
+	/// them a good chunk of `core::fmt`) into every binary.
+	ReadError,
 	/// Some constraint required by the spec was not met.
 	InvalidData,
 }
@@ -45,7 +49,7 @@ impl OggReadError {
 			OggReadError::NoCapturePatternFound => "No Ogg capture pattern found",
 			OggReadError::InvalidStreamStructVer(_) => "A non zero stream structure version was passed",
 			OggReadError::HashMismatch(_, _) => "CRC32 hash mismatch",
-			OggReadError::ReadError(_) => "I/O error",
+			OggReadError::ReadError => "I/O error",
 			OggReadError::InvalidData => "Constraint violated",
 		}
 	}
@@ -54,13 +58,6 @@ impl OggReadError {
 impl error::Error for OggReadError {
 	fn description(&self) -> &str {
 		self.description_str()
-	}
-
-	fn cause(&self) -> Option<&dyn error::Error> {
-		match *self {
-			OggReadError::ReadError(ref err) => Some(err as &dyn error::Error),
-			_ => None,
-		}
 	}
 }
 
@@ -71,8 +68,8 @@ impl Display for OggReadError {
 }
 
 impl From<io::Error> for OggReadError {
-	fn from(err: io::Error) -> OggReadError {
-		return OggReadError::ReadError(err);
+	fn from(_err: io::Error) -> OggReadError {
+		return OggReadError::ReadError;
 	}
 }
 

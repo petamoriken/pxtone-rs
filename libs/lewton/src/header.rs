@@ -26,7 +26,7 @@ use crate::huffman_tree::{HuffmanError, VorbisHuffmanTree};
 use byteorder::{LittleEndian, ReadBytesExt};
 use std::error;
 use std::fmt;
-use std::io::{Cursor, Error, ErrorKind};
+use std::io::{Cursor, Error};
 use std::string::FromUtf8Error;
 
 /// Errors that can occur during Header decoding
@@ -77,11 +77,12 @@ impl From<HuffmanError> for HeaderReadError {
 }
 
 impl From<Error> for HeaderReadError {
-	fn from(err: Error) -> HeaderReadError {
-		match err.kind() {
-			ErrorKind::UnexpectedEof => HeaderReadError::EndOfPacket,
-			_ => panic!("Non EOF Error occured when reading from Cursor<&[u8]>: {}", err),
-		}
+	fn from(_err: Error) -> HeaderReadError {
+		// Reading from a `Cursor<&[u8]>` can only ever fail with `UnexpectedEof`.
+		// Upstream panics with the formatted error for every other kind, which
+		// drags the `Display`/`Debug` code of `io::Error` into the binary, so
+		// treat everything as the end of the packet instead.
+		HeaderReadError::EndOfPacket
 	}
 }
 
@@ -848,7 +849,7 @@ fn read_floor(rdr: &mut BitpackCursor, codebook_cnt: u16, blocksizes: (u8, u8)) 
 			// Now do an uniqueness check on floor1_x_list
 			// to check decodability.
 			let mut floor1_x_list_sorted = floor1_x_list.iter().cloned().enumerate().collect::<Vec<_>>();
-			floor1_x_list_sorted.sort_by(|a, b| a.1.cmp(&b.1));
+			insertion_sort_by_x(&mut floor1_x_list_sorted);
 			// 0 is guaranteed to be in the list,
 			// and due to sorting it will be first.
 			let mut last = 1;
@@ -875,6 +876,20 @@ fn read_floor(rdr: &mut BitpackCursor, codebook_cnt: u16, blocksizes: (u8, u8)) 
 		},
 		// Type greater than 1 is error condition per spec
 		_ => Err(HeaderReadError::HeaderBadFormat),
+	}
+}
+
+/// Sorts `(index, x)` pairs by `x`, keeping equal entries in order.
+///
+/// The x lists of a floor are short, and the standard library's sort would add
+/// several kilobytes of code to the binary, so sort them the simple way.
+fn insertion_sort_by_x(list: &mut [(usize, u32)]) {
+	for i in 1..list.len() {
+		let mut j = i;
+		while j > 0 && list[j - 1].1 > list[j].1 {
+			list.swap(j - 1, j);
+			j -= 1;
+		}
 	}
 }
 
