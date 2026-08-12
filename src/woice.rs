@@ -680,10 +680,8 @@ fn update_wave_ptv(
 // or leaving the tail of `dst` untouched as needed.
 fn decode_ogg_into(data: &[u8], dst: &mut [u8]) -> Result<(), PxtoneError> {
   use lewton::inside_ogg::OggStreamReader;
-  use std::io::Cursor;
 
-  let cursor = Cursor::new(data);
-  let mut reader = OggStreamReader::new(cursor).map_err(PxtoneError::OggVorbis)?;
+  let mut reader = OggStreamReader::new(data).map_err(PxtoneError::OggVorbis)?;
 
   let mut written = 0;
   while let Some(pck) = reader

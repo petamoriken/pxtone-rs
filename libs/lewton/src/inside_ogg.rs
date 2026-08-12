@@ -19,21 +19,20 @@ use crate::header::HeaderSet;
 use crate::header::*;
 use crate::samples::{InterleavedSamples, Samples};
 use ogg::{Packet, PacketReader};
-use std::io::{Read, Seek};
 
 /// Reads the vorbis headers from an ogg stream as well as stream serial information
-pub fn read_headers<'a, T: Read + Seek + 'a>(rdr: &mut PacketReader<T>) -> Result<(HeaderSet, u32), VorbisError> {
-	let pck: Packet = try_from!(rdr.read_packet_expected());
+pub fn read_headers(rdr: &mut PacketReader<'_>) -> Result<(HeaderSet, u32), VorbisError> {
+	let pck: Packet<'_> = try_from!(rdr.read_packet_expected());
 	let ident_hdr = try_from!(read_header_ident(&pck.data));
 	let stream_serial = pck.stream_serial();
 
-	let mut pck: Packet = try_from!(rdr.read_packet_expected());
+	let mut pck: Packet<'_> = try_from!(rdr.read_packet_expected());
 	while pck.stream_serial() != stream_serial {
 		pck = try_from!(rdr.read_packet_expected());
 	}
 	try_from!(read_header_comment(&pck.data));
 
-	let mut pck: Packet = try_from!(rdr.read_packet_expected());
+	let mut pck: Packet<'_> = try_from!(rdr.read_packet_expected());
 	while pck.stream_serial() != stream_serial {
 		pck = try_from!(rdr.read_packet_expected());
 	}
@@ -60,8 +59,8 @@ in the case of ogv, is not supported.
 If you need support for this, you need to use the lower level methods
 instead.
 */
-pub struct OggStreamReader<T: Read + Seek> {
-	rdr: PacketReader<T>,
+pub struct OggStreamReader<'a> {
+	rdr: PacketReader<'a>,
 	pwr: PreviousWindowRight,
 
 	stream_serial: u32,
@@ -72,16 +71,16 @@ pub struct OggStreamReader<T: Read + Seek> {
 	cur_absgp: Option<u64>,
 }
 
-impl<T: Read + Seek> OggStreamReader<T> {
-	/// Constructs a new OggStreamReader from a given implementation of `Read + Seek`.
-	pub fn new(rdr: T) -> Result<Self, VorbisError> {
-		OggStreamReader::from_ogg_reader(PacketReader::new(rdr))
+impl<'a> OggStreamReader<'a> {
+	/// Constructs a new OggStreamReader for a physical ogg stream in memory.
+	pub fn new(data: &'a [u8]) -> Result<Self, VorbisError> {
+		OggStreamReader::from_ogg_reader(PacketReader::new(data))
 	}
 	/// Constructs a new OggStreamReader from a given Ogg PacketReader.
 	///
 	/// The `new` function is a nice wrapper around this function that
 	/// also creates the ogg reader.
-	pub fn from_ogg_reader(mut rdr: PacketReader<T>) -> Result<Self, VorbisError> {
+	pub fn from_ogg_reader(mut rdr: PacketReader<'a>) -> Result<Self, VorbisError> {
 		let ((ident_hdr, setup_hdr), stream_serial) = try_from!(read_headers(&mut rdr));
 		return Ok(OggStreamReader {
 			rdr,
@@ -92,10 +91,10 @@ impl<T: Read + Seek> OggStreamReader<T> {
 			cur_absgp: None,
 		});
 	}
-	pub fn into_inner(self) -> PacketReader<T> {
+	pub fn into_inner(self) -> PacketReader<'a> {
 		self.rdr
 	}
-	fn read_next_audio_packet(&mut self) -> Result<Option<Packet>, VorbisError> {
+	fn read_next_audio_packet(&mut self) -> Result<Option<Packet<'a>>, VorbisError> {
 		loop {
 			let pck = match try_from!(self.rdr.read_packet()) {
 				Some(p) => p,
@@ -107,10 +106,10 @@ impl<T: Read + Seek> OggStreamReader<T> {
 					// re-initialize the internal context.
 					let ident_hdr = try_from!(read_header_ident(&pck.data));
 
-					let pck: Packet = try_from!(self.rdr.read_packet_expected());
+					let pck: Packet<'_> = try_from!(self.rdr.read_packet_expected());
 					try_from!(read_header_comment(&pck.data));
 
-					let pck: Packet = try_from!(self.rdr.read_packet_expected());
+					let pck: Packet<'_> = try_from!(self.rdr.read_packet_expected());
 					let setup_hdr = try_from!(read_header_setup(
 						&pck.data,
 						ident_hdr.audio_channels,
@@ -193,7 +192,7 @@ impl<T: Read + Seek> OggStreamReader<T> {
 	}
 
 	#[inline]
-	pub fn dec_packet_generic<S: Samples>(&mut self, pck: Packet) -> Result<S, VorbisError> {
+	pub fn dec_packet_generic<S: Samples>(&mut self, pck: Packet<'_>) -> Result<S, VorbisError> {
 		let mut decoded_pck: S = try_from!(read_audio_packet_generic(
 			&self.ident_hdr,
 			&self.setup_hdr,
@@ -233,7 +232,7 @@ impl<T: Read + Seek> OggStreamReader<T> {
 	/// increments.
 	pub fn skip_samples_linear<S: Samples>(&mut self, to_skip: usize) -> Result<(Option<S>, usize), VorbisError> {
 		let mut to_skip = to_skip;
-		let mut last_pck: Option<Packet> = None;
+		let mut last_pck: Option<Packet<'_>> = None;
 		let mut next_pck;
 
 		loop {
@@ -293,20 +292,5 @@ impl<T: Read + Seek> OggStreamReader<T> {
 	/// as number of PCM samples, on a per channel basis.
 	pub fn get_last_absgp(&self) -> Option<u64> {
 		self.cur_absgp
-	}
-
-	/// Seeks to the specified absolute granule position, with a page granularity.
-	///
-	/// The granularity is per-page, and the obtained position is
-	/// then <= the seeked absgp.
-	///
-	/// In the case of ogg/vorbis, the absolute granule position is given
-	/// as number of PCM samples, on a per channel basis.
-	pub fn seek_absgp_pg(&mut self, absgp: u64) -> Result<(), VorbisError> {
-		try_from!(self.rdr.seek_absgp(None, absgp));
-		// Reset the internal state after the seek
-		self.cur_absgp = None;
-		self.pwr = PreviousWindowRight::new();
-		Ok(())
 	}
 }

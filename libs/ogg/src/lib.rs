@@ -6,22 +6,28 @@
 // specified in the LICENSE file attached to this
 // source distribution.
 
+#![no_std]
 #![forbid(unsafe_code)]
 
 /*!
-Ogg container decoder and encoder
+Ogg container decoder
 
-The most interesting structures for in this
-mod are `PacketReader` and `PacketWriter`.
+The most interesting structure in this mod is `PacketReader`.
+
+Unlike upstream ogg this fork decodes from a byte slice rather than from an
+`io::Read`, it is `no_std` (`alloc` is required), and the encoder is only built
+for the tests.
 */
 
-extern crate byteorder;
+extern crate alloc;
 
 #[cfg(test)]
-mod test;
+extern crate std;
 
+/// Used by the test only encoder.
+#[cfg(test)]
 macro_rules! tri {
-	($e:expr_2021) => {
+	($e:expr) => {
 		match $e {
 			Ok(val) => val,
 			Err(err) => return Err(err.into()),
@@ -29,12 +35,20 @@ macro_rules! tri {
 	};
 }
 
+#[cfg(test)]
+mod test;
+
 mod crc;
 pub mod reading;
-pub mod writing;
+/// The encoder is only used to build streams for the reader's tests, so parts of
+/// it are unused.
+#[cfg(test)]
+#[allow(dead_code)]
+mod writing;
 
 pub use crate::reading::{OggReadError, PacketReader};
-pub use crate::writing::{PacketWriteEndInfo, PacketWriter};
+
+use alloc::borrow::Cow;
 
 /**
 Ogg packet representation.
@@ -45,9 +59,12 @@ Every packet belongs to a *logical* bitstream. The *logical* bitstreams then for
 
 Every logical bitstream is identified by the serial number its pages have stored. The Packet struct contains a field for that number as well, so that one can find out which logical bitstream the Packet belongs to.
 */
-pub struct Packet {
+pub struct Packet<'a> {
 	/// The data the `Packet` contains
-	pub data: Vec<u8>,
+	///
+	/// Borrowed from the stream, unless the packet spans multiple pages and had
+	/// to be glued together.
+	pub data: Cow<'a, [u8]>,
 	/// `true` iff this packet is the first one in the page.
 	first_packet_pg: bool,
 	/// `true` iff this packet is the first one in the logical bitstream.
@@ -61,12 +78,9 @@ pub struct Packet {
 	absgp_page: u64,
 	/// Serial number. Uniquely identifying the logical bitstream.
 	stream_serial: u32,
-	/*/// Packet counter
-	/// Why u64? There are MAX_U32 pages, and every page has up to 128 packets. u32 wouldn't be sufficient here...
-	pub sequence_num :u64,*/ // TODO perhaps add this later on...
 }
 
-impl Packet {
+impl Packet<'_> {
 	/// Returns whether the packet is the first one starting in the page
 	pub fn first_in_page(&self) -> bool {
 		self.first_packet_pg

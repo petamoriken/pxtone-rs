@@ -10,6 +10,9 @@
 Writing logic
 */
 
+use std::boxed::Box;
+use std::vec::Vec;
+
 use crate::crc::vorbis_crc32_update;
 use byteorder::{LittleEndian, WriteBytesExt};
 use std::collections::HashMap;
@@ -336,7 +339,7 @@ fn test_recapture() {
 	//print_u8_slice(c.get_ref());
 	assert_eq!(c.seek(SeekFrom::Start(0)).unwrap(), 0);
 	{
-		let mut r = PacketReader::new(c);
+		let mut r = PacketReader::new(c.get_ref());
 		let p1 = r.read_packet().unwrap().unwrap();
 		assert_eq!(test_arr, *p1.data);
 		let p2 = r.read_packet().unwrap().unwrap();

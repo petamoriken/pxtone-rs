@@ -9,12 +9,11 @@ mod common;
 use common::{pcm_to_wav, wav_matches};
 use lewton::inside_ogg::OggStreamReader;
 use std::fs;
-use std::io::Cursor;
 use std::path::Path;
 
 /// Mirrors `decode_ogg` in `src/woice.rs`.
 fn decode_ogg_to_wav(data: &[u8], path: &Path) -> Vec<u8> {
-  let mut reader = OggStreamReader::new(Cursor::new(data))
+  let mut reader = OggStreamReader::new(data)
     .unwrap_or_else(|e| panic!("{}: reading headers failed: {:?}", path.display(), e));
 
   let channels = reader.ident_hdr.audio_channels;
