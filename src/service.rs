@@ -361,7 +361,9 @@ impl PxtoneService {
   ///
   /// Call [`tones_ready`](Self::tones_ready) after loading.
   pub fn read(&mut self, data: Vec<u8>) -> Result<(), PxtoneError> {
-    let mut cursor = std::io::Cursor::new(&data);
+    // Use a `&[u8]` cursor (not `&Vec<u8>`) so that the parser is monomorphized
+    // only once, shared with the `Cursor<&[u8]>` users in `src/wasm/mod.rs`.
+    let mut cursor = std::io::Cursor::new(data.as_slice());
     self.read_metadata(&mut cursor)?;
     self.raw_data = data;
     Ok(())
