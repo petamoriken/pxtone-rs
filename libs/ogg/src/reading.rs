@@ -19,7 +19,7 @@ use std::error;
 use std::fmt::{Display, Error as FmtError, Formatter};
 use std::io;
 use std::io::Seek;
-use std::io::{Cursor, Error, ErrorKind, Read, SeekFrom, Write};
+use std::io::{Cursor, Error, ErrorKind, Read, SeekFrom};
 use std::mem::replace;
 
 /// Error that can be raised when decoding an Ogg transport.
@@ -368,22 +368,18 @@ impl BasePacketReader {
 
 			// Then do the copying
 			for pck in pg_info.last_overlap_pck.iter() {
-				cont.write_all(pck).unwrap();
+				cont.extend_from_slice(pck);
 			}
 			// Now reset the overlap container again
 			pg_info.last_overlap_pck = Vec::new();
-			cont.write_all(&pg_info.page_body[offs as usize..(offs + len) as usize])
-				.unwrap();
+			cont.extend_from_slice(&pg_info.page_body[offs as usize..(offs + len) as usize]);
 
 			cont
 		} else {
-			let mut cont: Vec<u8> = Vec::with_capacity(len as usize);
 			// TODO The copy below is totally unneccessary. It is only needed so that we don't have to carry around the old Vec's.
 			// TODO get something like the shared_slice crate for RefCells, so that we can also have mutable data, shared through
 			// slices.
-			let cont_slice: &[u8] = &pg_info.page_body[offs as usize..(offs + len) as usize];
-			cont.write_all(cont_slice).unwrap();
-			cont
+			pg_info.page_body[offs as usize..(offs + len) as usize].to_vec()
 		};
 
 		let first_pck_in_pg = pg_info.is_first_pck_in_pg();
@@ -452,9 +448,7 @@ impl BasePacketReader {
 					// we encounter the next segment with length < 255 (doesnt have to be in this page)
 					let (offs, len) = inf.bi.packet_positions[inf.packet_idx as usize];
 					if len as usize != inf.page_body.len() {
-						let mut tmp = Vec::with_capacity(len as usize);
-						tmp.write_all(&inf.page_body[offs as usize..(offs + len) as usize])
-							.unwrap();
+						let tmp = inf.page_body[offs as usize..(offs + len) as usize].to_vec();
 						inf.last_overlap_pck.push(tmp);
 					} else {
 						// Little optimisation: don't copy if not neccessary
