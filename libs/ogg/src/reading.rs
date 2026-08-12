@@ -10,17 +10,17 @@
 Reading logic
 */
 
-use std::error;
-use std::io;
-use std::io::{Cursor, Read, Write, SeekFrom, Error, ErrorKind};
-use byteorder::{ReadBytesExt, LittleEndian};
-use std::collections::HashMap;
-use std::collections::hash_map::Entry;
-use std::fmt::{Display, Formatter, Error as FmtError};
-use std::mem::replace;
+use byteorder::{LittleEndian, ReadBytesExt};
 use crc::vorbis_crc32_update;
-use Packet;
+use std::collections::hash_map::Entry;
+use std::collections::HashMap;
+use std::error;
+use std::fmt::{Display, Error as FmtError, Formatter};
+use std::io;
 use std::io::Seek;
+use std::io::{Cursor, Error, ErrorKind, Read, SeekFrom, Write};
+use std::mem::replace;
+use Packet;
 
 /// Error that can be raised when decoding an Ogg transport.
 #[derive(Debug)]
@@ -43,8 +43,7 @@ impl OggReadError {
 	fn description_str(&self) -> &str {
 		match *self {
 			OggReadError::NoCapturePatternFound => "No Ogg capture pattern found",
-			OggReadError::InvalidStreamStructVer(_) =>
-				"A non zero stream structure version was passed",
+			OggReadError::InvalidStreamStructVer(_) => "A non zero stream structure version was passed",
 			OggReadError::HashMismatch(_, _) => "CRC32 hash mismatch",
 			OggReadError::ReadError(_) => "I/O error",
 			OggReadError::InvalidData => "Constraint violated",
@@ -60,19 +59,19 @@ impl error::Error for OggReadError {
 	fn cause(&self) -> Option<&dyn error::Error> {
 		match *self {
 			OggReadError::ReadError(ref err) => Some(err as &dyn error::Error),
-			_ => None
+			_ => None,
 		}
 	}
 }
 
 impl Display for OggReadError {
-	fn fmt(&self, fmt :&mut Formatter) -> Result<(), FmtError> {
+	fn fmt(&self, fmt: &mut Formatter) -> Result<(), FmtError> {
 		write!(fmt, "{}", Self::description_str(self))
 	}
 }
 
 impl From<io::Error> for OggReadError {
-	fn from(err :io::Error) -> OggReadError {
+	fn from(err: io::Error) -> OggReadError {
 		return OggReadError::ReadError(err);
 	}
 }
@@ -80,40 +79,40 @@ impl From<io::Error> for OggReadError {
 /// Containing information about an OGG page that is shared between multiple places
 struct PageBaseInfo {
 	/// `true`: the first packet is continued from the page before. `false`: if it's a "fresh" one
-	starts_with_continued :bool,
+	starts_with_continued: bool,
 	/// `true` if this page is the first one in the logical bitstream
-	first_page :bool,
+	first_page: bool,
 	/// `true` if this page is the last one in the logical bitstream
-	last_page :bool,
+	last_page: bool,
 	/// Absolute granule position. The codec defines further meaning.
-	absgp :u64,
+	absgp: u64,
 	/// Page counter
-	sequence_num :u32,
+	sequence_num: u32,
 	/// Packet information:
 	/// index is number of packet,
 	/// tuple is (offset, length) of packet
 	/// if ends_with_continued is true, the last element will contain information
 	/// about the continued packet
-	packet_positions :Vec<(u16,u16)>,
+	packet_positions: Vec<(u16, u16)>,
 	/// `true` if the packet is continued in subsequent page(s)
 	/// `false` if the packet has a segment of length < 255 inside this page
-	ends_with_continued :bool,
+	ends_with_continued: bool,
 }
 
 /// Internal helper struct for PacketReader state
 struct PageInfo {
 	/// Basic information about the last read page
-	bi :PageBaseInfo,
+	bi: PageBaseInfo,
 	/// The index of the first "unread" packet
-	packet_idx :u8,
+	packet_idx: u8,
 	/// Contains the package data
-	page_body :Vec<u8>,
+	page_body: Vec<u8>,
 
 	/// If there is a residue from previous pages in terms of a package spanning multiple
 	/// pages, this field contains it. Having this Vec<Vec<u8>> and
 	/// not Vec<u8> ensures to give us O(n) complexity, not O(n^2)
 	/// for `n` as number of pages that the packet is contained in.
-	last_overlap_pck :Vec<Vec<u8>>,
+	last_overlap_pck: Vec<Vec<u8>>,
 }
 
 impl PageInfo {
@@ -127,8 +126,7 @@ impl PageInfo {
 	/// If the first "unread" packet isn't completed in this page
 	/// (spans page borders), this returns `false`.
 	fn is_last_pck_in_pg(&self) -> bool {
-		return (self.packet_idx + 1 + (self.bi.ends_with_continued as u8)) as usize
-			== self.bi.packet_positions.len();
+		return (self.packet_idx + 1 + (self.bi.ends_with_continued as u8)) as usize == self.bi.packet_positions.len();
 	}
 }
 
@@ -138,20 +136,21 @@ pub struct OggPage(PageParser);
 impl OggPage {
 	/// Returns whether there is an ending packet in the page
 	fn has_packet_end(&self) -> bool {
-		(self.0.bi.packet_positions.len() -
-			self.0.bi.ends_with_continued as usize) > 0
+		(self.0.bi.packet_positions.len() - self.0.bi.ends_with_continued as usize) > 0
 	}
 	/// Returns whether there is a packet that both
 	/// starts and ends inside the page
 	fn has_whole_packet(&self) -> bool {
-		self.0.bi.packet_positions.len().saturating_sub(
-			self.0.bi.ends_with_continued as usize +
-			self.0.bi.starts_with_continued as usize) > 0
+		self.0
+			.bi
+			.packet_positions
+			.len()
+			.saturating_sub(self.0.bi.ends_with_continued as usize + self.0.bi.starts_with_continued as usize)
+			> 0
 	}
 	/// Returns whether there is a starting packet in the page
 	fn has_packet_start(&self) -> bool {
-		(self.0.bi.packet_positions.len() -
-			self.0.bi.starts_with_continued as usize) > 0
+		(self.0.bi.packet_positions.len() - self.0.bi.starts_with_continued as usize) > 0
 	}
 }
 
@@ -166,16 +165,16 @@ Then later code uses the `OggPage` returned by the `parse_packet_data` function.
 pub struct PageParser {
 	// Members packet_positions, ends_with_continued and packet_count
 	// get populated after segments have been parsed
-	bi :PageBaseInfo,
+	bi: PageBaseInfo,
 
-	stream_serial :u32,
-	checksum :u32,
+	stream_serial: u32,
+	checksum: u32,
 	header_buf: [u8; 27],
 	/// Number of packet ending segments
-	packet_count :u16, // Gets populated gafter segments have been parsed
+	packet_count: u16, // Gets populated gafter segments have been parsed
 	/// after segments have been parsed, this contains the segments buffer,
 	/// after the packet data have been read, this contains the packets buffer.
-	segments_or_packets_buf :Vec<u8>,
+	segments_or_packets_buf: Vec<u8>,
 }
 
 impl PageParser {
@@ -190,7 +189,7 @@ impl PageParser {
 	/// Returns a page parser, and the requested size of the segments array.
 	/// You should allocate and fill such an array, in order to pass it to the `parse_segments`
 	/// function.
-	pub fn new(header_buf :[u8; 27]) -> Result<(PageParser, usize), OggReadError> {
+	pub fn new(header_buf: [u8; 27]) -> Result<(PageParser, usize), OggReadError> {
 		let mut header_rdr = Cursor::new(header_buf);
 		header_rdr.set_position(4);
 		let stream_structure_version = tri!(header_rdr.read_u8());
@@ -200,27 +199,28 @@ impl PageParser {
 		let header_type_flag = header_rdr.read_u8().unwrap();
 		let stream_serial;
 
-		Ok((PageParser {
-			bi : PageBaseInfo {
-				starts_with_continued : header_type_flag & 0x01u8 != 0,
-				first_page : header_type_flag & 0x02u8 != 0,
-				last_page : header_type_flag & 0x04u8 != 0,
-				absgp : header_rdr.read_u64::<LittleEndian>().unwrap(),
-				sequence_num : {
-					stream_serial = header_rdr.read_u32::<LittleEndian>().unwrap();
-					header_rdr.read_u32::<LittleEndian>().unwrap()
+		Ok((
+			PageParser {
+				bi: PageBaseInfo {
+					starts_with_continued: header_type_flag & 0x01u8 != 0,
+					first_page: header_type_flag & 0x02u8 != 0,
+					last_page: header_type_flag & 0x04u8 != 0,
+					absgp: header_rdr.read_u64::<LittleEndian>().unwrap(),
+					sequence_num: {
+						stream_serial = header_rdr.read_u32::<LittleEndian>().unwrap();
+						header_rdr.read_u32::<LittleEndian>().unwrap()
+					},
+					packet_positions: Vec::new(),
+					ends_with_continued: false,
 				},
-				packet_positions : Vec::new(),
-				ends_with_continued : false,
+				stream_serial,
+				checksum: header_rdr.read_u32::<LittleEndian>().unwrap(),
+				header_buf,
+				packet_count: 0,
+				segments_or_packets_buf: Vec::new(),
 			},
-			stream_serial,
-			checksum : header_rdr.read_u32::<LittleEndian>().unwrap(),
-			header_buf,
-			packet_count : 0,
-			segments_or_packets_buf :Vec::new(),
-		},
 			// Number of page segments
-			header_rdr.read_u8().unwrap() as usize
+			header_rdr.read_u8().unwrap() as usize,
 		))
 	}
 
@@ -229,9 +229,9 @@ impl PageParser {
 	///
 	/// You should allocate and fill such an array, in order to pass it to the `parse_packet_data`
 	/// function.
-	pub fn parse_segments(&mut self, segments_buf :Vec<u8>) -> usize {
-		let mut page_siz :u16 = 0; // Size of the page's body
-		// Whether our page ends with a continued packet
+	pub fn parse_segments(&mut self, segments_buf: Vec<u8>) -> usize {
+		let mut page_siz: u16 = 0; // Size of the page's body
+							 // Whether our page ends with a continued packet
 		self.bi.ends_with_continued = self.bi.starts_with_continued;
 
 		// First run: get the number of packets,
@@ -244,10 +244,9 @@ impl PageParser {
 			self.bi.ends_with_continued = !(*val < 255);
 		}
 
-		let mut packets = Vec::with_capacity(self.packet_count as usize
-			+ self.bi.ends_with_continued as usize);
-		let mut cur_packet_siz :u16 = 0;
-		let mut cur_packet_offs :u16 = 0;
+		let mut packets = Vec::with_capacity(self.packet_count as usize + self.bi.ends_with_continued as usize);
+		let mut cur_packet_siz: u16 = 0;
+		let mut cur_packet_offs: u16 = 0;
 
 		// Second run: get the offsets of the packets
 		// Not that we need it right now, but it's much more fun this way, am I right
@@ -271,8 +270,7 @@ impl PageParser {
 	/// Parses the packets data and verifies the checksum.
 	///
 	/// Returns an `OggPage` to be used by later code.
-	pub fn parse_packet_data(mut self, packet_data :Vec<u8>) ->
-			Result<OggPage, OggReadError> {
+	pub fn parse_packet_data(mut self, packet_data: Vec<u8>) -> Result<OggPage, OggReadError> {
 		// Now to hash calculation.
 		// 1. Clear the header buffer
 		self.header_buf[22] = 0;
@@ -281,10 +279,9 @@ impl PageParser {
 		self.header_buf[25] = 0;
 
 		// 2. Calculate the hash
-		let mut hash_calculated :u32;
+		let mut hash_calculated: u32;
 		hash_calculated = vorbis_crc32_update(0, &self.header_buf);
-		hash_calculated = vorbis_crc32_update(hash_calculated,
-			&self.segments_or_packets_buf);
+		hash_calculated = vorbis_crc32_update(hash_calculated, &self.segments_or_packets_buf);
 		hash_calculated = vorbis_crc32_update(hash_calculated, &packet_data);
 
 		// 3. Compare to the extracted one
@@ -322,18 +319,17 @@ pub struct BasePacketReader {
 	// TODO the hashmap plus the set is perhaps smart ass perfect design but could be made more performant I guess...
 	// I mean: in > 99% of all cases we'll just have one or two streams.
 	// AND: their setup changes only very rarely.
-
 	/// Contains info about all logical streams that
-	page_infos :HashMap<u32, PageInfo>,
+	page_infos: HashMap<u32, PageInfo>,
 
 	/// Contains the stream_serial of the stream that contains some unprocessed packet data.
 	/// There is always <= 1, bc if there is one, no new pages will be read, so there is no chance for a second to be added
 	/// None if there is no such stream and one has to read a new page.
-	stream_with_stuff :Option<u32>,
+	stream_with_stuff: Option<u32>,
 
 	// Bool that is set to true when a seek of the stream has occured.
 	// This helps validator code to decide whether to accept certain strange data.
-	has_seeked :bool,
+	has_seeked: bool,
 }
 
 impl BasePacketReader {
@@ -342,8 +338,11 @@ impl BasePacketReader {
 	/// You can feed it data using the `push_page` function, and
 	/// obtain data using the `read_packet` function.
 	pub fn new() -> Self {
-		BasePacketReader { page_infos: HashMap::new(),
-			stream_with_stuff: None, has_seeked: false }
+		BasePacketReader {
+			page_infos: HashMap::new(),
+			stream_with_stuff: None,
+			has_seeked: false,
+		}
 	}
 	/// Extracts a packet from the cache, if the cache contains valid packet data,
 	/// otherwise it returns `None`.
@@ -354,22 +353,22 @@ impl BasePacketReader {
 		if self.stream_with_stuff == None {
 			return None;
 		}
-		let str_serial :u32 = self.stream_with_stuff.unwrap();
+		let str_serial: u32 = self.stream_with_stuff.unwrap();
 		let pg_info = self.page_infos.get_mut(&str_serial).unwrap();
 		let (offs, len) = pg_info.bi.packet_positions[pg_info.packet_idx as usize];
 		// If there is a continued packet, and we are at the start right now,
 		// and we actually have its end in the current page, glue it together.
-		let need_to_glue = pg_info.packet_idx == 0 &&
-				pg_info.bi.starts_with_continued &&
-				!(pg_info.bi.ends_with_continued && pg_info.bi.packet_positions.len() == 1);
-		let packet_content :Vec<u8> = if need_to_glue {
+		let need_to_glue = pg_info.packet_idx == 0
+			&& pg_info.bi.starts_with_continued
+			&& !(pg_info.bi.ends_with_continued && pg_info.bi.packet_positions.len() == 1);
+		let packet_content: Vec<u8> = if need_to_glue {
 			// First find out the size of our spanning packet
-			let mut siz :usize = 0;
+			let mut siz: usize = 0;
 			for pck in pg_info.last_overlap_pck.iter() {
 				siz += pck.len();
 			}
 			siz += len as usize;
-			let mut cont :Vec<u8> = Vec::with_capacity(siz);
+			let mut cont: Vec<u8> = Vec::with_capacity(siz);
 
 			// Then do the copying
 			for pck in pg_info.last_overlap_pck.iter() {
@@ -377,15 +376,16 @@ impl BasePacketReader {
 			}
 			// Now reset the overlap container again
 			pg_info.last_overlap_pck = Vec::new();
-			cont.write_all(&pg_info.page_body[offs as usize .. (offs + len) as usize]).unwrap();
+			cont.write_all(&pg_info.page_body[offs as usize..(offs + len) as usize])
+				.unwrap();
 
 			cont
 		} else {
-			let mut cont :Vec<u8> = Vec::with_capacity(len as usize);
+			let mut cont: Vec<u8> = Vec::with_capacity(len as usize);
 			// TODO The copy below is totally unneccessary. It is only needed so that we don't have to carry around the old Vec's.
 			// TODO get something like the shared_slice crate for RefCells, so that we can also have mutable data, shared through
 			// slices.
-			let cont_slice :&[u8] = &pg_info.page_body[offs as usize .. (offs + len) as usize];
+			let cont_slice: &[u8] = &pg_info.page_body[offs as usize..(offs + len) as usize];
 			cont.write_all(cont_slice).unwrap();
 			cont
 		};
@@ -421,7 +421,7 @@ impl BasePacketReader {
 	/// If you want the code to function properly, you should first call
 	/// `parse_segments`, then `parse_packet_data` on a `PageParser`
 	/// before passing the resulting `OggPage` to this function.
-	pub fn push_page(&mut self, page :OggPage) -> Result<(), OggReadError> {
+	pub fn push_page(&mut self, page: OggPage) -> Result<(), OggReadError> {
 		let mut pg_prs = page.0;
 		match self.page_infos.entry(pg_prs.stream_serial) {
 			Entry::Occupied(mut o) => {
@@ -457,13 +457,13 @@ impl BasePacketReader {
 					let (offs, len) = inf.bi.packet_positions[inf.packet_idx as usize];
 					if len as usize != inf.page_body.len() {
 						let mut tmp = Vec::with_capacity(len as usize);
-						tmp.write_all(&inf.page_body[offs as usize .. (offs + len) as usize]).unwrap();
+						tmp.write_all(&inf.page_body[offs as usize..(offs + len) as usize])
+							.unwrap();
 						inf.last_overlap_pck.push(tmp);
 					} else {
 						// Little optimisation: don't copy if not neccessary
-						inf.last_overlap_pck.push(replace(&mut inf.page_body, vec![0;0]));
+						inf.last_overlap_pck.push(replace(&mut inf.page_body, vec![0; 0]));
 					}
-
 				}
 				inf.bi = pg_prs.bi;
 				inf.packet_idx = 0;
@@ -498,14 +498,14 @@ impl BasePacketReader {
 					}
 				}
 				v.insert(PageInfo {
-					bi : pg_prs.bi,
+					bi: pg_prs.bi,
 					packet_idx: 0,
 					page_body: pg_prs.segments_or_packets_buf,
 					last_overlap_pck: Vec::new(),
 				});
 			},
 		}
-		let pg_has_stuff :bool = pg_prs.packet_count > 0;
+		let pg_has_stuff: bool = pg_prs.packet_count > 0;
 
 		if pg_has_stuff {
 			self.stream_with_stuff = Some(pg_prs.stream_serial);
@@ -544,23 +544,23 @@ enum UntilPageHeaderResult {
 }
 
 struct UntilPageHeaderReader {
-	mode :UntilPageHeaderReaderMode,
+	mode: UntilPageHeaderReaderMode,
 	/// Capture pattern offset. Needed so that if we only partially
 	/// recognized the capture pattern, we later on only check the
 	/// remaining part.
-	cpt_of :u8,
+	cpt_of: u8,
 	/// The return buffer.
-	ret_buf :[u8; 27],
-	read_amount :usize,
+	ret_buf: [u8; 27],
+	read_amount: usize,
 }
 
 impl UntilPageHeaderReader {
 	pub fn new() -> Self {
 		UntilPageHeaderReader {
-			mode : UntilPageHeaderReaderMode::Searching,
-			cpt_of : 0,
-			ret_buf : [0; 27],
-			read_amount : 0,
+			mode: UntilPageHeaderReaderMode::Searching,
+			cpt_of: 0,
+			ret_buf: [0; 27],
+			read_amount: 0,
 		}
 	}
 	/// Returns Some(off), where off is the offset of the last byte
@@ -568,7 +568,7 @@ impl UntilPageHeaderReader {
 	/// is not inside the passed slice.
 	///
 	/// Changes the capture pattern offset accordingly
-	fn check_arr(&mut self, arr :&[u8]) -> Option<usize> {
+	fn check_arr(&mut self, arr: &[u8]) -> Option<usize> {
 		for (i, ch) in arr.iter().enumerate() {
 			match *ch {
 				b'O' => self.cpt_of = 1,
@@ -583,23 +583,22 @@ impl UntilPageHeaderReader {
 	/// return Ok(true) if the full header has been read and can be extracted with
 	///
 	/// or return Ok(false) if the
-	pub fn do_read<R :Read>(&mut self, mut rdr :R)
-			-> Result<UntilPageHeaderResult, OggReadError> {
+	pub fn do_read<R: Read>(&mut self, mut rdr: R) -> Result<UntilPageHeaderResult, OggReadError> {
 		use self::UntilPageHeaderReaderMode::*;
 		use self::UntilPageHeaderResult as Res;
 		// The array's size is freely choseable, but must be > 27,
 		// and must well fit into an i32 (needs to be stored in SeekNeeded)
-		let mut buf :[u8; 1024] = [0; 1024];
+		let mut buf: [u8; 1024] = [0; 1024];
 
 		let rd_len = tri!(rdr.read(if self.read_amount < 27 {
 			// This is an optimisation for the most likely case:
 			// the next page directly follows the current read position.
 			// Then it would be a waste to read more than the needed amount.
-			&mut buf[0 .. 27 - self.read_amount]
+			&mut buf[0..27 - self.read_amount]
 		} else {
 			match self.mode {
 				Searching => &mut buf,
-				FoundWithNeeded(amount) => &mut buf[0 .. amount as usize],
+				FoundWithNeeded(amount) => &mut buf[0..amount as usize],
 				SeekNeeded(_) => return Ok(Res::SeekNeeded),
 				Found => return Ok(Res::Found),
 			}
@@ -633,7 +632,7 @@ impl UntilPageHeaderReader {
 			tri!(Err(OggReadError::NoCapturePatternFound));
 		}
 
-		let rd_buf = &buf[0 .. rd_len];
+		let rd_buf = &buf[0..rd_len];
 
 		use std::cmp::min;
 		let (off, needed) = match self.mode {
@@ -649,9 +648,7 @@ impl UntilPageHeaderReader {
 				// Nothing found
 				None => return Ok(Res::ReadNeeded),
 			},
-			FoundWithNeeded(needed) => {
-				(0, needed as usize)
-			},
+			FoundWithNeeded(needed) => (0, needed as usize),
 			_ => unimplemented!(),
 		};
 
@@ -659,8 +656,7 @@ impl UntilPageHeaderReader {
 
 		let copy_amount = min(needed, fnd_buf.len());
 		let start_fill = 27 - needed;
-		(&mut self.ret_buf[start_fill .. copy_amount + start_fill])
-				.copy_from_slice(&fnd_buf[0 .. copy_amount]);
+		(&mut self.ret_buf[start_fill..copy_amount + start_fill]).copy_from_slice(&fnd_buf[0..copy_amount]);
 		if fnd_buf.len() == needed {
 			// Capture pattern found!
 			self.mode = Found;
@@ -679,8 +675,7 @@ impl UntilPageHeaderReader {
 			return Ok(Res::SeekNeeded);
 		}
 	}
-	pub fn do_seek<S :Seek>(&mut self, mut skr :S)
-			-> Result<UntilPageHeaderResult, OggReadError> {
+	pub fn do_seek<S: Seek>(&mut self, mut skr: S) -> Result<UntilPageHeaderResult, OggReadError> {
 		use self::UntilPageHeaderReaderMode::*;
 		use self::UntilPageHeaderResult as Res;
 		match self.mode {
@@ -712,16 +707,19 @@ consistent when it encounters the `WouldBlock` error kind.
 If you desire async functionality, consider enabling the `async` feature
 and look into the async module.
 */
-pub struct PacketReader<T :io::Read + io::Seek> {
-	rdr :T,
+pub struct PacketReader<T: io::Read + io::Seek> {
+	rdr: T,
 
-	base_pck_rdr :BasePacketReader,
+	base_pck_rdr: BasePacketReader,
 }
 
-impl<T :io::Read + io::Seek> PacketReader<T> {
+impl<T: io::Read + io::Seek> PacketReader<T> {
 	/// Constructs a new `PacketReader` with a given `Read`.
-	pub fn new(rdr :T) -> PacketReader<T> {
-		PacketReader { rdr, base_pck_rdr : BasePacketReader::new() }
+	pub fn new(rdr: T) -> PacketReader<T> {
+		PacketReader {
+			rdr,
+			base_pck_rdr: BasePacketReader::new(),
+		}
 	}
 	/// Returns the wrapped reader, consuming the `PacketReader`.
 	pub fn into_inner(self) -> T {
@@ -753,8 +751,10 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 	pub fn read_packet_expected(&mut self) -> Result<Packet, OggReadError> {
 		match tri!(self.read_packet()) {
 			Some(p) => Ok(p),
-			None => tri!(Err(Error::new(ErrorKind::UnexpectedEof,
-				"Expected ogg packet but found end of physical stream"))),
+			None => tri!(Err(Error::new(
+				ErrorKind::UnexpectedEof,
+				"Expected ogg packet but found end of physical stream"
+			))),
 		}
 	}
 
@@ -775,7 +775,7 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 				Eof => return Ok(None),
 				Found => break,
 				ReadNeeded => tri!(r.do_read(&mut self.rdr)),
-				SeekNeeded => tri!(r.do_seek(&mut self.rdr))
+				SeekNeeded => tri!(r.do_seek(&mut self.rdr)),
 			}
 		}
 		Ok(Some(r.into_header()))
@@ -787,9 +787,9 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 	/// is at the current reader position.
 	/// Instead it searches until it finds the capture pattern.
 	fn read_ogg_page(&mut self) -> Result<Option<OggPage>, OggReadError> {
-		let header_buf :[u8; 27] = match tri!(self.read_until_pg_header()) {
+		let header_buf: [u8; 27] = match tri!(self.read_until_pg_header()) {
 			Some(s) => s,
-			None => return Ok(None)
+			None => return Ok(None),
 		};
 		let (mut pg_prs, page_segments) = tri!(PageParser::new(header_buf));
 
@@ -810,7 +810,7 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 	/// number of bytes. All new pages will be read from the new position.
 	///
 	/// This also flushes all the unread packets in the queue.
-	pub fn seek_bytes(&mut self, pos :SeekFrom) -> Result<u64, Error> {
+	pub fn seek_bytes(&mut self, pos: SeekFrom) -> Result<u64, Error> {
 		let r = tri!(self.rdr.seek(pos));
 		// Reset the internal state
 		self.base_pck_rdr.update_after_seek();
@@ -833,8 +833,7 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 	/// if `Ǹone` gets passed when multiple streams exist.
 	///
 	/// The returned bool indicates whether the seek was successful.
-	pub fn seek_absgp(&mut self, stream_serial :Option<u32>,
-			pos_goal :u64) -> Result<bool, OggReadError> {
+	pub fn seek_absgp(&mut self, stream_serial: Option<u32>, pos_goal: u64) -> Result<bool, OggReadError> {
 		macro_rules! found {
 			($pos:expr) => {{
 				// println!("found: {}", $pos);
@@ -928,8 +927,8 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 		// until a page is found.
 
 		//println!("seek start. goal = {}", pos_goal);
-		let ab_of = |pg :&OggPage| { pg.0.bi.absgp };
-		let seq_of = |pg :&OggPage| { pg.0.bi.sequence_num };
+		let ab_of = |pg: &OggPage| pg.0.bi.absgp;
+		let seq_of = |pg: &OggPage| pg.0.bi.sequence_num;
 
 		// First, find initial "boundaries"
 		// Seek to the start of the file to get the starting boundary
@@ -960,11 +959,10 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 			tri!(self.rdr.seek(SeekFrom::Start(pos_to_seek)));
 			let (pos, pg) = pg_read_match_serial!();
 			/*println!("seek {} {} . {} @ {} {} . {}",
-				ab_of(&begin_pg), ab_of(&end_pg), ab_of(&pg),
-				begin_pos, end_pos, pos);// */
+			ab_of(&begin_pg), ab_of(&end_pg), ab_of(&pg),
+			begin_pos, end_pos, pos);// */
 
-			if seq_of(&end_pg) == seq_of(&pg) ||
-					seq_of(&begin_pg) == seq_of(&pg) {
+			if seq_of(&end_pg) == seq_of(&pg) || seq_of(&begin_pg) == seq_of(&pg) {
 				//println!("switching to linear.");
 				// The bisection seek doesn't bring us any further.
 				// Switch to a linear seek to get the last details.
@@ -976,9 +974,9 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 					pos = tri!(self.rdr.seek(SeekFrom::Current(0)));
 					pg = bt!(self.read_ogg_page());
 					/*println!("absgp {} pck_start {} whole_pck {} pck_end {} @ {} {}",
-						ab_of(&pg), pg.has_packet_start(), pg.has_whole_packet(),
-						pg.has_packet_end(),
-						pos, last_packet_end_pos);// */
+					ab_of(&pg), pg.has_packet_start(), pg.has_whole_packet(),
+					pg.has_packet_end(),
+					pos, last_packet_end_pos);// */
 					match stream_serial {
 						// Continue the search if we encounter a
 						// page with a different stream serial,
@@ -989,8 +987,10 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 						_ if ab_of(&pg) >= pos_goal => found!(last_packet_end_pos),
 						// If we encounter a page with a packet start,
 						// update accordingly.
-						_ => if pg.has_packet_end() {
-							last_packet_end_pos = pos;
+						_ => {
+							if pg.has_packet_end() {
+								last_packet_end_pos = pos;
+							}
 						},
 					}
 				}
@@ -1012,8 +1012,7 @@ impl<T :io::Read + io::Seek> PacketReader<T> {
 }
 
 // util function
-fn seek_before_end<T :io::Read + io::Seek>(mut rdr :T,
-		offs :u64) -> Result<u64, OggReadError> {
+fn seek_before_end<T: io::Read + io::Seek>(mut rdr: T, offs: u64) -> Result<u64, OggReadError> {
 	let end_pos = tri!(rdr.seek(SeekFrom::End(0)));
 	let end_pos_to_seek = ::std::cmp::min(end_pos, offs);
 	return Ok(tri!(rdr.seek(SeekFrom::End(-(end_pos_to_seek as i64)))));
@@ -1027,11 +1026,11 @@ pub mod async_api {
 	#![allow(deprecated)]
 
 	use super::*;
-	use tokio_io::AsyncRead;
-	use tokio_io::codec::{Decoder, FramedRead};
+	use bytes::BytesMut;
 	use futures::stream::Stream;
 	use futures::{Async, Poll};
-	use bytes::BytesMut;
+	use tokio_io::codec::{Decoder, FramedRead};
+	use tokio_io::AsyncRead;
 
 	enum PageDecodeState {
 		Head,
@@ -1055,13 +1054,13 @@ pub mod async_api {
 	Async page reading functionality.
 	*/
 	struct PageDecoder {
-		state : PageDecodeState,
+		state: PageDecodeState,
 	}
 
 	impl PageDecoder {
 		fn new() -> Self {
 			PageDecoder {
-				state : PageDecodeState::Head,
+				state: PageDecodeState::Head,
 			}
 		}
 	}
@@ -1070,8 +1069,7 @@ pub mod async_api {
 		type Item = OggPage;
 		type Error = OggReadError;
 
-		fn decode(&mut self, buf :&mut BytesMut) ->
-				Result<Option<OggPage>, OggReadError> {
+		fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<OggPage>, OggReadError> {
 			use self::PageDecodeState::*;
 			loop {
 				let needed_size = self.state.needed_size();
@@ -1106,8 +1104,7 @@ pub mod async_api {
 			}
 		}
 
-		fn decode_eof(&mut self, buf :&mut BytesMut) ->
-				Result<Option<OggPage>, OggReadError> {
+		fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<OggPage>, OggReadError> {
 			// Ugly hack for "bytes remaining on stream" error
 			return self.decode(buf);
 		}
@@ -1116,21 +1113,24 @@ pub mod async_api {
 	/**
 	Async packet reading functionality.
 	*/
-	pub struct PacketReader<T> where T :AsyncRead {
-		base_pck_rdr :BasePacketReader,
-		pg_rd :FramedRead<T, PageDecoder>,
+	pub struct PacketReader<T>
+	where
+		T: AsyncRead,
+	{
+		base_pck_rdr: BasePacketReader,
+		pg_rd: FramedRead<T, PageDecoder>,
 	}
 
-	impl<T :AsyncRead> PacketReader<T> {
-		pub fn new(inner :T) -> Self {
+	impl<T: AsyncRead> PacketReader<T> {
+		pub fn new(inner: T) -> Self {
 			PacketReader {
-				base_pck_rdr : BasePacketReader::new(),
-				pg_rd : FramedRead::new(inner, PageDecoder::new()),
+				base_pck_rdr: BasePacketReader::new(),
+				pg_rd: FramedRead::new(inner, PageDecoder::new()),
 			}
 		}
 	}
 
-	impl<T :AsyncRead> Stream for PacketReader<T> {
+	impl<T: AsyncRead> Stream for PacketReader<T> {
 		type Item = Packet;
 		type Error = OggReadError;
 
@@ -1150,5 +1150,4 @@ pub mod async_api {
 			}
 		}
 	}
-
 }

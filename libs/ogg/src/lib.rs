@@ -40,8 +40,8 @@ mod crc;
 pub mod reading;
 pub mod writing;
 
-pub use writing::{PacketWriter, PacketWriteEndInfo};
-pub use reading::{PacketReader, OggReadError};
+pub use reading::{OggReadError, PacketReader};
+pub use writing::{PacketWriteEndInfo, PacketWriter};
 
 /**
 Ogg packet representation.
@@ -54,20 +54,20 @@ Every logical bitstream is identified by the serial number its pages have stored
 */
 pub struct Packet {
 	/// The data the `Packet` contains
-	pub data :Vec<u8>,
+	pub data: Vec<u8>,
 	/// `true` iff this packet is the first one in the page.
-	first_packet_pg :bool,
+	first_packet_pg: bool,
 	/// `true` iff this packet is the first one in the logical bitstream.
-	first_packet_stream :bool,
+	first_packet_stream: bool,
 	/// `true` iff this packet is the last one in the page.
-	last_packet_pg :bool,
+	last_packet_pg: bool,
 	/// `true` iff this packet is the last one in the logical bitstream
-	last_packet_stream :bool,
+	last_packet_stream: bool,
 	/// Absolute granule position of the last page the packet was in.
 	/// The meaning of the absolute granule position is defined by the codec.
-	absgp_page :u64,
+	absgp_page: u64,
 	/// Serial number. Uniquely identifying the logical bitstream.
-	stream_serial :u32,
+	stream_serial: u32,
 	/*/// Packet counter
 	/// Why u64? There are MAX_U32 pages, and every page has up to 128 packets. u32 wouldn't be sufficient here...
 	pub sequence_num :u64,*/ // TODO perhaps add this later on...

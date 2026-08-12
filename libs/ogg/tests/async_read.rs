@@ -8,21 +8,21 @@
 
 #![cfg(feature = "async")]
 
+extern crate futures;
 extern crate ogg;
 extern crate rand;
 extern crate tokio_io;
-extern crate futures;
 
-use std::io;
-use ogg::{PacketWriter, PacketWriteEndInfo};
+use futures::Stream;
 use ogg::reading::async_api::PacketReader;
+use ogg::{PacketWriteEndInfo, PacketWriter};
 use std::boxed::Box;
+use std::io;
 use std::io::{Cursor, Seek, SeekFrom};
 use tokio_io::AsyncRead;
-use futures::Stream;
 
 struct RandomWouldBlock<T>(T);
-impl <T: io::Read> io::Read for RandomWouldBlock<T> {
+impl<T: io::Read> io::Read for RandomWouldBlock<T> {
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		if rand::random() {
 			return Err(io::Error::new(io::ErrorKind::WouldBlock, "would block"));
@@ -31,9 +31,9 @@ impl <T: io::Read> io::Read for RandomWouldBlock<T> {
 	}
 }
 
-impl <T :io::Read> AsyncRead for RandomWouldBlock<T> {}
+impl<T: io::Read> AsyncRead for RandomWouldBlock<T> {}
 
-impl <T: io::Seek> io::Seek for RandomWouldBlock<T> {
+impl<T: io::Seek> io::Seek for RandomWouldBlock<T> {
 	fn seek(&mut self, pos: io::SeekFrom) -> io::Result<u64> {
 		if rand::random() {
 			return Err(io::Error::new(io::ErrorKind::WouldBlock, "would block"));
@@ -44,26 +44,24 @@ impl <T: io::Seek> io::Seek for RandomWouldBlock<T> {
 
 macro_rules! test_arr_eq {
 	($a_arr:expr, $b_arr:expr) => {
-		for i in 0 .. $b_arr.len() {
+		for i in 0..$b_arr.len() {
 			if $a_arr[i] != $b_arr[i] {
 				panic!("Mismatch of values at index {}: {} {}", i, $a_arr[i], $b_arr[i]);
 			}
 		}
-	}
+	};
 }
 
 macro_rules! cont_try {
 	($e:expr) => {
-		(|| {
-			loop {
-				match $e {
-					Ok(futures::Async::Ready(v)) => return Ok(v),
-					Ok(_) => (),
-					Err(e) => return Err(e),
-				}
+		(|| loop {
+			match $e {
+				Ok(futures::Async::Ready(v)) => return Ok(v),
+				Ok(_) => (),
+				Err(e) => return Err(e),
 			}
-		}) ()
-	}
+		})()
+	};
 }
 
 fn test_ogg_random_would_block_run() {
@@ -76,8 +74,8 @@ fn test_ogg_random_would_block_run() {
 		let np = PacketWriteEndInfo::NormalPacket;
 		w.write_packet(Box::new(test_arr), 0xdeadb33f, np, 0).unwrap();
 		w.write_packet(Box::new(test_arr_2), 0xdeadb33f, np, 1).unwrap();
-		w.write_packet(Box::new(test_arr_3), 0xdeadb33f,
-			PacketWriteEndInfo::EndPage, 2).unwrap();
+		w.write_packet(Box::new(test_arr_3), 0xdeadb33f, PacketWriteEndInfo::EndPage, 2)
+			.unwrap();
 	}
 	//print_u8_slice(c.get_ref());
 	assert_eq!(c.seek(SeekFrom::Start(0)).unwrap(), 0);
@@ -105,8 +103,8 @@ fn test_ogg_random_would_block_run() {
 		let np = PacketWriteEndInfo::NormalPacket;
 		w.write_packet(Box::new(test_arr), 0xdeadb33f, np, 0).unwrap();
 		w.write_packet(Box::new(test_arr_2), 0xdeadb33f, np, 1).unwrap();
-		w.write_packet(Box::new(test_arr_3), 0xdeadb33f,
-			PacketWriteEndInfo::EndPage, 2).unwrap();
+		w.write_packet(Box::new(test_arr_3), 0xdeadb33f, PacketWriteEndInfo::EndPage, 2)
+			.unwrap();
 	}
 	//print_u8_slice(c.get_ref());
 	assert_eq!(c.seek(SeekFrom::Start(0)).unwrap(), 0);
@@ -132,8 +130,8 @@ fn test_ogg_random_would_block_run() {
 		let mut w = PacketWriter::new(&mut c);
 		let np = PacketWriteEndInfo::NormalPacket;
 		w.write_packet(Box::new(test_arr_2), 0xdeadb33f, np, 1).unwrap();
-		w.write_packet(Box::new(test_arr_3), 0xdeadb33f,
-			PacketWriteEndInfo::EndPage, 2).unwrap();
+		w.write_packet(Box::new(test_arr_3), 0xdeadb33f, PacketWriteEndInfo::EndPage, 2)
+			.unwrap();
 	}
 	//print_u8_slice(c.get_ref());
 	assert_eq!(c.seek(SeekFrom::Start(0)).unwrap(), 0);
@@ -149,7 +147,7 @@ fn test_ogg_random_would_block_run() {
 
 #[test]
 fn test_ogg_random_would_block() {
-	for i in 0 .. 100 {
+	for i in 0..100 {
 		println!("Run {}", i);
 		test_ogg_random_would_block_run();
 	}

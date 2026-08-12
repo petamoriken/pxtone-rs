@@ -8,14 +8,14 @@
 
 extern crate ogg;
 
-use std::env;
-use ogg::{PacketReader, PacketWriter};
 use ogg::writing::PacketWriteEndInfo;
+use ogg::{PacketReader, PacketWriter};
+use std::env;
 use std::fs::File;
 
 fn main() {
 	match run() {
-		Ok(_) =>(),
+		Ok(_) => (),
 		Err(err) => println!("Error: {}", err),
 	}
 }
@@ -33,8 +33,12 @@ macro_rules! btry {
 }
 
 fn run() -> Result<(), std::io::Error> {
-	let input_path = env::args().nth(1).expect("No arg for input path found. Please specify a file to open.");
-	let output_path = env::args().nth(2).expect("No arg for output path found. Please specify a file to save to.");
+	let input_path = env::args()
+		.nth(1)
+		.expect("No arg for input path found. Please specify a file to open.");
+	let output_path = env::args()
+		.nth(2)
+		.expect("No arg for output path found. Please specify a file to save to.");
 	println!("Opening file: {}", input_path);
 	println!("Writing to: {}", output_path);
 	let mut f_i = try!(File::open(input_path));
@@ -62,10 +66,7 @@ fn run() -> Result<(), std::io::Error> {
 				};
 				let stream_serial = pck.stream_serial();
 				let absgp_page = pck.absgp_page();
-				btry!(pck_wtr.write_packet(pck.data.into_boxed_slice(),
-					stream_serial,
-					inf,
-					absgp_page));
+				btry!(pck_wtr.write_packet(pck.data.into_boxed_slice(), stream_serial, inf, absgp_page));
 			},
 			// End of stream
 			None => break,
