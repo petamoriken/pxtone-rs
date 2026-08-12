@@ -11,7 +11,7 @@ use super::*;
 use std::io::{Cursor, Seek, SeekFrom};
 
 macro_rules! test_arr_eq {
-	($a_arr:expr, $b_arr:expr) => {
+	($a_arr:expr_2021, $b_arr:expr_2021) => {
 		let a_arr = &$a_arr;
 		let b_arr = &$b_arr;
 		for i in 0..b_arr.len() {
@@ -239,10 +239,10 @@ fn gen_pck(seed: u32, len_d_four: usize) -> Box<[u8]> {
 }
 
 macro_rules! test_seek_r {
-	($r:expr, $absgp:expr) => {
+	($r:expr_2021, $absgp:expr_2021) => {
 		test_seek_r!($r, $absgp, +, 0);
 	};
-	($r:expr, $absgp:expr, $o:tt, $m:expr) => {
+	($r:expr_2021, $absgp:expr_2021, $o:tt, $m:expr_2021) => {
 		// First, perform the seek
 		$r.seek_absgp(None, $absgp).unwrap();
 		// Then go to the searched packet inside the page
@@ -261,7 +261,7 @@ macro_rules! test_seek_r {
 	};
 }
 macro_rules! ensure_continues_r {
-	($r:expr, $absgp:expr) => {
+	($r:expr_2021, $absgp:expr_2021) => {
 		// Ensure the stream continues normally
 		let pck = $r.read_packet().unwrap().unwrap();
 		test_arr_eq!(pck.data, gen_pck($absgp, &pck.data.len() / 4));
@@ -334,12 +334,12 @@ fn test_seeking() {
 
 	let mut r = PacketReader::new(c);
 	macro_rules! test_seek {
-		($absgp:expr) => {
+		($absgp:expr_2021) => {
 			test_seek_r!(r, $absgp)
 		};
 	}
 	macro_rules! ensure_continues {
-		($absgp:expr) => {
+		($absgp:expr_2021) => {
 			ensure_continues_r!(r, $absgp)
 		};
 	}
@@ -428,15 +428,15 @@ fn test_seeking_continued() {
 
 	let mut r = PacketReader::new(c);
 	macro_rules! test_seek {
-		($absgp:expr) => {
+		($absgp:expr_2021) => {
 			test_seek_r!(r, $absgp)
 		};
-		($absgp:expr, $o:tt, $m:expr) => {
+		($absgp:expr_2021, $o:tt, $m:expr_2021) => {
 			test_seek_r!(r, $absgp, $o, $m)
 		};
 	}
 	macro_rules! ensure_continues {
-		($absgp:expr) => {
+		($absgp:expr_2021) => {
 			ensure_continues_r!(r, $absgp)
 		};
 	}

@@ -10,17 +10,17 @@
 Reading logic
 */
 
+use crate::Packet;
+use crate::crc::vorbis_crc32_update;
 use byteorder::{LittleEndian, ReadBytesExt};
-use crc::vorbis_crc32_update;
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::error;
 use std::fmt::{Display, Error as FmtError, Formatter};
 use std::io;
 use std::io::Seek;
 use std::io::{Cursor, Error, ErrorKind, Read, SeekFrom, Write};
 use std::mem::replace;
-use Packet;
 
 /// Error that can be raised when decoding an Ogg transport.
 #[derive(Debug)]
@@ -231,7 +231,7 @@ impl PageParser {
 	/// function.
 	pub fn parse_segments(&mut self, segments_buf: Vec<u8>) -> usize {
 		let mut page_siz: u16 = 0; // Size of the page's body
-							 // Whether our page ends with a continued packet
+		// Whether our page ends with a continued packet
 		self.bi.ends_with_continued = self.bi.starts_with_continued;
 
 		// First run: get the number of packets,
@@ -311,9 +311,8 @@ bitstream, and when the cache of every logical bistream is empty,
 it asks for a fresh page. You will then need to feed the struct
 one via the `push_page` function.
 
-All functions on this struct are async ready.
-They get their data fed, instead of calling and blocking
-in order to get it.
+All functions on this struct get their data fed, instead of
+calling and blocking in order to get it.
 */
 pub struct BasePacketReader {
 	// TODO the hashmap plus the set is perhaps smart ass perfect design but could be made more performant I guess...
@@ -702,10 +701,8 @@ Reader for packets from an Ogg stream.
 
 This reads codec packets belonging to several different logical streams from one physical Ogg container stream.
 
-This reader is not async ready. It does not keep its internal state
-consistent when it encounters the `WouldBlock` error kind.
-If you desire async functionality, consider enabling the `async` feature
-and look into the async module.
+This reader does not keep its internal state consistent when it
+encounters the `WouldBlock` error kind.
 */
 pub struct PacketReader<T: io::Read + io::Seek> {
 	rdr: T,
@@ -835,7 +832,7 @@ impl<T: io::Read + io::Seek> PacketReader<T> {
 	/// The returned bool indicates whether the seek was successful.
 	pub fn seek_absgp(&mut self, stream_serial: Option<u32>, pos_goal: u64) -> Result<bool, OggReadError> {
 		macro_rules! found {
-			($pos:expr) => {{
+			($pos:expr_2021) => {{
 				// println!("found: {}", $pos);
 				tri!(self.rdr.seek(SeekFrom::Start($pos)));
 				self.base_pck_rdr.update_after_seek();
@@ -843,7 +840,7 @@ impl<T: io::Read + io::Seek> PacketReader<T> {
 			}};
 		}
 		macro_rules! bt {
-			($e:expr) => {{
+			($e:expr_2021) => {{
 				match tri!($e) {
 					Some(s) => s,
 					None => return Ok(false),
@@ -855,7 +852,7 @@ impl<T: io::Read + io::Seek> PacketReader<T> {
 		// it returns early if we found our goal
 		// or any page past it.
 		macro_rules! pg_read_until_end_or_goal {
-			{$goal:expr} => {{
+			{$goal:expr_2021} => {{
 				let mut pos;
 				let mut pg;
 				loop {
@@ -1016,138 +1013,4 @@ fn seek_before_end<T: io::Read + io::Seek>(mut rdr: T, offs: u64) -> Result<u64,
 	let end_pos = tri!(rdr.seek(SeekFrom::End(0)));
 	let end_pos_to_seek = ::std::cmp::min(end_pos, offs);
 	return Ok(tri!(rdr.seek(SeekFrom::End(-(end_pos_to_seek as i64)))));
-}
-
-#[cfg(feature = "async")]
-/**
-Asyncronous ogg decoding
-*/
-pub mod async_api {
-	#![allow(deprecated)]
-
-	use super::*;
-	use bytes::BytesMut;
-	use futures::stream::Stream;
-	use futures::{Async, Poll};
-	use tokio_io::codec::{Decoder, FramedRead};
-	use tokio_io::AsyncRead;
-
-	enum PageDecodeState {
-		Head,
-		Segments(PageParser, usize),
-		PacketData(PageParser, usize),
-		InUpdate,
-	}
-
-	impl PageDecodeState {
-		fn needed_size(&self) -> usize {
-			match self {
-				&PageDecodeState::Head => 27,
-				&PageDecodeState::Segments(_, s) => s,
-				&PageDecodeState::PacketData(_, s) => s,
-				&PageDecodeState::InUpdate => panic!("invalid state"),
-			}
-		}
-	}
-
-	/**
-	Async page reading functionality.
-	*/
-	struct PageDecoder {
-		state: PageDecodeState,
-	}
-
-	impl PageDecoder {
-		fn new() -> Self {
-			PageDecoder {
-				state: PageDecodeState::Head,
-			}
-		}
-	}
-
-	impl Decoder for PageDecoder {
-		type Item = OggPage;
-		type Error = OggReadError;
-
-		fn decode(&mut self, buf: &mut BytesMut) -> Result<Option<OggPage>, OggReadError> {
-			use self::PageDecodeState::*;
-			loop {
-				let needed_size = self.state.needed_size();
-				if buf.len() < needed_size {
-					return Ok(None);
-				}
-				let mut ret = None;
-				let consumed_buf = buf.split_to(needed_size).to_vec();
-
-				self.state = match ::std::mem::replace(&mut self.state, InUpdate) {
-					Head => {
-						let mut hdr_buf = [0; 27];
-						// TODO once we have const generics, the copy below can be done
-						// much nicer, maybe with a new into_array fn on Vec's
-						hdr_buf.copy_from_slice(&consumed_buf);
-						let tup = tri!(PageParser::new(hdr_buf));
-						Segments(tup.0, tup.1)
-					},
-					Segments(mut pg_prs, _) => {
-						let new_needed_len = pg_prs.parse_segments(consumed_buf);
-						PacketData(pg_prs, new_needed_len)
-					},
-					PacketData(pg_prs, _) => {
-						ret = Some(tri!(pg_prs.parse_packet_data(consumed_buf)));
-						Head
-					},
-					InUpdate => panic!("invalid state"),
-				};
-				if ret.is_some() {
-					return Ok(ret);
-				}
-			}
-		}
-
-		fn decode_eof(&mut self, buf: &mut BytesMut) -> Result<Option<OggPage>, OggReadError> {
-			// Ugly hack for "bytes remaining on stream" error
-			return self.decode(buf);
-		}
-	}
-
-	/**
-	Async packet reading functionality.
-	*/
-	pub struct PacketReader<T>
-	where
-		T: AsyncRead,
-	{
-		base_pck_rdr: BasePacketReader,
-		pg_rd: FramedRead<T, PageDecoder>,
-	}
-
-	impl<T: AsyncRead> PacketReader<T> {
-		pub fn new(inner: T) -> Self {
-			PacketReader {
-				base_pck_rdr: BasePacketReader::new(),
-				pg_rd: FramedRead::new(inner, PageDecoder::new()),
-			}
-		}
-	}
-
-	impl<T: AsyncRead> Stream for PacketReader<T> {
-		type Item = Packet;
-		type Error = OggReadError;
-
-		fn poll(&mut self) -> Poll<Option<Packet>, OggReadError> {
-			// Read pages until we got a valid entire packet
-			// (packets may span multiple pages, so reading one page
-			// doesn't always suffice to give us a valid packet)
-			loop {
-				if let Some(pck) = self.base_pck_rdr.read_packet() {
-					return Ok(Async::Ready(Some(pck)));
-				}
-				let page = try_ready!(self.pg_rd.poll());
-				match page {
-					Some(page) => tri!(self.base_pck_rdr.push_page(page)),
-					None => return Ok(Async::Ready(None)),
-				}
-			}
-		}
-	}
 }

@@ -16,19 +16,12 @@ mod are `PacketReader` and `PacketWriter`.
 */
 
 extern crate byteorder;
-#[cfg(feature = "async")]
-extern crate tokio_io;
-#[cfg(feature = "async")]
-#[macro_use]
-extern crate futures;
-#[cfg(feature = "async")]
-extern crate bytes;
 
 #[cfg(test)]
 mod test;
 
 macro_rules! tri {
-	($e:expr) => {
+	($e:expr_2021) => {
 		match $e {
 			Ok(val) => val,
 			Err(err) => return Err(err.into()),
@@ -40,8 +33,8 @@ mod crc;
 pub mod reading;
 pub mod writing;
 
-pub use reading::{OggReadError, PacketReader};
-pub use writing::{PacketWriteEndInfo, PacketWriter};
+pub use crate::reading::{OggReadError, PacketReader};
+pub use crate::writing::{PacketWriteEndInfo, PacketWriter};
 
 /**
 Ogg packet representation.

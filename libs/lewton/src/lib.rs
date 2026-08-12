@@ -6,7 +6,7 @@
 // at your option. Please see the LICENSE file
 // attached to this source distribution for details.
 
-#![cfg_attr(not(cargo_c), forbid(unsafe_code))]
+#![forbid(unsafe_code)]
 #![cfg_attr(test, allow(unknown_lints))]
 #![forbid(non_ascii_idents)]
 
@@ -100,12 +100,6 @@ pub mod samples;
 #[cfg(feature = "ogg")]
 #[doc(no_inline)]
 pub use ogg::OggReadError;
-
-#[cfg(cargo_c)]
-mod capi;
-
-#[cfg(cargo_c)]
-pub use capi::*;
 
 /// Errors that can occur during decoding
 #[derive(Debug)]

@@ -22,10 +22,6 @@ use ogg::{Packet, PacketReader};
 use std::io::{Read, Seek};
 
 /// Reads the three vorbis headers from an ogg stream as well as stream serial information
-///
-/// Please note that this function doesn't work well with async
-/// I/O. In order to support this use case, enable the `async_ogg` feature,
-/// and use the `HeadersReader` struct instead.
 pub fn read_headers<'a, T: Read + Seek + 'a>(rdr: &mut PacketReader<T>) -> Result<(HeaderSet, u32), VorbisError> {
 	let pck: Packet = try_from!(rdr.read_packet_expected());
 	let ident_hdr = try_from!(read_header_ident(&pck.data));
@@ -79,10 +75,6 @@ pub struct OggStreamReader<T: Read + Seek> {
 
 impl<T: Read + Seek> OggStreamReader<T> {
 	/// Constructs a new OggStreamReader from a given implementation of `Read + Seek`.
-	///
-	/// Please note that this function doesn't work well with async
-	/// I/O. In order to support this use case, enable the `async_ogg` feature,
-	/// and use the `HeadersReader` struct instead.
 	pub fn new(rdr: T) -> Result<Self, VorbisError> {
 		OggStreamReader::from_ogg_reader(PacketReader::new(rdr))
 	}
@@ -90,10 +82,6 @@ impl<T: Read + Seek> OggStreamReader<T> {
 	///
 	/// The `new` function is a nice wrapper around this function that
 	/// also creates the ogg reader.
-	///
-	/// Please note that this function doesn't work well with async
-	/// I/O. In order to support this use case, enable the `async_ogg` feature,
-	/// and use the `HeadersReader` struct instead.
 	pub fn from_ogg_reader(mut rdr: PacketReader<T>) -> Result<Self, VorbisError> {
 		let ((ident_hdr, comment_hdr, setup_hdr), stream_serial) = try_from!(read_headers(&mut rdr));
 		return Ok(OggStreamReader {
@@ -323,152 +311,5 @@ impl<T: Read + Seek> OggStreamReader<T> {
 		self.cur_absgp = None;
 		self.pwr = PreviousWindowRight::new();
 		Ok(())
-	}
-}
-
-#[cfg(feature = "async_ogg")]
-/**
-Support for async I/O
-
-This module provides support for asyncronous I/O.
-*/
-pub mod async_api {
-
-	use super::*;
-	use futures::stream::Stream;
-	use futures::try_ready;
-	use futures::{Async, Future, Poll};
-	use ogg::OggReadError;
-	use ogg::reading::async_api::PacketReader;
-	use std::io::{Error, ErrorKind};
-	use std::mem::replace;
-	use tokio_io::AsyncRead;
-
-	/// Async ready creator utility to read headers out of an
-	/// ogg stream.
-	///
-	/// All functions this struct has are ready to be used for operation with async I/O.
-	pub struct HeadersReader<T: AsyncRead> {
-		pck_rd: PacketReader<T>,
-		ident_hdr: Option<IdentHeader>,
-		comment_hdr: Option<CommentHeader>,
-	}
-	impl<T: AsyncRead> HeadersReader<T> {
-		pub fn new(inner: T) -> Self {
-			HeadersReader::from_packet_reader(PacketReader::new(inner))
-		}
-		pub fn from_packet_reader(pck_rd: PacketReader<T>) -> Self {
-			HeadersReader {
-				pck_rd,
-				ident_hdr: None,
-				comment_hdr: None,
-			}
-		}
-	}
-	impl<T: AsyncRead> Future for HeadersReader<T> {
-		type Item = HeaderSet;
-		type Error = VorbisError;
-		fn poll(&mut self) -> Poll<Self::Item, Self::Error> {
-			macro_rules! rd_pck {
-				() => {
-					if let Some(pck) = try_ready!(self.pck_rd.poll()) {
-						pck
-					} else {
-						// Note: we are stealing the Io variant from
-						// the ogg crate here which is not 100% clean,
-						// but I think in general it is what the
-						// read_packet_expected function of the ogg
-						// crate does too, and adding our own case
-						// to the VorbisError enum that only fires
-						// in an async mode is too complicated IMO.
-						try_from!(Err(OggReadError::ReadError(Error::new(
-							ErrorKind::UnexpectedEof,
-							"Expected header packet but found end of stream"
-						))))
-					}
-				};
-			}
-			if self.ident_hdr.is_none() {
-				let pck = rd_pck!();
-				self.ident_hdr = Some(try_from!(read_header_ident(&pck.data)));
-			}
-			if self.comment_hdr.is_none() {
-				let pck = rd_pck!();
-				self.comment_hdr = Some(try_from!(read_header_comment(&pck.data)));
-			}
-			let setup_hdr = {
-				let ident = self.ident_hdr.as_ref().unwrap();
-				let pck = rd_pck!();
-				try_from!(read_header_setup(
-					&pck.data,
-					ident.audio_channels,
-					(ident.blocksize_0, ident.blocksize_1)
-				))
-			};
-			let ident_hdr = replace(&mut self.ident_hdr, None).unwrap();
-			let comment_hdr = replace(&mut self.comment_hdr, None).unwrap();
-			Ok(Async::Ready((ident_hdr, comment_hdr, setup_hdr)))
-		}
-	}
-	/// Reading ogg/vorbis files or streams
-	///
-	/// This is a small helper struct to help reading ogg/vorbis files
-	/// or streams in that format.
-	///
-	/// It only supports the main use case of pure audio ogg files streams.
-	/// Reading a file where vorbis is only one of multiple streams, like
-	/// in the case of ogv, is not supported.
-	///
-	/// If you need support for this, you need to use the lower level methods
-	/// instead.
-	pub struct OggStreamReader<T: AsyncRead> {
-		pck_rd: PacketReader<T>,
-		pwr: PreviousWindowRight,
-
-		pub ident_hdr: IdentHeader,
-		pub comment_hdr: CommentHeader,
-		pub setup_hdr: SetupHeader,
-
-		absgp_of_last_read: Option<u64>,
-	}
-
-	impl<T: AsyncRead> OggStreamReader<T> {
-		/// Creates a new OggStreamReader from the given parameters
-		pub fn new(hdr_rdr: HeadersReader<T>, hdrs: HeaderSet) -> Self {
-			OggStreamReader::from_pck_rdr(hdr_rdr.pck_rd, hdrs)
-		}
-		/// Creates a new OggStreamReader from the given parameters
-		pub fn from_pck_rdr(pck_rd: PacketReader<T>, hdrs: HeaderSet) -> Self {
-			OggStreamReader {
-				pck_rd,
-				pwr: PreviousWindowRight::new(),
-
-				ident_hdr: hdrs.0,
-				comment_hdr: hdrs.1,
-				setup_hdr: hdrs.2,
-
-				absgp_of_last_read: None,
-			}
-		}
-	}
-
-	impl<T: AsyncRead> Stream for OggStreamReader<T> {
-		type Item = Vec<Vec<i16>>;
-		type Error = VorbisError;
-
-		fn poll(&mut self) -> Poll<Option<Vec<Vec<i16>>>, VorbisError> {
-			let pck = match try_ready!(self.pck_rd.poll()) {
-				Some(p) => p,
-				None => return Ok(Async::Ready(None)),
-			};
-			let decoded_pck = try_from!(read_audio_packet(
-				&self.ident_hdr,
-				&self.setup_hdr,
-				&pck.data,
-				&mut self.pwr
-			));
-			self.absgp_of_last_read = Some(pck.absgp_page());
-			Ok(Async::Ready(Some(decoded_pck)))
-		}
 	}
 }

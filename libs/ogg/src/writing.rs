@@ -10,8 +10,8 @@
 Writing logic
 */
 
+use crate::crc::vorbis_crc32_update;
 use byteorder::{LittleEndian, WriteBytesExt};
-use crc::vorbis_crc32_update;
 use std::collections::HashMap;
 use std::io::{self, Cursor, Seek, SeekFrom, Write};
 use std::result;
