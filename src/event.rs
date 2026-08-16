@@ -1,8 +1,6 @@
 use crate::error::PxtoneError;
-use crate::read_ext::ReadExt;
+use crate::reader::Reader;
 use crate::sort::stable_sort_by;
-use byteorder::{LE, ReadBytesExt};
-use std::io::{Read, Seek};
 
 // Event kind constants
 pub const EVENT_KIND_NULL: u8 = 0;
@@ -145,9 +143,9 @@ impl EventList {
   }
 
   // Reads a v5-format event list (equivalent to Linear_Start / Linear_Add / Linear_End)
-  pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
-    let eve_count = r.read_u32::<LE>()?;
+  pub(crate) fn read_v5(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_i32()?;
+    let eve_count = r.read_u32()?;
 
     let mut absolute = 0i32;
 
@@ -176,18 +174,18 @@ impl EventList {
   }
 
   // Reads an x4x-format event block
-  pub(crate) fn read_x4x_block<R: Read + Seek>(
+  pub(crate) fn read_x4x_block(
     &mut self,
-    r: &mut R,
+    r: &mut Reader<'_>,
     tail_absolute: bool,
     check_rrr: bool,
   ) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
-    let unit_index = r.read_u16::<LE>()?;
-    let event_kind = r.read_u16::<LE>()? as u8;
-    let data_count = r.read_u16::<LE>()?;
-    let rrr = r.read_u16::<LE>()?;
-    let event_count = r.read_u32::<LE>()?;
+    let _size = r.read_i32()?;
+    let unit_index = r.read_u16()?;
+    let event_kind = r.read_u16()? as u8;
+    let data_count = r.read_u16()?;
+    let rrr = r.read_u16()?;
+    let event_count = r.read_u32()?;
 
     if data_count != 2 {
       return Err(PxtoneError::UnknownFormat);

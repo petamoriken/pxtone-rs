@@ -11,11 +11,10 @@ use crate::master::Master;
 use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
+use crate::reader::Reader;
 use crate::text::Text;
 use crate::unit::{MAX_CHANNEL, MAX_GROUP_COUNT, MAX_UNIT_CONTROL_VOICE, Unit};
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VOICE_FLAG_WAVELOOP, Woice};
-use byteorder::{LE, ReadBytesExt};
-use std::io::{Read, Seek};
 use tinyvec::ArrayVec;
 
 // ---- Constants ----
@@ -334,9 +333,9 @@ impl PxtoneService {
   /// Loads a `.ptnoise` file and returns the rendered audio.
   ///
   /// The output format matches the current destination quality.
-  pub fn render_noise<R: Read>(&mut self, r: &mut R) -> Result<NoiseWave, PxtoneError> {
+  pub fn render_noise(&mut self, data: &[u8]) -> Result<NoiseWave, PxtoneError> {
     let mut noise = Noise::new();
-    noise.read(r)?;
+    noise.read(&mut Reader::new(data))?;
     let pcm = self.noise_builder.build_noise(
       &mut noise,
       self.dst_channels,
@@ -361,10 +360,7 @@ impl PxtoneService {
   ///
   /// Call [`tones_ready`](Self::tones_ready) after loading.
   pub fn read(&mut self, data: Vec<u8>) -> Result<(), PxtoneError> {
-    // Use a `&[u8]` cursor (not `&Vec<u8>`) so that the parser is monomorphized
-    // only once, shared with the `Cursor<&[u8]>` users in `src/wasm/mod.rs`.
-    let mut cursor = std::io::Cursor::new(data.as_slice());
-    self.read_metadata(&mut cursor)?;
+    self.read_metadata(data.as_slice())?;
     self.raw_data = data;
     Ok(())
   }
@@ -372,7 +368,8 @@ impl PxtoneService {
   /// Parses the file structure without retaining the binary data (PCM samples, OGG streams).
   ///
   /// Use this for lightweight validation. For playback, use [`read`](Self::read) instead.
-  pub fn read_metadata<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub fn read_metadata(&mut self, data: &[u8]) -> Result<(), PxtoneError> {
+    let r = &mut Reader::new(data);
     self.clear();
 
     let fmt_ver = self.read_version(r)?;
@@ -408,7 +405,7 @@ impl PxtoneService {
   }
 
   /// Reads the version string and returns a FmtVer
-  fn read_version<R: Read>(&self, r: &mut R) -> Result<FmtVer, PxtoneError> {
+  fn read_version(&self, r: &mut Reader<'_>) -> Result<FmtVer, PxtoneError> {
     let mut ver = [0u8; VERSION_SIZE];
     r.read_exact(&mut ver)?;
 
@@ -434,17 +431,13 @@ impl PxtoneService {
     };
 
     // Skip exe_ver + rrr (4 bytes)
-    let _exe_ver = r.read_u16::<LE>()?;
-    let _rrr = r.read_u16::<LE>()?;
+    let _exe_ver = r.read_u16()?;
+    let _rrr = r.read_u16()?;
 
     Ok(fmt_ver)
   }
 
-  fn read_tune_items<R: Read + Seek>(
-    &mut self,
-    r: &mut R,
-    _fmt_ver: FmtVer,
-  ) -> Result<(), PxtoneError> {
+  fn read_tune_items(&mut self, r: &mut Reader<'_>, _fmt_ver: FmtVer) -> Result<(), PxtoneError> {
     loop {
       let mut code = [0u8; CODE_SIZE];
       r.read_exact(&mut code)?;
@@ -452,12 +445,12 @@ impl PxtoneService {
       match &code {
         // v5 tags
         b"num UNIT" => {
-          let size = r.read_i32::<LE>()?;
+          let size = r.read_i32()?;
           if size != 4 {
             return Err(PxtoneError::UnknownFormat);
           }
-          let num = r.read_i16::<LE>()? as usize;
-          let rrr = r.read_i16::<LE>()?;
+          let num = r.read_i16()? as usize;
+          let rrr = r.read_i16()?;
           if rrr != 0 {
             return Err(PxtoneError::UnknownFormat);
           }
@@ -526,7 +519,7 @@ impl PxtoneService {
         b"assiUNIT" => self.read_assi_unit(r)?,
 
         b"pxtoneND" | b"END=====" => {
-          let _end = r.read_i32::<LE>()?; // 0
+          let _end = r.read_i32()?; // 0
           break;
         }
 
@@ -546,13 +539,13 @@ impl PxtoneService {
     Ok(())
   }
 
-  fn read_assi_woic<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let size = r.read_i32::<LE>()?;
+  fn read_assi_woic(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let size = r.read_i32()?;
     if size != (2 + 2 + MAX_WOICE_NAME) as i32 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let woice_index = r.read_u16::<LE>()? as usize;
-    let rrr = r.read_u16::<LE>()?;
+    let woice_index = r.read_u16()? as usize;
+    let rrr = r.read_u16()?;
     let mut name = [0u8; MAX_WOICE_NAME];
     r.read_exact(&mut name)?;
 
@@ -568,13 +561,13 @@ impl PxtoneService {
     Ok(())
   }
 
-  fn read_assi_unit<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let size = r.read_i32::<LE>()?;
+  fn read_assi_unit(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let size = r.read_i32()?;
     if size != (2 + 2 + MAX_UNIT_NAME) as i32 {
       return Err(PxtoneError::UnknownFormat);
     }
-    let unit_index = r.read_u16::<LE>()? as usize;
-    let rrr = r.read_u16::<LE>()?;
+    let unit_index = r.read_u16()? as usize;
+    let rrr = r.read_u16()?;
     let mut name = [0u8; MAX_UNIT_NAME];
     r.read_exact(&mut name)?;
 
@@ -591,16 +584,16 @@ impl PxtoneService {
   }
 
   /// Reads a v1x unit struct (size:i32 + name[16] + type:u16 + group:u16)
-  fn read_old_unit_v1<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  fn read_old_unit_v1(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
     if self.units.len() >= MAX_UNIT_COUNT {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let _size = r.read_i32::<LE>()?;
+    let _size = r.read_i32()?;
     let mut name = [0u8; MAX_UNIT_NAME];
     r.read_exact(&mut name)?;
-    let _utype = r.read_u16::<LE>()?;
-    let group = r.read_u16::<LE>()? as i32;
+    let _utype = r.read_u16()?;
+    let group = r.read_u16()? as i32;
 
     let u_idx = self.units.len();
     let end = name.iter().position(|&b| b == 0).unwrap_or(MAX_UNIT_NAME);
@@ -618,14 +611,14 @@ impl PxtoneService {
   }
 
   /// Reads a v3x unit struct (size:i32 + type:u16 + group:u16)
-  fn read_old_unit_v3<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  fn read_old_unit_v3(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
     if self.units.len() >= MAX_UNIT_COUNT {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let _size = r.read_i32::<LE>()?;
-    let _utype = r.read_u16::<LE>()?;
-    let group = r.read_u16::<LE>()? as i32;
+    let _size = r.read_i32()?;
+    let _utype = r.read_u16()?;
+    let group = r.read_u16()? as i32;
 
     let u_idx = self.units.len();
     self.units.push(Unit::new());
@@ -640,18 +633,18 @@ impl PxtoneService {
   }
 
   /// Reads x1x project info (size:i32 + name[16] + ...)
-  fn read_x1x_project<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
+  fn read_x1x_project(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_i32()?;
     let mut name = [0u8; 16];
     r.read_exact(&mut name)?;
-    let beat_tempo = r.read_f32::<LE>()?;
-    let ticks_per_beat = r.read_u16::<LE>()?;
-    let beats_per_measure = r.read_u16::<LE>()? as u8;
-    let _beat_note = r.read_u16::<LE>()?;
-    let _measure_count = r.read_u16::<LE>()?;
-    let _channels = r.read_u16::<LE>()?;
-    let _bits_per_sample = r.read_u16::<LE>()?;
-    let _sample_rate = r.read_u32::<LE>()?;
+    let beat_tempo = r.read_f32()?;
+    let ticks_per_beat = r.read_u16()?;
+    let beats_per_measure = r.read_u16()? as u8;
+    let _beat_note = r.read_u16()?;
+    let _measure_count = r.read_u16()?;
+    let _channels = r.read_u16()?;
+    let _bits_per_sample = r.read_u16()?;
+    let _sample_rate = r.read_u32()?;
 
     self.text.set_name_raw(&name);
     self.master.beats_per_measure = beats_per_measure;

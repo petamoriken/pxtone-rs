@@ -1,7 +1,6 @@
 use crate::error::PxtoneError;
+use crate::reader::Reader;
 use crate::unit::MAX_GROUP_COUNT;
-use byteorder::{LE, ReadBytesExt};
-use std::io::{Read, Seek};
 
 const CUT_MIN: f32 = 0.0;
 const CUT_MAX: f32 = 100.0;
@@ -51,13 +50,13 @@ impl OverDrive {
   }
 
   /// Reads a (20-byte) overdrive structure
-  pub(crate) fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_u32::<LE>()?;
-    let xxx = r.read_u16::<LE>()?;
-    let group = r.read_u16::<LE>()? as usize;
-    let cut = r.read_f32::<LE>()?;
-    let amp = r.read_f32::<LE>()?;
-    let yyy = r.read_f32::<LE>()?;
+  pub(crate) fn read(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_u32()?;
+    let xxx = r.read_u16()?;
+    let group = r.read_u16()? as usize;
+    let cut = r.read_f32()?;
+    let amp = r.read_f32()?;
+    let yyy = r.read_f32()?;
 
     if xxx != 0 {
       return Err(PxtoneError::UnknownFormat);

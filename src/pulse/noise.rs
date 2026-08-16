@@ -1,6 +1,5 @@
 use crate::error::PxtoneError;
-use crate::read_ext::ReadExt;
-use std::io::Read;
+use crate::reader::Reader;
 use tinyvec::ArrayVec;
 
 // ---- Wave type ----
@@ -140,7 +139,7 @@ impl Noise {
   }
 
   /// Reads a "PTNOISE-" format noise block
-  pub(crate) fn read<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
     let mut code = [0u8; 8];
     r.read_exact(&mut code)?;
     if &code != CODE {
@@ -213,7 +212,7 @@ fn fix_osc(osc: &mut NoiseOscillator) {
   osc.offset = osc.offset.clamp(0.0, LIMIT_OSC_OFFSET);
 }
 
-fn read_oscillator<R: Read>(r: &mut R, osc: &mut NoiseOscillator) -> Result<(), PxtoneError> {
+fn read_oscillator(r: &mut Reader<'_>, osc: &mut NoiseOscillator) -> Result<(), PxtoneError> {
   let type_val = r.read_var_i32()?;
   osc.wave_type = WaveType::try_from(type_val).map_err(|_| PxtoneError::UnknownFormat)?;
   osc.reversed = r.read_var_u32()? != 0;

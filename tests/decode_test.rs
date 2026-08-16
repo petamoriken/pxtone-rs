@@ -3,8 +3,7 @@ mod common;
 use common::{pcm_to_wav, wav_matches};
 use encoding_rs::SHIFT_JIS;
 use pxtone::{DestinationQuality, PxtoneService, VomitPreparation};
-use std::fs::{self, File};
-use std::io::BufReader;
+use std::fs;
 use std::path::Path;
 use toml::{Table, Value};
 
@@ -207,11 +206,10 @@ fn decoded_ptnoise_matches_reference() {
     let stem = ptnoise_path.file_stem().unwrap().to_string_lossy();
     let wav_path = snapshot_dir.join(format!("{}.wav", stem));
 
-    let file =
-      File::open(&ptnoise_path).unwrap_or_else(|e| panic!("{}: {}", ptnoise_path.display(), e));
-    let mut reader = BufReader::new(file);
+    let data =
+      fs::read(&ptnoise_path).unwrap_or_else(|e| panic!("{}: {}", ptnoise_path.display(), e));
     let noise_wave = service
-      .render_noise(&mut reader)
+      .render_noise(&data)
       .unwrap_or_else(|e| panic!("{}: render_noise failed: {:?}", ptnoise_path.display(), e));
 
     let wav = pcm_to_wav(

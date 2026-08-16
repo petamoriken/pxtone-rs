@@ -4,9 +4,7 @@ use crate::event::{
   EVENT_KIND_BEAT_TEMPO, EVENT_KIND_BEATS_PER_MEASURE, EVENT_KIND_LAST, EVENT_KIND_REPEAT,
   EVENT_KIND_TICKS_PER_BEAT,
 };
-use crate::read_ext::ReadExt;
-use byteorder::{LE, ReadBytesExt};
-use std::io::{Read, Seek};
+use crate::reader::Reader;
 
 /// Song-level timing parameters loaded from the file.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -104,17 +102,17 @@ impl Master {
   // Reads a v5-format Master block.
   // Block: u32 size(=15), i16 ticks_per_beat, u8 beats_per_measure, f32 beat_tempo,
   //        i32 tick_repeat, i32 tick_last
-  pub(crate) fn read_v5<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let size = r.read_u32::<LE>()?;
+  pub(crate) fn read_v5(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let size = r.read_u32()?;
     if size != 15 {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let ticks_per_beat = r.read_i16::<LE>()? as i32;
+    let ticks_per_beat = r.read_i16()? as i32;
     let beats_per_measure = r.read_u8()?;
-    let beat_tempo = r.read_f32::<LE>()?;
-    let tick_repeat = r.read_i32::<LE>()?;
-    let tick_last = r.read_i32::<LE>()?;
+    let beat_tempo = r.read_f32()?;
+    let tick_repeat = r.read_i32()?;
+    let tick_last = r.read_i32()?;
 
     self.ticks_per_beat = ticks_per_beat as u16;
     self.beats_per_measure = beats_per_measure;
@@ -130,11 +128,11 @@ impl Master {
   }
 
   // Reads an x4x-format Master block.
-  pub(crate) fn read_x4x<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
-    let data_count = r.read_u16::<LE>()?;
-    let rrr = r.read_u16::<LE>()?;
-    let event_count = r.read_u32::<LE>()?;
+  pub(crate) fn read_x4x(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_i32()?;
+    let data_count = r.read_u16()?;
+    let rrr = r.read_u16()?;
+    let event_count = r.read_u32()?;
 
     if data_count != 3 {
       return Err(PxtoneError::UnknownFormat);

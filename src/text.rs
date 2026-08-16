@@ -1,6 +1,5 @@
 use crate::error::PxtoneError;
-use byteorder::{LE, ReadBytesExt};
-use std::io::Read;
+use crate::reader::Reader;
 
 /// Song title and comment text loaded from the file.
 ///
@@ -17,12 +16,12 @@ impl Text {
     Self::default()
   }
 
-  pub(crate) fn read_name<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_name(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
     self.name = Some(read_raw(r)?);
     Ok(())
   }
 
-  pub(crate) fn read_comment<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  pub(crate) fn read_comment(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
     self.comment = Some(read_raw(r)?);
     Ok(())
   }
@@ -43,8 +42,8 @@ impl Text {
   }
 }
 
-fn read_raw<R: Read>(r: &mut R) -> Result<Vec<u8>, PxtoneError> {
-  let size = r.read_i32::<LE>()?;
+fn read_raw(r: &mut Reader<'_>) -> Result<Vec<u8>, PxtoneError> {
+  let size = r.read_i32()?;
   if size < 0 {
     return Err(PxtoneError::BrokenFile);
   }
