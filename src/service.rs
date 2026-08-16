@@ -138,6 +138,20 @@ impl Default for VomitPreparation {
   }
 }
 
+/// Wraps a sample position into `[0, body)`.
+///
+/// `%` would call libm's `fmod` on wasm, which drags 128 bit division in. This
+/// only runs when seeking into a note, where sub-sample drift is inaudible.
+fn wrap_sample_pos(pos: f64, body: f64) -> f64 {
+  let wrapped = pos - body * (pos / body).floor();
+  // Rounding can put the result just outside the interval.
+  if wrapped >= 0.0 && wrapped < body {
+    wrapped
+  } else {
+    0.0
+  }
+}
+
 /// Builds the `voice_NN` placeholder name of the x3x formats.
 ///
 /// `format!` would pull `core::fmt`'s integer formatting in for this one call.
@@ -1291,7 +1305,7 @@ impl PxtoneService {
                 continue;
               }
               tone.sample_pos = if wave_loop && body > 0.0 {
-                initial_pos % body
+                wrap_sample_pos(initial_pos, body)
               } else {
                 initial_pos
               };
@@ -1460,7 +1474,7 @@ impl PxtoneService {
 
 #[cfg(test)]
 mod tests {
-  use super::voice_name;
+  use super::{voice_name, wrap_sample_pos};
 
   #[test]
   fn formats_x3x_voice_names() {
@@ -1469,5 +1483,27 @@ mod tests {
     assert_eq!(voice_name(42), "voice_42");
     assert_eq!(voice_name(99), "voice_99");
     assert_eq!(voice_name(100), "voice_100");
+  }
+
+  #[test]
+  fn wraps_sample_positions_like_the_remainder_operator() {
+    for body in [1.0f64, 3.0, 441.0, 65536.5] {
+      for i in 0..2000 {
+        let pos = i as f64 * 1234.567;
+        let wrapped = wrap_sample_pos(pos, body);
+        assert!(
+          (0.0..body).contains(&wrapped),
+          "{pos} % {body} = {wrapped} is outside the body"
+        );
+        assert!(
+          (wrapped - pos % body).abs() < 1.0e-6,
+          "{pos} % {body}: {wrapped} vs {}",
+          pos % body
+        );
+      }
+    }
+    assert_eq!(wrap_sample_pos(9.0, 3.0), 0.0);
+    assert_eq!(wrap_sample_pos(0.5, 3.0), 0.5);
+    assert_eq!(wrap_sample_pos(f64::NAN, 3.0), 0.0);
   }
 }
