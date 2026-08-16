@@ -49,8 +49,8 @@ fn win_slope(x: u16, n: u16) -> f32 {
 	// as stb_vorbis shares the window slope generation function,
 	// The *other* possible reason is that we don't need the right
 	// window for anything. TODO investigate this more.
-	let v = (0.5 * std::f32::consts::PI * (x as f32 + 0.5) / n as f32).sin();
-	return (0.5 * std::f32::consts::PI * v * v).sin();
+	let v = lite_math::sin(0.5 * std::f32::consts::PI * (x as f32 + 0.5) / n as f32);
+	return lite_math::sin(0.5 * std::f32::consts::PI * v * v);
 }
 
 fn generate_window(n: u16) -> Vec<f32> {
@@ -79,16 +79,19 @@ fn compute_twiddle_factors(blocksize: u8) -> TwiddleFactors {
 	let pi_2_n = 2.0 * std::f32::consts::PI / (n as f32);
 
 	for k in 0..n4 {
-		a.push(f32::cos((k as f32) * pi_4_n));
-		a.push(-f32::sin((k as f32) * pi_4_n));
-		b.push(f32::cos(((k2 + 1) as f32) * pi_05_n) * 0.5);
-		b.push(f32::sin(((k2 + 1) as f32) * pi_05_n) * 0.5);
+		let (sin_a, cos_a) = lite_math::sin_cos((k as f32) * pi_4_n);
+		a.push(cos_a);
+		a.push(-sin_a);
+		let (sin_b, cos_b) = lite_math::sin_cos(((k2 + 1) as f32) * pi_05_n);
+		b.push(cos_b * 0.5);
+		b.push(sin_b * 0.5);
 		k2 += 2;
 	}
 	k2 = 0;
 	for _ in 0..n8 {
-		c.push(f32::cos(((k2 + 1) as f32) * pi_2_n));
-		c.push(-f32::sin(((k2 + 1) as f32) * pi_2_n));
+		let (sin_c, cos_c) = lite_math::sin_cos(((k2 + 1) as f32) * pi_2_n);
+		c.push(cos_c);
+		c.push(-sin_c);
 		k2 += 2;
 	}
 	return TwiddleFactors { a, b, c };
@@ -148,7 +151,7 @@ pub fn compute_bark_map_cos_omega(n: u16, floor0_rate: u16, floor0_bark_map_size
 	for i in 0..n {
 		let foobar = (bark(i as f32 * hfl_dn) * foobar_const_part).floor();
 		let map_elem = foobar.min(bms_m1);
-		let cos_omega = (map_elem * omega_factor).cos();
+		let cos_omega = lite_math::cos(map_elem * omega_factor);
 		res.push(cos_omega);
 	}
 	return res;

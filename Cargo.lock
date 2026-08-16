@@ -306,6 +306,7 @@ name = "lewton"
 version = "0.10.2"
 dependencies = [
  "byteorder",
+ "lite-math",
  "ogg",
  "tinyvec",
 ]
@@ -315,6 +316,10 @@ name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+
+[[package]]
+name = "lite-math"
+version = "0.1.0"
 
 [[package]]
 name = "lock_api"
@@ -420,6 +425,7 @@ dependencies = [
  "criterion",
  "encoding_rs",
  "lewton",
+ "lite-math",
  "talc",
  "tinyvec",
  "toml",

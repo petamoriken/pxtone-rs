@@ -20,6 +20,7 @@ ogg = ["dep:ogg"]
 byteorder = "1.0"
 tinyvec = { version = "1.0", features = ["alloc"] }
 ogg = { path = "../ogg", version = "0.8", optional = true }
+lite-math = { path = "../lite-math" }
 
 [dev-dependencies]
 ogg = { path = "../ogg", version = "0.8" }

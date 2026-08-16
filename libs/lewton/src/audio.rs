@@ -135,12 +135,12 @@ fn floor_zero_decode(
 				if temp_vector.len() + coefficients.len() < fl.floor0_order as usize {
 					// Little optimisation: we don't have to care about the >= case here
 					for &e in temp_vector {
-						coefficients.push((last + e as f32).cos());
+						coefficients.push(lite_math::cos(last + e as f32));
 						last_new = e as f32;
 					}
 				} else {
 					for &e in temp_vector {
-						coefficients.push((last + e as f32).cos());
+						coefficients.push(lite_math::cos(last + e as f32));
 						last_new = e as f32;
 						// This rule makes sure that coefficients doesn't get
 						// larger than floor0_order and saves an allocation
@@ -819,7 +819,7 @@ fn dct_iv_slow(buffer: &mut [f32]) {
 	let n = buffer.len();
 	let nmask = (n << 3) - 1;
 	let mcos = (0..8 * n)
-		.map(|i| (std::f32::consts::FRAC_PI_4 * (i as f32) / (n as f32)).cos())
+		.map(|i| lite_math::cos(std::f32::consts::FRAC_PI_4 * (i as f32) / (n as f32)))
 		.collect::<Vec<_>>();
 	for i in 0..n {
 		let mut acc = 0.;

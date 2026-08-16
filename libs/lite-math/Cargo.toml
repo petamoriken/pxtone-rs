@@ -1,0 +1,9 @@
+[package]
+name = "lite-math"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "Compact, deterministic f32 maths for the wasm build"
+
+[lib]
+name = "lite_math"

@@ -289,11 +289,9 @@ Checking the Comment header
 
 You should call this function with the second packet in the stream.
 
-Unlike upstream lewton, this fork does not hand the comment metadata to
-the caller: pxtone has no use for the vendor string or for the key-value
-comments, and skipping them keeps the UTF-8 decoding and the allocations
-out of the binary. The packet is still walked over to make sure that it
-is a structurally valid comment header.
+Unlike upstream lewton, this fork drops the metadata: pxtone never reads it,
+and skipping it keeps the UTF-8 decoding and the allocations out of the binary.
+The packet is still walked over to check that it is structurally valid.
 
 The function does not check whether the comment field names consist
 of characters `0x20` through `0x7D` (`0x3D` excluded), as the vorbis

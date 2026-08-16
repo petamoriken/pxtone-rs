@@ -1,9 +1,8 @@
 //! Compact stable sort.
 //!
-//! `slice::sort_by` (driftsort) is fast, but its generic machinery costs several
-//! kilobytes of code per instantiation, which is a lot for the wasm build.
-//! Sorting only happens while loading a file, never while mixing, so a plain
-//! run-insertion plus bottom-up merge sort is the better trade-off here.
+//! `slice::sort_by` (driftsort) costs several kilobytes of wasm per
+//! instantiation. Sorting only happens while loading a file, so run-insertion
+//! plus a bottom-up merge is the better trade-off.
 
 /// Length of the initial runs built with insertion sort.
 const RUN: usize = 16;

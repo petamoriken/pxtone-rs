@@ -676,9 +676,8 @@ fn update_wave_ptv(
 
 // ---- OGG Vorbis decode (lewton) ----
 //
-// Decodes into `dst` as interleaved 16 bit little endian samples. Samples past
-// the end of `dst` are dropped, and a stream shorter than `dst` leaves the rest
-// of the buffer untouched.
+// Decodes into `dst` as interleaved 16 bit little endian samples, truncating
+// or leaving the tail of `dst` untouched as needed.
 fn decode_ogg_into(data: &[u8], dst: &mut [u8]) -> Result<(), PxtoneError> {
   use lewton::inside_ogg::OggStreamReader;
   use std::io::Cursor;
