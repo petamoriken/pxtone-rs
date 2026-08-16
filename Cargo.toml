@@ -25,7 +25,8 @@ codegen-units = 1
 [profile.release-wasm]
 inherits = "release"
 panic = "abort"
-strip = true
+# The name section is needed by tools/wasm_stub_panic.ts; wasm-opt drops it.
+strip = "debuginfo"
 
 # The vorbis decoder only runs once per OGGV material while loading a file, so
 # trade its code size against speed. This is worth about 11KB of wasm.
