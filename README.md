@@ -79,7 +79,7 @@ and [Deno](https://deno.com/), then run:
 deno task build:wasm
 ```
 
-An LLVM that can target wasm (`brew install llvm`) is optional: `libs/lite-math`
+A clang that can target wasm (`brew install llvm`) is optional: `libs/lite-math`
 uses it to assemble the `f32.sqrt` and `f32.floor` instructions, which stable
 Rust cannot emit. Without it the build falls back to portable implementations of
 those two functions.
