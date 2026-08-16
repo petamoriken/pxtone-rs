@@ -11,6 +11,17 @@ both native Rust usage and WebAssembly via a C FFI interface.
 - Access song metadata: title, comment, tempo, time signature, units, and events
 - WebAssembly build support (no JavaScript glue code; pure C FFI exports)
 
+## Project layout
+
+The `pxtone` crate sits at the root; `libs/` holds the crates it decodes with,
+all wired up as path dependencies of the workspace.
+
+| Crate            | Contents                                                                                                |
+| ---------------- | ------------------------------------------------------------------------------------------------------- |
+| `libs/lewton`    | Vorbis decoder. Fork of [lewton](https://github.com/RustAudio/lewton) 0.10.2, `no_std`, decode only     |
+| `libs/ogg`       | Ogg container. Fork of [ogg](https://github.com/RustAudio/ogg) 0.8.0, `no_std`, reads from a byte slice |
+| `libs/lite-math` | `f32` sine, cosine, square root, floor, exponentials and arctangent, sized for the wasm build           |
+
 ## Usage
 
 ### Rust
@@ -46,12 +57,10 @@ Decode a `.ptnoise` file:
 
 ```rust
 use pxtone::{DestinationQuality, PxtoneService};
-use std::fs::File;
-use std::io::BufReader;
 
 let mut service = PxtoneService::new(DestinationQuality::default()).unwrap();
-let mut reader = BufReader::new(File::open("instrument.ptnoise").unwrap());
-let wave = service.render_noise(&mut reader).unwrap();
+let data = std::fs::read("instrument.ptnoise").unwrap();
+let wave = service.render_noise(&data).unwrap();
 // wave.samples: Vec<u8> of 16-bit LE PCM
 // wave.channels: u8
 // wave.sample_rate: u32
@@ -70,14 +79,23 @@ and [Deno](https://deno.com/), then run:
 deno task build:wasm
 ```
 
+An LLVM that can target wasm (`brew install llvm`) is optional: `libs/lite-math`
+uses it to assemble the `f32.sqrt` and `f32.floor` instructions, which stable
+Rust cannot emit. Without it the build falls back to portable implementations of
+those two functions.
+
 This runs the following pipeline:
 
-| Step | Command                 | Description                                              |
-| ---- | ----------------------- | -------------------------------------------------------- |
-| 1    | `build:wasm:raw`        | Compiles Rust → `pxtone_raw.wasm`                        |
-| 2    | `build:wasm:merge`      | Compiles WAT wrappers and merges them into `pxtone.wasm` |
-| 3    | `build:wasm:strip-impl` | Strips internal `_`-prefixed exports from the binary     |
-| 4    | `build:wasm:opt`        | Optimizes with `wasm-opt -O3`                            |
+| Step | Command                 | Description                                                      |
+| ---- | ----------------------- | ---------------------------------------------------------------- |
+| 1    | `build:wasm:raw`        | Compiles Rust → `pxtone_raw.wasm`                                |
+| 2    | `build:wasm:merge`      | Compiles WAT wrappers and merges them into `pxtone.wasm`         |
+| 3    | `build:wasm:strip-impl` | Strips internal `_`-prefixed exports from the binary             |
+| 4    | `build:wasm:stub-panic` | Traps in the panic paths and clears the messages they pointed at |
+| 5    | `build:wasm:opt`        | Optimizes with `wasm-opt -O3`                                    |
+
+Panics therefore trap in the wasm build rather than aborting with a message,
+which nothing could observe anyway: the module imports nothing to write to.
 
 The compiled module exports a C FFI interface with WebAssembly multi-value
 returns. Memory management uses explicit `alloc`/`dealloc` exports. See
@@ -139,3 +157,7 @@ deno task test:wasm
 ## License
 
 [MIT](LICENSE.md)
+
+The vendored decoders keep their own licenses:
+[`libs/lewton`](libs/lewton/LICENSE) is MIT or Apache-2.0, and
+[`libs/ogg`](libs/ogg/LICENSE) is BSD-3-Clause.
