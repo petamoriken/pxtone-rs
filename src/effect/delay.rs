@@ -1,7 +1,6 @@
 use crate::error::PxtoneError;
+use crate::reader::Reader;
 use crate::unit::{MAX_CHANNEL, MAX_GROUP_COUNT};
-use byteorder::{LE, ReadBytesExt};
-use std::io::{Read, Seek};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u16)]
@@ -134,13 +133,13 @@ impl Delay {
   }
 
   /// Reads a (12-byte) delay structure
-  pub(crate) fn read<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
-    let unit = r.read_u16::<LE>()?;
-    let group = r.read_u16::<LE>()? as usize;
-    let rate = r.read_f32::<LE>()?;
+  pub(crate) fn read(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_i32()?;
+    let unit = r.read_u16()?;
+    let group = r.read_u16()? as usize;
+    let rate = r.read_f32()?;
     self.unit = DelayUnit::try_from(unit).map_err(|_| PxtoneError::UnknownFormat)?;
-    self.frequency = r.read_f32::<LE>()?;
+    self.frequency = r.read_f32()?;
     self.rate = rate;
     // pxtnDelay::Read falls back to group 0 when the stored group is out of range
     self.group = if group < MAX_GROUP_COUNT { group } else { 0 };

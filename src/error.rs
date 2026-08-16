@@ -1,10 +1,6 @@
-use std::io;
-
 /// Error type returned by pxtone operations.
 #[derive(Debug)]
 pub enum PxtoneError {
-  /// An I/O error occurred while reading the file.
-  Io(io::Error),
   /// The file is not a recognized pxtone format.
   UnknownFormat,
   /// The file was created by a newer version and cannot be decoded.
@@ -30,7 +26,6 @@ pub enum PxtoneError {
 impl std::fmt::Display for PxtoneError {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     match self {
-      PxtoneError::Io(e) => write!(f, "I/O error: {e}"),
       PxtoneError::UnknownFormat => write!(f, "Unknown format"),
       PxtoneError::NewFormat => write!(f, "Format version too new"),
       PxtoneError::BrokenFile => write!(f, "Broken file"),
@@ -45,18 +40,4 @@ impl std::fmt::Display for PxtoneError {
   }
 }
 
-impl std::error::Error for PxtoneError {
-  fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-    match self {
-      PxtoneError::Io(e) => Some(e),
-      PxtoneError::OggVorbis(e) => Some(e),
-      _ => None,
-    }
-  }
-}
-
-impl From<io::Error> for PxtoneError {
-  fn from(e: io::Error) -> Self {
-    PxtoneError::Io(e)
-  }
-}
+impl std::error::Error for PxtoneError {}

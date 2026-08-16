@@ -51,12 +51,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d20789868f4b01b2f2caec9f5c4e0213b41e3e5702a50157d699ae31ced2fcb"
 
 [[package]]
-name = "byteorder"
-version = "1.5.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
-
-[[package]]
 name = "cast"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -304,10 +298,8 @@ dependencies = [
 [[package]]
 name = "lewton"
 version = "0.10.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "777b48df9aaab155475a83a7df3070395ea1ac6902f5cd062b8f2b028075c030"
 dependencies = [
- "byteorder",
+ "lite-math",
  "ogg",
  "tinyvec",
 ]
@@ -317,6 +309,10 @@ name = "libc"
 version = "0.2.186"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68ab91017fe16c622486840e4c83c9a37afeff978bd239b5293d61ece587de66"
+
+[[package]]
+name = "lite-math"
+version = "0.1.0"
 
 [[package]]
 name = "lock_api"
@@ -345,11 +341,6 @@ dependencies = [
 [[package]]
 name = "ogg"
 version = "0.8.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6951b4e8bf21c8193da321bcce9c9dd2e13c858fe078bf9054a288b419ae5d6e"
-dependencies = [
- "byteorder",
-]
 
 [[package]]
 name = "once_cell"
@@ -420,10 +411,10 @@ dependencies = [
 name = "pxtone"
 version = "0.9.0"
 dependencies = [
- "byteorder",
  "criterion",
  "encoding_rs",
  "lewton",
+ "lite-math",
  "talc",
  "tinyvec",
  "toml",

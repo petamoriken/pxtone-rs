@@ -1,0 +1,33 @@
+[package]
+name = "lewton"
+version = "0.10.2"
+authors = ["est31 <MTest31@outlook.com>"]
+description = "Pure Rust vorbis decoder"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/RustAudio/lewton"
+keywords = ["ogg", "vorbis", "decoder", "audio"]
+categories = ["compression", "multimedia::audio", "multimedia::encoding"]
+documentation = "https://docs.rs/lewton"
+readme = "README.md"
+edition = "2024"
+rust-version = "1.95.0"
+
+[features]
+default = ["ogg"]
+ogg = ["dep:ogg"]
+
+[dependencies]
+tinyvec = { version = "1.0", features = ["alloc"] }
+ogg = { path = "../ogg", version = "0.8", optional = true }
+lite-math = { path = "../lite-math" }
+
+[dev-dependencies]
+ogg = { path = "../ogg", version = "0.8" }
+
+# Vendored upstream sources: keep clippy quiet so that lint runs on the
+# pxtone crate itself stay readable.
+[lints.clippy]
+all = { level = "allow", priority = -1 }
+
+[lib]
+name = "lewton"

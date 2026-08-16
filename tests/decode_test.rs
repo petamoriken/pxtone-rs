@@ -1,29 +1,11 @@
+mod common;
+
+use common::{pcm_to_wav, wav_matches};
 use encoding_rs::SHIFT_JIS;
 use pxtone::{DestinationQuality, PxtoneService, VomitPreparation};
-use std::fs::{self, File};
-use std::io::BufReader;
+use std::fs;
 use std::path::Path;
 use toml::{Table, Value};
-
-const WAV_HEADER_LEN: usize = 44;
-const WAV_PCM_TOLERANCE: i32 = 2;
-
-fn wav_matches(actual: &[u8], expected: &[u8]) -> bool {
-  if actual.len() != expected.len() {
-    return false;
-  }
-  if actual[..WAV_HEADER_LEN] != expected[..WAV_HEADER_LEN] {
-    return false;
-  }
-  actual[WAV_HEADER_LEN..]
-    .chunks_exact(2)
-    .zip(expected[WAV_HEADER_LEN..].chunks_exact(2))
-    .all(|(a, e)| {
-      let av = i16::from_le_bytes([a[0], a[1]]) as i32;
-      let ev = i16::from_le_bytes([e[0], e[1]]) as i32;
-      (av - ev).abs() <= WAV_PCM_TOLERANCE
-    })
-}
 
 fn decode_shift_jis(raw: &[u8]) -> String {
   SHIFT_JIS.decode(raw).0.into_owned()
@@ -37,27 +19,6 @@ fn load_service(service: &mut PxtoneService, path: &Path) {
   service
     .tones_ready()
     .unwrap_or_else(|e| panic!("{}: tones_ready failed: {:?}", path.display(), e));
-}
-
-fn pcm_to_wav(samples: &[u8], channels: u8, sample_rate: u32) -> Vec<u8> {
-  let data_len = samples.len() as u32;
-  let byte_rate = sample_rate * channels as u32 * 2;
-  let mut wav = Vec::with_capacity(44 + samples.len());
-  wav.extend_from_slice(b"RIFF");
-  wav.extend_from_slice(&(36u32 + data_len).to_le_bytes());
-  wav.extend_from_slice(b"WAVE");
-  wav.extend_from_slice(b"fmt ");
-  wav.extend_from_slice(&16u32.to_le_bytes());
-  wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
-  wav.extend_from_slice(&(channels as u16).to_le_bytes());
-  wav.extend_from_slice(&sample_rate.to_le_bytes());
-  wav.extend_from_slice(&byte_rate.to_le_bytes());
-  wav.extend_from_slice(&(channels as u16 * 2).to_le_bytes());
-  wav.extend_from_slice(&16u16.to_le_bytes());
-  wav.extend_from_slice(b"data");
-  wav.extend_from_slice(&data_len.to_le_bytes());
-  wav.extend_from_slice(samples);
-  wav
 }
 
 fn decode_ptcop_to_wav(service: &mut PxtoneService) -> Vec<u8> {
@@ -245,11 +206,10 @@ fn decoded_ptnoise_matches_reference() {
     let stem = ptnoise_path.file_stem().unwrap().to_string_lossy();
     let wav_path = snapshot_dir.join(format!("{}.wav", stem));
 
-    let file =
-      File::open(&ptnoise_path).unwrap_or_else(|e| panic!("{}: {}", ptnoise_path.display(), e));
-    let mut reader = BufReader::new(file);
+    let data =
+      fs::read(&ptnoise_path).unwrap_or_else(|e| panic!("{}: {}", ptnoise_path.display(), e));
     let noise_wave = service
-      .render_noise(&mut reader)
+      .render_noise(&data)
       .unwrap_or_else(|e| panic!("{}: render_noise failed: {:?}", ptnoise_path.display(), e));
 
     let wav = pcm_to_wav(

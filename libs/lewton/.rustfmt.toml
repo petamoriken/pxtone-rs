@@ -1,0 +1,8 @@
+# Note that this rustfmt file only provides rough
+# guidelines about how the style should be.
+# Right now, rustfmt is not capable to map all
+# demands to the code style (yet).
+
+hard_tabs = true
+max_width = 120
+match_block_trailing_comma = true

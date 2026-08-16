@@ -5,9 +5,7 @@ use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
 use crate::pulse::oscillator::{Oscillator, Point};
 use crate::pulse::pcm::Pcm;
-use crate::read_ext::ReadExt;
-use byteorder::{LE, ReadBytesExt};
-use std::io::{Read, Seek, SeekFrom};
+use crate::reader::Reader;
 use tinyvec::TinyVec;
 
 // ---- Constants ----
@@ -230,17 +228,17 @@ impl Woice {
   }
 
   // ---- PCM material loading ----
-  pub(crate) fn read_mate_pcm<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
+  pub(crate) fn read_mate_pcm(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_i32()?;
     // _MATERIALSTRUCT_PCM (24 bytes)
-    let _x3x_unit_no = r.read_u16::<LE>()?;
-    let basic_key = r.read_u16::<LE>()? as u32;
-    let voice_flags = r.read_u32::<LE>()?;
-    let channels = r.read_u16::<LE>()? as u8;
-    let bits_per_sample = r.read_u16::<LE>()? as u8;
-    let sample_rate = r.read_u32::<LE>()?;
-    let tuning = r.read_f32::<LE>()?;
-    let data_size = r.read_u32::<LE>()?;
+    let _x3x_unit_no = r.read_u16()?;
+    let basic_key = r.read_u16()? as u32;
+    let voice_flags = r.read_u32()?;
+    let channels = r.read_u16()? as u8;
+    let bits_per_sample = r.read_u16()? as u8;
+    let sample_rate = r.read_u32()?;
+    let tuning = r.read_f32()?;
+    let data_size = r.read_u32()?;
 
     if voice_flags & VOICE_FLAG_UNCOVERED != 0 {
       return Err(PxtoneError::UnknownFormat);
@@ -250,8 +248,8 @@ impl Woice {
       return Err(PxtoneError::UnknownFormat);
     }
     let frame_count = data_size * 8 / bits_per_sample as u32 / channels as u32;
-    let data_offset = r.stream_position()?;
-    r.seek(SeekFrom::Current(data_size as i64))?;
+    let data_offset = r.position();
+    r.skip(data_size as u64)?;
 
     let unit = VoiceUnit {
       basic_key,
@@ -274,14 +272,14 @@ impl Woice {
   }
 
   // ---- PTN material loading ----
-  pub(crate) fn read_mate_ptn<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
+  pub(crate) fn read_mate_ptn(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_i32()?;
     // _MATERIALSTRUCT_PTN (16 bytes)
-    let _x3x_unit_no = r.read_u16::<LE>()?;
-    let basic_key = r.read_u16::<LE>()? as u32;
-    let voice_flags = r.read_u32::<LE>()?;
-    let tuning = r.read_f32::<LE>()?;
-    let rrr = r.read_i32::<LE>()?;
+    let _x3x_unit_no = r.read_u16()?;
+    let basic_key = r.read_u16()? as u32;
+    let voice_flags = r.read_u32()?;
+    let tuning = r.read_f32()?;
+    let rrr = r.read_i32()?;
 
     if !(0..=1).contains(&rrr) {
       return Err(PxtoneError::UnknownFormat);
@@ -304,13 +302,13 @@ impl Woice {
   }
 
   // ---- PTV material loading ----
-  pub(crate) fn read_mate_ptv<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
+  pub(crate) fn read_mate_ptv(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_i32()?;
     // _MATERIALSTRUCT_PTV (12 bytes)
-    let _x3x_unit_no = r.read_u16::<LE>()?;
-    let rrr = r.read_u16::<LE>()?;
-    let x3x_tuning = r.read_f32::<LE>()?;
-    let _ptv_size = r.read_i32::<LE>()?;
+    let _x3x_unit_no = r.read_u16()?;
+    let rrr = r.read_u16()?;
+    let x3x_tuning = r.read_f32()?;
+    let _ptv_size = r.read_i32()?;
 
     if rrr != 0 {
       return Err(PxtoneError::UnknownFormat);
@@ -322,24 +320,24 @@ impl Woice {
   }
 
   // ---- OGGV material loading ----
-  pub(crate) fn read_mate_oggv<R: Read + Seek>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
-    let _size = r.read_i32::<LE>()?;
+  pub(crate) fn read_mate_oggv(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
+    let _size = r.read_i32()?;
     // _MATERIALSTRUCT_OGGV (12 bytes)
-    let _xxx = r.read_u16::<LE>()?;
-    let basic_key = r.read_u16::<LE>()? as u32;
-    let voice_flags = r.read_u32::<LE>()?;
-    let tuning = r.read_f32::<LE>()?;
+    let _xxx = r.read_u16()?;
+    let basic_key = r.read_u16()? as u32;
+    let voice_flags = r.read_u32()?;
+    let tuning = r.read_f32()?;
 
     if voice_flags & VOICE_FLAG_UNCOVERED != 0 {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let channels = r.read_u32::<LE>()? as u8;
-    let sample_rate = r.read_u32::<LE>()?;
-    let frame_count = r.read_u32::<LE>()?;
-    let size = r.read_i32::<LE>()?;
-    let data_offset = r.stream_position()?;
-    r.seek(SeekFrom::Current(size as i64))?;
+    let channels = r.read_u32()? as u8;
+    let sample_rate = r.read_u32()?;
+    let frame_count = r.read_u32()?;
+    let size = r.read_i32()?;
+    let data_offset = r.position();
+    r.skip(size as u64)?;
 
     let unit = VoiceUnit {
       basic_key,
@@ -361,15 +359,15 @@ impl Woice {
   }
 
   // ---- PTV loading (PTVOICE- format) ----
-  fn ptv_read<R: Read>(&mut self, r: &mut R) -> Result<(), PxtoneError> {
+  fn ptv_read(&mut self, r: &mut Reader<'_>) -> Result<(), PxtoneError> {
     let mut code = [0u8; 8];
     r.read_exact(&mut code)?;
     if &code != b"PTVOICE-" {
       return Err(PxtoneError::InvalidCode);
     }
 
-    let version = r.read_i32::<LE>()?;
-    let _total = r.read_i32::<LE>()?;
+    let version = r.read_i32()?;
+    let _total = r.read_i32()?;
     if version > 20060111 {
       return Err(PxtoneError::NewFormat);
     }
@@ -481,10 +479,8 @@ impl Woice {
         }
         VoiceData::OggVorbis(ogg) => {
           let slice = &raw_data[ogg.data_offset as usize..][..ogg.data_size as usize];
-          let decoded = decode_ogg(slice)?;
           let mut work = Pcm::create(ogg.channels, ogg.sample_rate, 16, ogg.frame_count)?;
-          let src = &decoded[..decoded.len().min(work.samples().len())];
-          work.samples_mut()[..src.len()].copy_from_slice(src);
+          decode_ogg_into(slice, work.samples_mut())?;
           let _ = work.convert(channels, sample_rate, bits_per_sample);
           instance.head_frames = work.head_frames;
           instance.body_frames = work.body_frames;
@@ -574,7 +570,7 @@ impl Woice {
 }
 
 // ---- PTV wave-reading helpers ----
-fn ptv_read_wave<R: Read>(r: &mut R) -> Result<VoiceData, PxtoneError> {
+fn ptv_read_wave(r: &mut Reader<'_>) -> Result<VoiceData, PxtoneError> {
   let vtype = r.read_var_u32()?;
   match vtype {
     0 => {
@@ -611,7 +607,7 @@ fn ptv_read_wave<R: Read>(r: &mut R) -> Result<VoiceData, PxtoneError> {
   }
 }
 
-fn ptv_read_envelope<R: Read>(r: &mut R, envelope: &mut VoiceEnvelope) -> Result<(), PxtoneError> {
+fn ptv_read_envelope(r: &mut Reader<'_>, envelope: &mut VoiceEnvelope) -> Result<(), PxtoneError> {
   let fps = r.read_var_u32()?;
   let head_count = r.read_var_u32()?;
   let body_count = r.read_var_u32()?;
@@ -677,25 +673,28 @@ fn update_wave_ptv(
 }
 
 // ---- OGG Vorbis decode (lewton) ----
-fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, PxtoneError> {
+//
+// Decodes into `dst` as interleaved 16 bit little endian samples, truncating
+// or leaving the tail of `dst` untouched as needed.
+fn decode_ogg_into(data: &[u8], dst: &mut [u8]) -> Result<(), PxtoneError> {
   use lewton::inside_ogg::OggStreamReader;
-  use std::io::Cursor;
 
-  let cursor = Cursor::new(data);
-  let mut reader = OggStreamReader::new(cursor).map_err(PxtoneError::OggVorbis)?;
+  let mut reader = OggStreamReader::new(data).map_err(PxtoneError::OggVorbis)?;
 
-  let _ch = reader.ident_hdr.audio_channels as usize;
-  let _sps = reader.ident_hdr.audio_sample_rate;
-
-  let mut pcm_i16: Vec<i16> = Vec::new();
+  let mut written = 0;
   while let Some(pck) = reader
     .read_dec_packet_itl()
     .map_err(PxtoneError::OggVorbis)?
   {
-    pcm_i16.extend_from_slice(&pck);
+    let room = (dst.len() - written) / 2;
+    let count = pck.len().min(room);
+    for (out, &sample) in dst[written..].chunks_exact_mut(2).zip(&pck[..count]) {
+      out.copy_from_slice(&sample.to_le_bytes());
+    }
+    written += count * 2;
+    if count < pck.len() {
+      break;
+    }
   }
-
-  // i16 → u8 LE byte sequence
-  let out: Vec<u8> = pcm_i16.iter().flat_map(|&s| s.to_le_bytes()).collect();
-  Ok(out)
+  Ok(())
 }

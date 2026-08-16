@@ -1,9 +1,9 @@
 use crate::pulse::noise::Noise;
+use crate::reader::Reader;
 use crate::service::{
   DestinationQuality, PxtoneService, StartPos, VomitPrepFlags, VomitPreparation,
 };
 use std::alloc::{Layout, alloc as sys_alloc, dealloc as sys_dealloc};
-use std::io::Cursor;
 
 #[cfg(not(target_feature = "atomics"))]
 use talc::wasm::{WasmDynamicTalc, new_wasm_dynamic_allocator};
@@ -108,11 +108,10 @@ pub unsafe extern "C" fn validate(data: *const u8, len: usize) -> i32 {
     return -1;
   }
   let slice = unsafe { std::slice::from_raw_parts(data, len) };
-  let mut cursor = Cursor::new(slice);
   let Ok(mut svc) = PxtoneService::new(DestinationQuality::default()) else {
     return -1;
   };
-  match svc.read_metadata(&mut cursor) {
+  match svc.read_metadata(slice) {
     Ok(()) => 0,
     Err(_) => -1,
   }
@@ -217,8 +216,7 @@ pub unsafe extern "C" fn service_render_noise(
   }
   let svc = unsafe { &mut *svc };
   let slice = unsafe { std::slice::from_raw_parts(data, data_len) };
-  let mut cursor = Cursor::new(slice);
-  let wave = match svc.render_noise(&mut cursor) {
+  let wave = match svc.render_noise(slice) {
     Ok(w) => w,
     Err(_) => return 0,
   };
@@ -249,9 +247,8 @@ pub unsafe extern "C" fn validate_noise(data: *const u8, len: usize) -> i32 {
     return -1;
   }
   let slice = unsafe { std::slice::from_raw_parts(data, len) };
-  let mut cursor = Cursor::new(slice);
   let mut noise = Noise::new();
-  match noise.read(&mut cursor) {
+  match noise.read(&mut Reader::new(slice)) {
     Ok(()) => 0,
     Err(_) => -1,
   }

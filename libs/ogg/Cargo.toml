@@ -1,0 +1,22 @@
+[package]
+name = "ogg"
+version = "0.8.0"
+authors = ["est31 <MTest31@outlook.com>"]
+description = "Ogg container decoder and encoder written in pure Rust"
+license = "BSD-3-Clause"
+keywords = ["ogg", "decoder", "encoder", "xiph"]
+documentation = "https://docs.rs/ogg/0.8.0"
+repository = "https://github.com/RustAudio/ogg"
+readme = "README.md"
+edition = "2024"
+
+[lib]
+name = "ogg"
+
+# Vendored upstream sources: keep clippy quiet so that lint runs on the
+# pxtone crate itself stay readable.
+[lints.clippy]
+all = { level = "allow", priority = -1 }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(fuzzing)'] }

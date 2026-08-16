@@ -1,0 +1,6 @@
+# Mirrors the upstream ogg code style so that `cargo fmt` at the
+# workspace root does not reformat the vendored sources.
+
+hard_tabs = true
+max_width = 120
+match_block_trailing_comma = true
