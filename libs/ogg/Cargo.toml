@@ -13,9 +13,6 @@ edition = "2024"
 [lib]
 name = "ogg"
 
-[dependencies]
-byteorder = "1.0"
-
 # Vendored upstream sources: keep clippy quiet so that lint runs on the
 # pxtone crate itself stay readable.
 [lints.clippy]

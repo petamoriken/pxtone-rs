@@ -14,7 +14,6 @@ use std::boxed::Box;
 use std::vec::Vec;
 
 use crate::crc::vorbis_crc32_update;
-use byteorder::{LittleEndian, WriteBytesExt};
 use std::collections::HashMap;
 use std::io::{self, Cursor, Seek, SeekFrom, Write};
 use std::result;
@@ -210,7 +209,7 @@ impl<T: io::Write> PacketWriter<T> {
 				flags |= 0x04;
 			}
 
-			tri!(hdr_cur.write_u8(flags));
+			tri!(hdr_cur.write_all(&[flags]));
 
 			let pck_data = &pg.cur_pg_data;
 
@@ -221,14 +220,14 @@ impl<T: io::Write> PacketWriter<T> {
 				}
 			}
 
-			tri!(hdr_cur.write_u64::<LittleEndian>(last_finishing_pck_absgp));
-			tri!(hdr_cur.write_u32::<LittleEndian>(serial));
-			tri!(hdr_cur.write_u32::<LittleEndian>(pg.sequence_num));
+			tri!(hdr_cur.write_all(&last_finishing_pck_absgp.to_le_bytes()));
+			tri!(hdr_cur.write_all(&serial.to_le_bytes()));
+			tri!(hdr_cur.write_all(&pg.sequence_num.to_le_bytes()));
 
 			// checksum, calculated later on :)
-			tri!(hdr_cur.write_u32::<LittleEndian>(0));
+			tri!(hdr_cur.write_all(&0u32.to_le_bytes()));
 
-			tri!(hdr_cur.write_u8(pg.segment_cnt));
+			tri!(hdr_cur.write_all(&[pg.segment_cnt]));
 
 			let mut hash_calculated: u32;
 
@@ -258,7 +257,7 @@ impl<T: io::Write> PacketWriter<T> {
 			// succeeded & we are at the right pos now).
 			// It's hopefully not required.
 			tri!(hdr_cur.seek(SeekFrom::Start(22)));
-			tri!(hdr_cur.write_u32::<LittleEndian>(hash_calculated));
+			tri!(hdr_cur.write_all(&hash_calculated.to_le_bytes()));
 
 			// Now all is done, write the stuff!
 			tri!(wtr.write_all(hdr_cur.get_ref()));
