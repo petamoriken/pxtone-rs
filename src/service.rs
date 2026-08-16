@@ -138,6 +138,34 @@ impl Default for VomitPreparation {
   }
 }
 
+/// Builds the `voice_NN` placeholder name of the x3x formats.
+///
+/// `format!` would pull `core::fmt`'s integer formatting in for this one call.
+fn voice_name(index: usize) -> String {
+  let mut digits = [0u8; 20];
+  let mut count = 0;
+  let mut rest = index;
+  loop {
+    digits[count] = b'0' + (rest % 10) as u8;
+    count += 1;
+    rest /= 10;
+    if rest == 0 {
+      break;
+    }
+  }
+
+  let mut name = String::with_capacity(6 + count.max(2));
+  name.push_str("voice_");
+  // The format was `{:02}`, so pad single digits with a leading zero.
+  if count < 2 {
+    name.push('0');
+  }
+  for &digit in digits[..count].iter().rev() {
+    name.push(digit as char);
+  }
+  name
+}
+
 /// Writes one 16-bit LE interleaved frame at sample index `pos`.
 /// `byte_per_smp` is either 2 (mono) or 4 (stereo).
 #[inline(always)]
@@ -687,7 +715,7 @@ impl PxtoneService {
 
   fn x3x_set_voice_names(&mut self) {
     for (i, w) in self.woices.iter_mut().enumerate() {
-      w.name = format!("voice_{:02}", i);
+      w.name = voice_name(i);
     }
   }
 
@@ -1427,5 +1455,19 @@ impl PxtoneService {
   #[inline]
   pub fn moo_get_total_sample(&self) -> u32 {
     self.calc_total_sample()
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::voice_name;
+
+  #[test]
+  fn formats_x3x_voice_names() {
+    assert_eq!(voice_name(0), "voice_00");
+    assert_eq!(voice_name(7), "voice_07");
+    assert_eq!(voice_name(42), "voice_42");
+    assert_eq!(voice_name(99), "voice_99");
+    assert_eq!(voice_name(100), "voice_100");
   }
 }
