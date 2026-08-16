@@ -23,11 +23,9 @@ decoded in this mod.
 use crate::bitpacking::BitpackCursor;
 use crate::header_cached::{CachedBlocksizeDerived, compute_bark_map_cos_omega};
 use crate::huffman_tree::{HuffmanError, VorbisHuffmanTree};
-use byteorder::{LittleEndian, ReadBytesExt};
-use std::error;
-use std::fmt;
-use std::io::{Cursor, Error};
-use std::string::FromUtf8Error;
+use alloc::vec::Vec;
+
+use core::fmt;
 
 /// Errors that can occur during Header decoding
 #[derive(Debug, PartialEq)]
@@ -48,7 +46,6 @@ pub enum HeaderReadError {
 	/// The given packet does not seem to be a header as per vorbis spec,
 	/// instead it seems to be an audio packet.
 	HeaderIsAudio,
-	Utf8DecodeError,
 	/// If the needed memory isn't addressable by us
 	///
 	/// This error is returned if a calculation yielded a higher value for
@@ -76,24 +73,6 @@ impl From<HuffmanError> for HeaderReadError {
 	}
 }
 
-impl From<Error> for HeaderReadError {
-	fn from(_err: Error) -> HeaderReadError {
-		// Reading from a `Cursor<&[u8]>` can only ever fail with `UnexpectedEof`.
-		// Upstream panics with the formatted error for every other kind, which
-		// drags the `Display`/`Debug` code of `io::Error` into the binary, so
-		// treat everything as the end of the packet instead.
-		HeaderReadError::EndOfPacket
-	}
-}
-
-impl From<FromUtf8Error> for HeaderReadError {
-	fn from(_: FromUtf8Error) -> HeaderReadError {
-		HeaderReadError::Utf8DecodeError
-	}
-}
-
-impl error::Error for HeaderReadError {}
-
 impl fmt::Display for HeaderReadError {
 	fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
 		let description = match self {
@@ -103,7 +82,6 @@ impl fmt::Display for HeaderReadError {
 			HeaderReadError::HeaderBadFormat => "Invalid header",
 			HeaderReadError::HeaderBadType(_) => "Invalid/unexpected header type",
 			HeaderReadError::HeaderIsAudio => "Packet seems to be audio",
-			HeaderReadError::Utf8DecodeError => "UTF-8 decoding error",
 			HeaderReadError::BufferNotAddressable => "Requested to create buffer of non-addressable size",
 		};
 		write!(fmt, "{}", description)
@@ -151,9 +129,6 @@ macro_rules! read_header_begin_body {
 }}
 }
 fn read_header_begin(rdr: &mut BitpackCursor) -> Result<u8, HeaderReadError> {
-	read_header_begin_body!(rdr)
-}
-fn read_header_begin_cursor(rdr: &mut Cursor<&[u8]>) -> Result<u8, HeaderReadError> {
 	read_header_begin_body!(rdr)
 }
 
@@ -298,35 +273,56 @@ of characters `0x20` through `0x7D` (`0x3D` excluded), as the vorbis
 spec requires.
 */
 pub fn read_header_comment(packet: &[u8]) -> Result<(), HeaderReadError> {
-	let mut rdr = Cursor::new(packet);
-	let hd_id = try_from!(read_header_begin_cursor(&mut rdr));
+	let Some(begin) = packet.first_chunk::<7>() else {
+		return Err(HeaderReadError::EndOfPacket);
+	};
+	let hd_id = begin[0];
+	if hd_id & 1 == 0 {
+		// This is an audio packet per vorbis spec, if anything.
+		try_from!(Err(HeaderReadError::HeaderIsAudio));
+	}
+	if &begin[1..7] != b"vorbis" {
+		try_from!(Err(HeaderReadError::NotVorbisHeader));
+	}
 	if hd_id != 3 {
 		try_from!(Err(HeaderReadError::HeaderBadType(hd_id)));
 	}
+
 	// Skip over the vendor string
-	let vendor_length = try_from!(rdr.read_u32::<LittleEndian>());
-	try_from!(skip_bytes(&mut rdr, vendor_length));
+	let mut pos = 7;
+	try_from!(skip_sized_block(packet, &mut pos));
 
 	// Skip over the comments
-	let comment_count = try_from!(rdr.read_u32::<LittleEndian>());
+	let comment_count = try_from!(read_u32(packet, &mut pos));
 	for _ in 0..comment_count {
-		let comment_length = try_from!(rdr.read_u32::<LittleEndian>());
-		try_from!(skip_bytes(&mut rdr, comment_length));
+		try_from!(skip_sized_block(packet, &mut pos));
 	}
-	let framing = try_from!(rdr.read_u8());
-	if framing != 1 {
-		try_from!(Err(HeaderReadError::HeaderBadFormat));
-	}
-	return Ok(());
+
+	// Framing bit
+	return match packet.get(pos) {
+		Some(1) => Ok(()),
+		Some(_) => Err(HeaderReadError::HeaderBadFormat),
+		None => Err(HeaderReadError::EndOfPacket),
+	};
 }
 
-/// Advances the cursor by `len` bytes, erroring out if the packet is too short
-fn skip_bytes(rdr: &mut Cursor<&[u8]>, len: u32) -> Result<(), HeaderReadError> {
-	let end = rdr.position() + len as u64;
-	if end > rdr.get_ref().len() as u64 {
+/// Reads a little endian `u32` at `pos` and advances it
+fn read_u32(packet: &[u8], pos: &mut usize) -> Result<u32, HeaderReadError> {
+	let Some(bytes) = packet.get(*pos..).and_then(<[u8]>::first_chunk::<4>) else {
 		return Err(HeaderReadError::EndOfPacket);
-	}
-	rdr.set_position(end);
+	};
+	*pos += 4;
+	return Ok(u32::from_le_bytes(*bytes));
+}
+
+/// Skips a `u32` length followed by that many bytes, erroring out if the packet
+/// is too short
+fn skip_sized_block(packet: &[u8], pos: &mut usize) -> Result<(), HeaderReadError> {
+	let len = try_from!(read_u32(packet, pos));
+	let Some(end) = pos.checked_add(len as usize).filter(|end| *end <= packet.len()) else {
+		return Err(HeaderReadError::EndOfPacket);
+	};
+	*pos = end;
 	return Ok(());
 }
 

@@ -16,6 +16,7 @@ that's used later in the decode process.
 The caching is done to speed up decoding.
 */
 
+use alloc::vec::Vec;
 #[derive(Clone)]
 pub struct TwiddleFactors {
 	pub a: Vec<f32>,
@@ -49,8 +50,8 @@ fn win_slope(x: u16, n: u16) -> f32 {
 	// as stb_vorbis shares the window slope generation function,
 	// The *other* possible reason is that we don't need the right
 	// window for anything. TODO investigate this more.
-	let v = lite_math::sin(0.5 * std::f32::consts::PI * (x as f32 + 0.5) / n as f32);
-	return lite_math::sin(0.5 * std::f32::consts::PI * v * v);
+	let v = lite_math::sin(0.5 * core::f32::consts::PI * (x as f32 + 0.5) / n as f32);
+	return lite_math::sin(0.5 * core::f32::consts::PI * v * v);
 }
 
 fn generate_window(n: u16) -> Vec<f32> {
@@ -74,9 +75,9 @@ fn compute_twiddle_factors(blocksize: u8) -> TwiddleFactors {
 
 	let mut k2 = 0;
 
-	let pi_4_n = 4.0 * std::f32::consts::PI / (n as f32);
-	let pi_05_n = 0.5 * std::f32::consts::PI / (n as f32);
-	let pi_2_n = 2.0 * std::f32::consts::PI / (n as f32);
+	let pi_4_n = 4.0 * core::f32::consts::PI / (n as f32);
+	let pi_05_n = 0.5 * core::f32::consts::PI / (n as f32);
+	let pi_2_n = 2.0 * core::f32::consts::PI / (n as f32);
 
 	for k in 0..n4 {
 		let (sin_a, cos_a) = lite_math::sin_cos((k as f32) * pi_4_n);
@@ -129,7 +130,7 @@ fn test_compute_bitreverse() {
 
 #[inline]
 fn bark(x: f32) -> f32 {
-	13.1 * (0.00074 * x).atan() + 2.24 * (0.0000000185 * x * x).atan() + 0.0001 * x
+	13.1 * lite_math::atan(0.00074 * x) + 2.24 * lite_math::atan(0.0000000185 * x * x) + 0.0001 * x
 }
 
 /// Precomputes bark map values used by floor type 0 packets
@@ -147,9 +148,9 @@ pub fn compute_bark_map_cos_omega(n: u16, floor0_rate: u16, floor0_bark_map_size
 	let foobar_const_part = floor0_bark_map_size as f32 / bark(hfl);
 	// Bark map size minus 1:
 	let bms_m1 = floor0_bark_map_size as f32 - 1.0;
-	let omega_factor = std::f32::consts::PI / floor0_bark_map_size as f32;
+	let omega_factor = core::f32::consts::PI / floor0_bark_map_size as f32;
 	for i in 0..n {
-		let foobar = (bark(i as f32 * hfl_dn) * foobar_const_part).floor();
+		let foobar = lite_math::floor(bark(i as f32 * hfl_dn) * foobar_const_part);
 		let map_elem = foobar.min(bms_m1);
 		let cos_omega = lite_math::cos(map_elem * omega_factor);
 		res.push(cos_omega);

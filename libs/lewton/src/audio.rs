@@ -18,10 +18,11 @@ use crate::header::{
 };
 use crate::ilog;
 use crate::samples::Samples;
-use std::cmp::min;
-use std::error;
-use std::fmt;
-use std::iter;
+use alloc::vec::Vec;
+use core::cmp::min;
+
+use core::fmt;
+use core::iter;
 use tinyvec::TinyVec;
 
 #[derive(Debug, PartialEq, Eq)]
@@ -49,8 +50,6 @@ impl From<()> for AudioReadError {
 		AudioReadError::EndOfPacket
 	}
 }
-
-impl error::Error for AudioReadError {}
 
 impl fmt::Display for AudioReadError {
 	fn fmt(&self, fmt: &mut fmt::Formatter) -> Result<(), fmt::Error> {
@@ -198,7 +197,7 @@ fn floor_zero_compute_curve(
 
 		// Compute linear_floor_value
 		let linear_floor_value =
-			(0.11512925 * (lfv_common_term / (p + q).sqrt() - fl.floor0_amplitude_offset as f32)).exp();
+			lite_math::exp(0.11512925 * (lfv_common_term / lite_math::sqrt(p + q) - fl.floor0_amplitude_offset as f32));
 
 		// Write into output
 		let mut iteration_condition = cos_omega;
@@ -258,9 +257,9 @@ fn floor_one_decode(
 
 fn extr_neighbor<F>(v: &[u32], max_idx: usize, compare: F, relation: &str) -> (usize, u32)
 where
-	F: Fn(u32, u32) -> std::cmp::Ordering,
+	F: Fn(u32, u32) -> core::cmp::Ordering,
 {
-	use std::cmp::Ordering;
+	use core::cmp::Ordering;
 
 	let bound = v[max_idx];
 	let prefix = &v[..max_idx];
@@ -819,7 +818,7 @@ fn dct_iv_slow(buffer: &mut [f32]) {
 	let n = buffer.len();
 	let nmask = (n << 3) - 1;
 	let mcos = (0..8 * n)
-		.map(|i| lite_math::cos(std::f32::consts::FRAC_PI_4 * (i as f32) / (n as f32)))
+		.map(|i| lite_math::cos(core::f32::consts::FRAC_PI_4 * (i as f32) / (n as f32)))
 		.collect::<Vec<_>>();
 	for i in 0..n {
 		let mut acc = 0.;

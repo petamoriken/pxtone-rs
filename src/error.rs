@@ -49,7 +49,8 @@ impl std::error::Error for PxtoneError {
   fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
     match self {
       PxtoneError::Io(e) => Some(e),
-      PxtoneError::OggVorbis(e) => Some(e),
+      // lewton is `no_std`, so `VorbisError` cannot implement `Error`. Its
+      // message is part of this error's `Display` output instead.
       _ => None,
     }
   }

@@ -10,6 +10,7 @@
 Traits for sample formats
 */
 
+use alloc::vec::Vec;
 /// Trait for a packet of multiple samples
 pub trait Samples {
 	fn num_samples(&self) -> usize;

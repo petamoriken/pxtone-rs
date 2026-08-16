@@ -18,6 +18,7 @@ use crate::audio::{PreviousWindowRight, get_decoded_sample_count, read_audio_pac
 use crate::header::HeaderSet;
 use crate::header::*;
 use crate::samples::{InterleavedSamples, Samples};
+use alloc::vec::Vec;
 use ogg::{Packet, PacketReader};
 
 /// Reads the vorbis headers from an ogg stream as well as stream serial information

@@ -18,6 +18,9 @@ the `VorbisHuffmanIter` struct which provides you with
 facilities to load a value bit by bit.
 */
 
+use alloc::boxed::Box;
+use alloc::vec::Vec;
+
 struct HuffTree {
 	// True iff every sub-tree in this tree
 	// either has two direct children or none
@@ -28,7 +31,6 @@ struct HuffTree {
 }
 
 /*
-use std::fmt;
 impl fmt::Debug for HuffTree {
 	fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
 		fn fmt_rec(s :&HuffTree, f: &mut fmt::Formatter, depth :u32) -> fmt::Result {

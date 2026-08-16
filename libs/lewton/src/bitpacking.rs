@@ -309,7 +309,7 @@ fn float32_unpack(val: u32) -> f32 {
 	let exp = (val & 0x7fe00000) >> 21;
 	let mantissa = (val & 0x1fffff) as f64;
 	let signed_mantissa = if sgn != 0 { -mantissa } else { mantissa };
-	return signed_mantissa as f32 * (exp as f32 - 788.0).exp2();
+	return signed_mantissa as f32 * lite_math::exp2(exp as f32 - 788.0);
 }
 
 #[test]

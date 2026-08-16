@@ -8,6 +8,9 @@
 
 #![allow(dead_code)]
 
+use alloc::vec::Vec;
+use std::println;
+
 #[rustfmt::skip]
 pub const IMDCT_INPUT_TEST_ARR_1: [f32; 128] = [
 	-0.01894, -0.10670,  0.51740,  0.39750,

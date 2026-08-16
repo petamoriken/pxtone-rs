@@ -6,6 +6,7 @@
 // at your option. Please see the LICENSE file
 // attached to this source distribution for details.
 
+#![no_std]
 #![forbid(unsafe_code)]
 #![cfg_attr(test, allow(unknown_lints))]
 #![forbid(non_ascii_idents)]
@@ -19,6 +20,12 @@ the `inside_ogg` module (make sure you haven't disabled the `ogg` feature).
 For lower level, per-packet usage, you can have a look at the `audio` and `header`
 modules.
 */
+
+#[macro_use]
+extern crate alloc;
+
+#[cfg(test)]
+extern crate std;
 
 macro_rules! try_from {
 	($expr:expr) => {
@@ -110,10 +117,8 @@ pub enum VorbisError {
 	OggError(OggReadError),
 }
 
-impl std::error::Error for VorbisError {}
-
-impl std::fmt::Display for VorbisError {
-	fn fmt(&self, fmt: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
+impl core::fmt::Display for VorbisError {
+	fn fmt(&self, fmt: &mut core::fmt::Formatter) -> Result<(), core::fmt::Error> {
 		write!(
 			fmt,
 			"{}",
@@ -163,122 +168,4 @@ fn test_ilog() {
 
 fn bit_reverse(n: u32) -> u32 {
 	n.reverse_bits()
-}
-
-#[allow(dead_code)]
-fn print_u8_slice(arr: &[u8]) {
-	if arr.len() <= 4 {
-		for a in arr {
-			print!("0x{:02x} ", a);
-		}
-		println!("");
-		return;
-	}
-	println!("[");
-	let mut i: usize = 0;
-	while i * 4 < arr.len() - 4 {
-		println!(
-			"\t0x{:02x}, 0x{:02x}, 0x{:02x}, 0x{:02x},",
-			arr[i * 4],
-			arr[i * 4 + 1],
-			arr[i * 4 + 2],
-			arr[i * 4 + 3]
-		);
-		i += 1;
-	}
-	match arr.len() as i64 - i as i64 * 4 {
-		1 => println!("\t0x{:02x}];", arr[i * 4]),
-		2 => println!("\t0x{:02x}, 0x{:02x}];", arr[i * 4], arr[i * 4 + 1]),
-		3 => println!(
-			"\t0x{:02x}, 0x{:02x}, 0x{:02x}];",
-			arr[i * 4],
-			arr[i * 4 + 1],
-			arr[i * 4 + 2]
-		),
-		4 => println!(
-			"\t0x{:02x}, 0x{:02x}, 0x{:02x}, 0x{:02x}];",
-			arr[i * 4],
-			arr[i * 4 + 1],
-			arr[i * 4 + 2],
-			arr[i * 4 + 3]
-		),
-		de => panic!("impossible value {}", de),
-	}
-}
-
-#[allow(dead_code)]
-fn print_u32_slice(arr: &[u32]) {
-	if arr.len() <= 4 {
-		for a in arr {
-			print!("0x{:02x} ", a);
-		}
-		println!("");
-		return;
-	}
-	println!("[");
-	let mut i: usize = 0;
-	while i * 4 < arr.len() - 4 {
-		println!(
-			"\t0x{:08x}, 0x{:08x}, 0x{:08x}, 0x{:08x},",
-			arr[i * 4],
-			arr[i * 4 + 1],
-			arr[i * 4 + 2],
-			arr[i * 4 + 3]
-		);
-		i += 1;
-	}
-	match arr.len() as i64 - i as i64 * 4 {
-		1 => println!("\t0x{:08x}];", arr[i * 4]),
-		2 => println!("\t0x{:08x}, 0x{:08x}];", arr[i * 4], arr[i * 4 + 1]),
-		3 => println!(
-			"\t0x{:08x}, 0x{:08x}, 0x{:08x}];",
-			arr[i * 4],
-			arr[i * 4 + 1],
-			arr[i * 4 + 2]
-		),
-		4 => println!(
-			"\t0x{:08x}, 0x{:08x}, 0x{:08x}, 0x{:08x}];",
-			arr[i * 4],
-			arr[i * 4 + 1],
-			arr[i * 4 + 2],
-			arr[i * 4 + 3]
-		),
-		de => panic!("impossible value {}", de),
-	}
-}
-
-#[allow(dead_code)]
-fn print_f64_slice(arr: &[f64]) {
-	if arr.len() <= 4 {
-		for a in arr {
-			print!("0x{} ", a);
-		}
-		println!("");
-		return;
-	}
-	println!("[");
-	let mut i: usize = 0;
-	while i * 4 < arr.len() - 4 {
-		println!(
-			"\t{}, {}, {}, {},",
-			arr[i * 4],
-			arr[i * 4 + 1],
-			arr[i * 4 + 2],
-			arr[i * 4 + 3]
-		);
-		i += 1;
-	}
-	match arr.len() as i64 - i as i64 * 4 {
-		1 => println!("\t{}];", arr[i * 4]),
-		2 => println!("\t{}, {}];", arr[i * 4], arr[i * 4 + 1]),
-		3 => println!("\t{}, {}, {}];", arr[i * 4], arr[i * 4 + 1], arr[i * 4 + 2]),
-		4 => println!(
-			"\t{}, {}, {}, {}];",
-			arr[i * 4],
-			arr[i * 4 + 1],
-			arr[i * 4 + 2],
-			arr[i * 4 + 3]
-		),
-		de => panic!("impossible value {}", de),
-	}
 }
