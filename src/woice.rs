@@ -481,10 +481,8 @@ impl Woice {
         }
         VoiceData::OggVorbis(ogg) => {
           let slice = &raw_data[ogg.data_offset as usize..][..ogg.data_size as usize];
-          let decoded = decode_ogg(slice)?;
           let mut work = Pcm::create(ogg.channels, ogg.sample_rate, 16, ogg.frame_count)?;
-          let src = &decoded[..decoded.len().min(work.samples().len())];
-          work.samples_mut()[..src.len()].copy_from_slice(src);
+          decode_ogg_into(slice, work.samples_mut())?;
           let _ = work.convert(channels, sample_rate, bits_per_sample);
           instance.head_frames = work.head_frames;
           instance.body_frames = work.body_frames;
@@ -677,25 +675,31 @@ fn update_wave_ptv(
 }
 
 // ---- OGG Vorbis decode (lewton) ----
-fn decode_ogg(data: &[u8]) -> Result<Vec<u8>, PxtoneError> {
+//
+// Decodes into `dst` as interleaved 16 bit little endian samples. Samples past
+// the end of `dst` are dropped, and a stream shorter than `dst` leaves the rest
+// of the buffer untouched.
+fn decode_ogg_into(data: &[u8], dst: &mut [u8]) -> Result<(), PxtoneError> {
   use lewton::inside_ogg::OggStreamReader;
   use std::io::Cursor;
 
   let cursor = Cursor::new(data);
   let mut reader = OggStreamReader::new(cursor).map_err(PxtoneError::OggVorbis)?;
 
-  let _ch = reader.ident_hdr.audio_channels as usize;
-  let _sps = reader.ident_hdr.audio_sample_rate;
-
-  let mut pcm_i16: Vec<i16> = Vec::new();
+  let mut written = 0;
   while let Some(pck) = reader
     .read_dec_packet_itl()
     .map_err(PxtoneError::OggVorbis)?
   {
-    pcm_i16.extend_from_slice(&pck);
+    let room = (dst.len() - written) / 2;
+    let count = pck.len().min(room);
+    for (out, &sample) in dst[written..].chunks_exact_mut(2).zip(&pck[..count]) {
+      out.copy_from_slice(&sample.to_le_bytes());
+    }
+    written += count * 2;
+    if count < pck.len() {
+      break;
+    }
   }
-
-  // i16 → u8 LE byte sequence
-  let out: Vec<u8> = pcm_i16.iter().flat_map(|&s| s.to_le_bytes()).collect();
-  Ok(out)
+  Ok(())
 }
