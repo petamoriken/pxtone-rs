@@ -7,10 +7,13 @@
 //! needs, a few hundred bytes, and bit-identical on every platform.
 //!
 //! No FMA (wasm has no scalar one, so `mul_add` would call libm) and no SIMD
-//! (the callers are cold table-building loops).
+//! (the callers are cold table-building loops). [`sqrt`] and [`floor`] are
+//! single wasm instructions that stable Rust cannot emit, so `src/wasm.s`
+//! spells them out and `build.rs` links that in; other targets use the
+//! portable implementations here.
 
 #![no_std]
-#![forbid(unsafe_code)]
+#![deny(unsafe_code)]
 
 /// 2/pi, used to find the quadrant of the argument.
 const FRAC_2_PI: f64 = 0.636_619_772_367_581_3;
@@ -120,7 +123,33 @@ fn cos_poly(r: f64) -> f64 {
   C0 + r2 * (C1 + r2 * (C2 + r2 * (C3 + r2 * C4)))
 }
 
+/// The `f32.sqrt` and `f32.floor` instructions, assembled by `build.rs` from
+/// `src/wasm.s` because stable Rust cannot emit them.
+#[cfg(wasm_instructions)]
+#[allow(unsafe_code, reason = "calls into the hand written wasm assembly")]
+mod wasm {
+  unsafe extern "C" {
+    safe fn lite_math_sqrt_f32(x: f32) -> f32;
+    safe fn lite_math_floor_f32(x: f32) -> f32;
+  }
+
+  pub(super) fn sqrt(x: f32) -> f32 {
+    lite_math_sqrt_f32(x)
+  }
+
+  pub(super) fn floor(x: f32) -> f32 {
+    lite_math_floor_f32(x)
+  }
+}
+
+/// Returns the square root of `x`.
+#[cfg(wasm_instructions)]
+pub fn sqrt(x: f32) -> f32 {
+  wasm::sqrt(x)
+}
+
 /// Returns the square root of `x`, by Newton-Raphson in `f64`.
+#[cfg(not(wasm_instructions))]
 pub fn sqrt(x: f32) -> f32 {
   if x.is_nan() || x < 0.0 {
     return f32::NAN;
@@ -139,6 +168,13 @@ pub fn sqrt(x: f32) -> f32 {
 }
 
 /// Returns the largest integer less than or equal to `x`.
+#[cfg(wasm_instructions)]
+pub fn floor(x: f32) -> f32 {
+  wasm::floor(x)
+}
+
+/// Returns the largest integer less than or equal to `x`.
+#[cfg(not(wasm_instructions))]
 pub fn floor(x: f32) -> f32 {
   // Every f32 of magnitude 2^23 or above is already an integer, which also
   // covers the infinities and NaN.
