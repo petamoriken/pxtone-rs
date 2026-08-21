@@ -25,6 +25,26 @@ fn div_pow2_i32<const SHIFT: u32>(x: i32) -> i32 {
   (x + ((x >> 31) & ((1i32 << SHIFT) - 1))) >> SHIFT
 }
 
+/// The per-unit constants a block of samples shares, hoisted out of the sample
+/// loop by [`Unit::tone_params`]. Only an event can change any of them and no
+/// event fires inside a block; left in `self` every one would be reloaded each
+/// sample, because the `&mut self` that renders the sample could have written
+/// them.
+#[derive(Clone, Copy)]
+pub(crate) struct ToneParams {
+  /// velocity × volume × pan, per channel, so that the voice loop needs a
+  /// single i64 multiply and shift.
+  /// Max intermediate: 32768 × 128 × 128 × 128 = 68_719_476_736 < i64::MAX ✓
+  factors: [i64; MAX_CHANNEL],
+  tuning: f32,
+  voice_count: usize,
+  voice_flags: [u32; MAX_UNIT_CONTROL_VOICE],
+  /// Whether this unit renders silence because it is muted.
+  muted: bool,
+  group_index: usize,
+  pan_delays: [usize; MAX_CHANNEL],
+}
+
 /// Runtime playback state for a single voice layer within a unit.
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct VoiceTone {
@@ -304,37 +324,30 @@ impl Unit {
   #[inline(always)]
   pub(crate) fn tone_sample<const ENVELOPE: bool>(
     &mut self,
-    mute_by_unit: bool,
+    params: ToneParams,
     channels: u8,
     time_pan_index: usize,
     smooth_smp: u32,
     frequency: f32,
     instances: &[VoiceInstance],
   ) {
-    if mute_by_unit && !self.played {
+    if params.muted {
       if ENVELOPE {
         self.tone_envelope(instances);
       }
-      self.tone_increment_sample(frequency, instances);
+      self.tone_increment_sample(params, frequency, instances);
       self.tone_silence(time_pan_index);
       return;
     }
     self.quiet_run = 0;
 
-    // velocity × volume × pan folded into one factor per channel so the voice
-    // loop needs a single i64 multiply/divide.
-    // Max intermediate: 32768 × 128 × 128 × 128 = 68_719_476_736 < i64::MAX ✓
-    let sv = self.velocity as i64 * self.volume as i64;
-    let f0 = sv * self.pan_volumes[0] as i64;
-    let f1 = sv * self.pan_volumes[1] as i64;
-    let tuning = self.tuning;
+    let [f0, f1] = params.factors;
 
     let mut buf0 = 0i32;
     let mut buf1 = 0i32;
 
-    let voice_count = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
-    for (v, vi) in instances.iter().enumerate().take(voice_count) {
-      let voice_flags = self.voice_flags[v];
+    for (v, vi) in instances.iter().enumerate().take(params.voice_count) {
+      let voice_flags = params.voice_flags[v];
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
         if ENVELOPE && vi.envelope_size > 0 {
@@ -370,7 +383,7 @@ impl Unit {
         buf0 += w0;
         buf1 += w1;
 
-        Self::step_advance(vt, vi, voice_flags, tuning, frequency);
+        Self::step_advance(vt, vi, voice_flags, params.tuning, frequency);
       }
     }
 
@@ -404,13 +417,25 @@ impl Unit {
       return;
     }
 
+    let params = self.tone_params(mute_by_unit);
+    // The key only moves while a portamento is in flight; otherwise it, and the
+    // playback rate that comes out of the frequency table, are the same for
+    // every sample in the block. `tone_increment_key` is idempotent in that
+    // case, so calling it once leaves the same state behind.
+    let steady = self.portamento_duration == 0 || self.key_delta == 0;
+    let mut freq = 0.0f32;
+    let mut have_freq = false;
+
     for (i, groups) in mix.iter_mut().enumerate() {
       let time_pan_index = (time_pan_index + i) & (BUFSIZE_TIMEPAN - 1);
       if self.is_sounding() {
-        let key = self.tone_increment_key();
-        let freq = frequency.get2(key) * sample_stride;
+        if !have_freq || !steady {
+          let key = self.tone_increment_key();
+          freq = frequency.get2(key) * sample_stride;
+          have_freq = true;
+        }
         self.tone_sample::<true>(
-          mute_by_unit,
+          params,
           channels,
           time_pan_index,
           smooth_smp,
@@ -421,8 +446,26 @@ impl Unit {
         self.tone_silence(time_pan_index);
       }
       if !self.is_flushed() {
-        self.tone_supple(groups, channel_count, time_pan_index);
+        self.tone_supple(params, groups, channel_count, time_pan_index);
       }
+    }
+  }
+
+  /// Reads the constants a block of samples shares. See [`ToneParams`].
+  #[inline]
+  pub(crate) fn tone_params(&self, mute_by_unit: bool) -> ToneParams {
+    let sv = self.velocity as i64 * self.volume as i64;
+    ToneParams {
+      factors: [
+        sv * self.pan_volumes[0] as i64,
+        sv * self.pan_volumes[1] as i64,
+      ],
+      tuning: self.tuning,
+      voice_count: self.voice_count.min(MAX_UNIT_CONTROL_VOICE),
+      voice_flags: self.voice_flags,
+      muted: mute_by_unit && !self.played,
+      group_index: self.group_index,
+      pan_delays: [self.pan_delays[0] as usize, self.pan_delays[1] as usize],
     }
   }
 
@@ -431,17 +474,18 @@ impl Unit {
   #[inline]
   pub(crate) fn tone_supple<const GROUPS: usize>(
     &self,
+    params: ToneParams,
     group_smps: &mut [[i32; GROUPS]; MAX_CHANNEL],
     channels: usize,
     time_pan_index: usize,
   ) {
-    if self.group_index >= GROUPS {
+    let group_index = params.group_index;
+    if group_index >= GROUPS {
       return;
     }
     for (ch, groups) in group_smps.iter_mut().enumerate().take(channels) {
-      let idx =
-        (time_pan_index + BUFSIZE_TIMEPAN - self.pan_delays[ch] as usize) & (BUFSIZE_TIMEPAN - 1);
-      groups[self.group_index] += self.pan_delay_buffers[ch][idx];
+      let idx = (time_pan_index + BUFSIZE_TIMEPAN - params.pan_delays[ch]) & (BUFSIZE_TIMEPAN - 1);
+      groups[group_index] += self.pan_delay_buffers[ch][idx];
     }
   }
 
@@ -505,14 +549,17 @@ impl Unit {
 
   // Advances the sample position of every live voice layer.
   #[inline(always)]
-  pub(crate) fn tone_increment_sample(&mut self, frequency: f32, instances: &[VoiceInstance]) {
-    let tuning = self.tuning;
-    let voice_count = self.voice_count.min(MAX_UNIT_CONTROL_VOICE);
-    for (v, vi) in instances.iter().enumerate().take(voice_count) {
-      let voice_flags = self.voice_flags[v];
+  pub(crate) fn tone_increment_sample(
+    &mut self,
+    params: ToneParams,
+    frequency: f32,
+    instances: &[VoiceInstance],
+  ) {
+    for (v, vi) in instances.iter().enumerate().take(params.voice_count) {
+      let voice_flags = params.voice_flags[v];
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
-        Self::step_advance(vt, vi, voice_flags, tuning, frequency);
+        Self::step_advance(vt, vi, voice_flags, params.tuning, frequency);
       }
     }
   }
