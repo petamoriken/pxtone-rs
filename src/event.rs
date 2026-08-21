@@ -229,12 +229,15 @@ impl EventList {
       e.tick < tick || (e.tick == tick && compare_priority(kind, e.kind) >= 0)
     });
 
-    // Replace if a record with the same tick/unit/kind already exists
-    if let Some(existing) = self.events[..pos]
+    // Only the run of records already at `tick` can hold the one to replace, and
+    // the list is ordered by tick, so the search starts where that run does
+    // rather than at the front of the list.
+    let run = self.events[..pos].partition_point(|e| e.tick < tick);
+    if let Some(existing) = self.events[run..pos]
       .iter()
-      .rposition(|e| e.tick == tick && e.unit_index == unit_index && e.kind == kind)
+      .rposition(|e| e.unit_index == unit_index && e.kind == kind)
     {
-      self.events[existing] = rec;
+      self.events[run + existing] = rec;
     } else {
       self.events.insert(pos, rec);
     }
