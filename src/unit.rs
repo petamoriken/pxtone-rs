@@ -36,7 +36,10 @@ pub(crate) struct ToneParams {
   /// single i64 multiply and shift.
   /// Max intermediate: 32768 × 128 × 128 × 128 = 68_719_476_736 < i64::MAX ✓
   factors: [i64; MAX_CHANNEL],
-  tuning: f32,
+  /// `offset_frequency × tuning` per voice, the block-invariant half of the
+  /// step [`Unit::step_advance`] adds to the sample position. Splitting it out
+  /// keeps the order of the two multiplications the C++ uses.
+  steps: [f64; MAX_UNIT_CONTROL_VOICE],
   voice_count: usize,
   voice_flags: [u32; MAX_UNIT_CONTROL_VOICE],
   /// Whether this unit renders silence because it is muted.
@@ -383,7 +386,7 @@ impl Unit {
         buf0 += w0;
         buf1 += w1;
 
-        Self::step_advance(vt, vi, voice_flags, params.tuning, frequency);
+        Self::step_advance(vt, vi, voice_flags, params.steps[v], frequency);
       }
     }
 
@@ -460,7 +463,10 @@ impl Unit {
         sv * self.pan_volumes[0] as i64,
         sv * self.pan_volumes[1] as i64,
       ],
-      tuning: self.tuning,
+      steps: [
+        self.tones[0].offset_frequency as f64 * self.tuning as f64,
+        self.tones[1].offset_frequency as f64 * self.tuning as f64,
+      ],
       voice_count: self.voice_count.min(MAX_UNIT_CONTROL_VOICE),
       voice_flags: self.voice_flags,
       muted: mute_by_unit && !self.played,
@@ -516,7 +522,7 @@ impl Unit {
     vt: &mut VoiceTone,
     vi: &VoiceInstance,
     voice_flags: u32,
-    tuning: f32,
+    step: f64,
     frequency: f32,
   ) {
     vt.life_count -= 1;
@@ -532,7 +538,7 @@ impl Unit {
         vt.envelope_pos = 0;
       }
     }
-    vt.sample_pos += vt.offset_frequency as f64 * tuning as f64 * frequency as f64;
+    vt.sample_pos += step * frequency as f64;
 
     let body = vi.body_frames as f64;
     if vt.sample_pos >= body {
@@ -559,7 +565,7 @@ impl Unit {
       let voice_flags = params.voice_flags[v];
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
-        Self::step_advance(vt, vi, voice_flags, params.tuning, frequency);
+        Self::step_advance(vt, vi, voice_flags, params.steps[v], frequency);
       }
     }
   }
