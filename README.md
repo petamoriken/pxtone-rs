@@ -194,8 +194,12 @@ replacing `#[inline(always)]` and `#[inline]` with `#[inline(never)]` across
 only the functions with substantial bodies: a helper of a few instructions looks
 expensive once every call to it is real.
 
-`moo` has no single hot spot left — `tone_sample` 19%, `step_advance` 12%,
-`step_envelope` 7%, `tone_supple` 6%, `get_frame` 6%, the rest below 5% each.
+`moo` has no single hot spot left — `tone_sample` 22%, `step_advance` 15%,
+`tone_supple` 8%, `step_envelope` 8%, `get_frame` 6%, the delay effect 5%, the
+rest below 5% each. What used to sit alongside them, the frequency table lookup
+and the portamento step, is gone: everything the mixing pass reads off a unit
+holds for a whole block, so `ToneParams` reads it once instead of once per
+sample.
 
 ### Optimizations considered and rejected
 
