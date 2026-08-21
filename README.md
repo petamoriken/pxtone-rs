@@ -92,7 +92,7 @@ This runs the following pipeline:
 | 2    | `build:wasm:merge`      | Compiles WAT wrappers and merges them into `pxtone.wasm`         |
 | 3    | `build:wasm:strip-impl` | Strips internal `_`-prefixed exports from the binary             |
 | 4    | `build:wasm:stub-panic` | Traps in the panic paths and clears the messages they pointed at |
-| 5    | `build:wasm:opt`        | Optimizes with `wasm-opt -O3`                                    |
+| 5    | `build:wasm:opt`        | Optimizes with `wasm-opt -Oz --converge`                         |
 
 Panics therefore trap in the wasm build rather than aborting with a message,
 which nothing could observe anyway: the module imports nothing to write to.
