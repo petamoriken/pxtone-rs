@@ -11,7 +11,7 @@
     "test": "deno task test:rust && deno task test:wasm && deno task test:refs",
     "test:rust": "cargo test",
     "test:wasm": "deno task build:wasm && deno test --allow-read tests/wasm_test.ts",
-    "test:refs": "deno run --allow-read --allow-write --allow-env tests/compare_reference.ts"
+    "test:refs": "deno run --allow-read tests/compare_reference.ts"
   },
   "imports": {
     "@std/toml": "jsr:@std/toml@^1.0.11"

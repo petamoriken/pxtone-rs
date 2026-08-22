@@ -31,21 +31,39 @@ const MAX_ARGUMENT: f64 = 1.0e6;
 ///
 /// Arguments that are not finite, or whose magnitude exceeds `1e6`, return
 /// `NaN`; the decoder never produces those.
-#[inline(never)]
+#[inline]
 pub fn sin(x: f32) -> f32 {
+  sin_f64(x as f64) as f32
+}
+
+/// Returns the sine of `x` radians without narrowing the result.
+///
+/// The reduction and the polynomial already run in `f64`; this hands back what
+/// they produced, accurate to about 3e-9 rather than to an `f64` ulp. Callers
+/// that mirror `double` arithmetic in the C++ want this rather than [`sin`],
+/// whose `f32` result is only good to 1e-7.
+#[inline(never)]
+pub fn sin_f64(x: f64) -> f64 {
   match reduce(x) {
-    Some((quadrant, r)) => quadrant_sin(quadrant, r) as f32,
-    None => f32::NAN,
+    Some((quadrant, r)) => quadrant_sin(quadrant, r),
+    None => f64::NAN,
   }
 }
 
 /// Returns the cosine of `x` radians. See [`sin`] for the accepted domain.
-#[inline(never)]
+#[inline]
 pub fn cos(x: f32) -> f32 {
+  cos_f64(x as f64) as f32
+}
+
+/// Returns the cosine of `x` radians without narrowing the result. See
+/// [`sin_f64`] for what that is worth.
+#[inline(never)]
+pub fn cos_f64(x: f64) -> f64 {
   match reduce(x) {
     // cos(x) == sin(x + pi/2), one quadrant along.
-    Some((quadrant, r)) => quadrant_sin(quadrant + 1, r) as f32,
-    None => f32::NAN,
+    Some((quadrant, r)) => quadrant_sin(quadrant + 1, r),
+    None => f64::NAN,
   }
 }
 
@@ -53,7 +71,7 @@ pub fn cos(x: f32) -> f32 {
 /// the accepted domain.
 #[inline(never)]
 pub fn sin_cos(x: f32) -> (f32, f32) {
-  let Some((quadrant, r)) = reduce(x) else {
+  let Some((quadrant, r)) = reduce(x as f64) else {
     return (f32::NAN, f32::NAN);
   };
   // Odd quadrants exchange the two polynomials, and each result is negative in
@@ -68,8 +86,7 @@ pub fn sin_cos(x: f32) -> (f32, f32) {
 
 /// Splits `x` into a quadrant index and a remainder in `[-pi/4, pi/4]`, so that
 /// `x == quadrant * pi/2 + remainder`. Returns `None` outside the domain.
-fn reduce(x: f32) -> Option<(i64, f64)> {
-  let x = x as f64;
+fn reduce(x: f64) -> Option<(i64, f64)> {
   if x.is_nan() || x.abs() > MAX_ARGUMENT {
     return None;
   }
@@ -340,6 +357,28 @@ mod tests {
     for x in samples() {
       assert_eq!(super::sin_cos(x), (super::sin(x), super::cos(x)), "x = {x}");
     }
+  }
+
+  /// The `f64` entry points are what the reduction and the polynomial produce,
+  /// so they hold to the fit's accuracy rather than to an `f64` ulp.
+  #[test]
+  fn matches_the_reference_in_f64() {
+    /// The sine fit is good to 3.1e-9 and the cosine one to 4.8e-11.
+    const TOLERANCE_F64: f64 = 1.0e-8;
+
+    for i in -20_000..20_000i32 {
+      let x = i as f64 * 0.031_25;
+      assert!(
+        (super::sin_f64(x) - x.sin()).abs() <= TOLERANCE_F64,
+        "sin_f64({x})"
+      );
+      assert!(
+        (super::cos_f64(x) - x.cos()).abs() <= TOLERANCE_F64,
+        "cos_f64({x})"
+      );
+    }
+    assert!(super::sin_f64(f64::NAN).is_nan());
+    assert!(super::cos_f64(1.0e7).is_nan());
   }
 
   #[test]

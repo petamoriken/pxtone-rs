@@ -1,21 +1,15 @@
-// Diffs the snapshots in tests/snapshots against the reference renders in
-// tests/reference, so that the corpus is checked against what the original C++
-// implementation produces rather than only against itself.
+// Requires every snapshot in tests/snapshots to be sample for sample what the
+// original C++ implementation renders, held in tests/reference.
 //
 // Both sides are committed WAV files, so this needs nothing but Deno and runs in
-// CI. The port does not agree with the reference everywhere yet, so the pass
-// mark is `tests/reference/expected.toml`, which records where each file stands:
-// a file that drifts further from the reference fails, and one that gets closer
-// asks to be recorded.
+// CI. The whole corpus matches, so anything at all is a failure: a decode that
+// drifts from the original is a bug in the port, and this is what catches it.
 //
 //   deno task test:refs [ptcop|ptnoise]
-//   UPDATE_REFS=1 deno task test:refs      # rewrite expected.toml
 //
-// See tests/reference/README.md for how the reference side was produced.
+// See tests/reference/README.md for how the reference side was produced and for
+// the one place this port diverges on purpose.
 
-import { parse, stringify } from "@std/toml";
-
-const EXPECTED_PATH = "tests/reference/expected.toml";
 const WAV_HEADER_LEN = 44;
 
 const SUITES = [
@@ -66,125 +60,62 @@ function compare(reference: Uint8Array, snapshot: Uint8Array): Difference {
   return { compared, differing, worst, firstAt };
 }
 
-interface Expected {
-  path: string;
-  differing: number;
-  worst: number;
-}
-
-async function readExpected(): Promise<Map<string, Expected>> {
-  const expected = new Map<string, Expected>();
-  try {
-    const table = parse(await Deno.readTextFile(EXPECTED_PATH));
-    for (const entry of (table.file ?? []) as Expected[]) {
-      expected.set(entry.path, entry);
-    }
-  } catch {
-    // No file yet; every result counts as new.
+async function names(dir: string, suffix: string): Promise<string[]> {
+  const found: string[] = [];
+  for await (const entry of Deno.readDir(dir)) {
+    if (entry.isFile && entry.name.endsWith(suffix)) found.push(entry.name);
   }
-  return expected;
+  found.sort();
+  return found;
 }
 
 const only = Deno.args[0];
-const update = Deno.env.get("UPDATE_REFS") === "1";
-const expected = await readExpected();
-
-const results: { path: string; d: Difference }[] = [];
-const rows: string[] = [];
-const worse: string[] = [];
-const better: string[] = [];
-const missing: string[] = [];
+const failures: string[] = [];
+let checked = 0;
 
 for (const suite of SUITES) {
   if (only && only !== suite.kind) continue;
 
-  const names: string[] = [];
-  for await (const entry of Deno.readDir(suite.reference)) {
-    if (entry.isFile && entry.name.endsWith(".wav")) names.push(entry.name);
-  }
-  names.sort();
+  const rendered = new Set(await names(suite.reference, ".wav"));
+  const snapshots = new Set(await names(suite.snapshots, ".wav"));
 
-  for (const name of names) {
-    const stem = name.replace(/\.wav$/, "");
-    const path = `${suite.kind}/${stem}`;
-    const snapshot = `${suite.snapshots}/${name}`;
-    try {
-      await Deno.stat(snapshot);
-    } catch {
-      missing.push(path);
+  // A sample with no reference render, or a render with no snapshot, would
+  // otherwise slip past the comparison entirely.
+  for (const name of snapshots) {
+    if (!rendered.has(name)) {
+      failures.push(`${suite.kind}/${name}: no reference render`);
+    }
+  }
+  for (const name of rendered) {
+    if (!snapshots.has(name)) {
+      failures.push(`${suite.kind}/${name}: no snapshot`);
       continue;
     }
 
     const d = compare(
       await Deno.readFile(`${suite.reference}/${name}`),
-      await Deno.readFile(snapshot),
+      await Deno.readFile(`${suite.snapshots}/${name}`),
     );
-    results.push({ path, d });
-
-    const share = (100 * d.differing / d.compared).toFixed(3);
-    rows.push(
-      `${stem.padEnd(34)} ${String(d.differing).padStart(9)} ${
-        (share + "%").padStart(8)
-      } ${String(d.worst).padStart(7)} ${String(d.firstAt ?? "-").padStart(9)}`,
-    );
-
-    const was = expected.get(path);
-    if (!was) {
-      if (d.differing > 0) worse.push(`${path}: new, ${d.differing} differing`);
-    } else if (d.differing > was.differing || d.worst > was.worst) {
-      worse.push(
-        `${path}: ${was.differing} differing / worst ${was.worst} -> ` +
-          `${d.differing} / ${d.worst}`,
-      );
-    } else if (d.differing < was.differing || d.worst < was.worst) {
-      better.push(
-        `${path}: ${was.differing} differing / worst ${was.worst} -> ` +
-          `${d.differing} / ${d.worst}`,
+    checked++;
+    if (d.differing > 0) {
+      const share = (100 * d.differing / d.compared).toFixed(3);
+      failures.push(
+        `${suite.kind}/${name}: ${d.differing} of ${d.compared} samples ` +
+          `(${share}%), worst ${d.worst}, first at ${d.firstAt}`,
       );
     }
   }
 }
 
-console.log(
-  `\n${"file".padEnd(34)} ${"differing".padStart(9)} ${"share".padStart(8)} ${
-    "worst".padStart(7)
-  } ${"first".padStart(9)}`,
-);
-for (const row of rows) console.log(row);
-
-const identical = results.filter(({ d }) => d.differing === 0).length;
-console.log(
-  `\n${identical} of ${results.length} snapshot(s) identical to the reference`,
-);
-
-if (update) {
-  const file = results.map(({ path, d }) => ({
-    path,
-    differing: d.differing,
-    worst: d.worst,
-  }));
-  await Deno.writeTextFile(
-    EXPECTED_PATH,
-    "# Where each snapshot stands against tests/reference, as recorded by\n" +
-      "# `UPDATE_REFS=1 deno task test:refs`. A file that drifts further from\n" +
-      "# the reference fails the check; one that gets closer asks to be\n" +
-      "# recorded here.\n\n" + stringify({ file }),
-  );
-  console.log(`wrote ${EXPECTED_PATH}`);
+if (failures.length === 0) {
+  console.log(`${checked} snapshot(s) match the reference exactly`);
   Deno.exit(0);
 }
 
-for (const line of better) console.log(`closer:  ${line}`);
-for (const line of missing) console.log(`skipped: ${line}, no snapshot`);
-for (const line of worse) console.error(`WORSE:   ${line}`);
-
-if (better.length > 0) {
-  console.log(
-    `\n${better.length} file(s) moved closer to the reference; rerun with ` +
-      `UPDATE_REFS=1 to record it.`,
-  );
-}
-if (worse.length > 0) {
-  console.error(`\n${worse.length} file(s) moved away from the reference.`);
-  Deno.exit(1);
-}
+console.error(`${checked} snapshot(s) checked, ${failures.length} problem(s):`);
+for (const failure of failures) console.error(`  ${failure}`);
+console.error(
+  "\nThe reference is what the original renders; a difference is this port " +
+    "drifting from it.",
+);
+Deno.exit(1);

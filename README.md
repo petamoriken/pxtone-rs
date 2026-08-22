@@ -179,13 +179,9 @@ deno task test:refs ptnoise   # one of them
 ```
 
 Both sides are committed WAV files, so this needs nothing but Deno and runs in
-CI. The port does not agree with the reference everywhere yet, so the pass mark
-is `tests/reference/expected.toml`, which records how far off each file is: one
-that drifts further away fails, and one that gets closer asks to be recorded.
-
-```sh
-UPDATE_REFS=1 deno task test:refs
-```
+CI. Every snapshot matches its reference render sample for sample, so the check
+is exact: any difference at all fails, because it means the decode has drifted
+from the original.
 
 Songs are stored as their first five seconds, which is where every difference
 found so far begins; the instruments are short enough to keep whole. See
