@@ -104,7 +104,13 @@ impl OscState {
         if tbl.is_empty() {
           return 0.0;
         }
-        let sample = tbl[offset.min(tbl.len() - 1)] as i32;
+        // `increment` wraps on `offset > SMP_COUNT`, so an offset of exactly
+        // SMP_COUNT stays, and the C++ then reads one entry past the end of a
+        // table that is SMP_COUNT long. It gets a zero: the tables are
+        // zero-allocated and nothing has written there. Reading the last entry
+        // instead put the frequency oscillator, and with it everything it
+        // drives, off from that sample onwards.
+        let sample = tbl.get(offset).copied().unwrap_or(0) as i32;
         if FREQUENCY {
           (KEY_TOP * sample / SAMPLING_TOP as i32) as f64
         } else {
