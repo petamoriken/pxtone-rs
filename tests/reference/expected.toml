@@ -6,13 +6,13 @@
 
 [[file]]
 path = "ptcop/5LOVE[Quois]"
-differing = 4254
-worst = 22
+differing = 0
+worst = 0
 
 [[file]]
 path = "ptcop/Aisatsu[Rusk]"
-differing = 336
-worst = 243
+differing = 0
+worst = 0
 
 [[file]]
 path = "ptcop/ComputerXXsan[gensai]"
@@ -21,18 +21,18 @@ worst = 0
 
 [[file]]
 path = "ptcop/Fuwafuwa[PEPO]"
-differing = 3133
-worst = 49
+differing = 0
+worst = 0
 
 [[file]]
 path = "ptcop/overworld2_nes[Se-ko]"
-differing = 2693
-worst = 2074
+differing = 0
+worst = 0
 
 [[file]]
 path = "ptcop/overworld2_orche[Se-ko]"
-differing = 19847
-worst = 1073
+differing = 0
+worst = 0
 
 [[file]]
 path = "ptnoise/drum_bass1"

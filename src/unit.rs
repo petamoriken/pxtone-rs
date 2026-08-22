@@ -33,9 +33,12 @@ pub(crate) struct ToneParams {
   volume: i32,
   pan_volumes: [i32; MAX_CHANNEL],
   /// `offset_frequency × tuning` per voice, the block-invariant half of the
-  /// step [`Unit::step_advance`] adds to the sample position. Splitting it out
-  /// keeps the order of the two multiplications the C++ uses.
-  steps: [f64; MAX_UNIT_CONTROL_VOICE],
+  /// step [`Unit::step_advance`] adds to the sample position.
+  ///
+  /// In `f32`: the C++ multiplies the three floats together and only the sum
+  /// widens, so computing the step in `f64` drifts the position and eventually
+  /// reads a frame either side of the one it should.
+  steps: [f32; MAX_UNIT_CONTROL_VOICE],
   voice_count: usize,
   voice_flags: [u32; MAX_UNIT_CONTROL_VOICE],
   /// Whether this unit renders silence because it is muted.
@@ -461,8 +464,8 @@ impl Unit {
       volume: self.volume as i32,
       pan_volumes: [self.pan_volumes[0] as i32, self.pan_volumes[1] as i32],
       steps: [
-        self.tones[0].offset_frequency as f64 * self.tuning as f64,
-        self.tones[1].offset_frequency as f64 * self.tuning as f64,
+        self.tones[0].offset_frequency * self.tuning,
+        self.tones[1].offset_frequency * self.tuning,
       ],
       voice_count: self.voice_count.min(MAX_UNIT_CONTROL_VOICE),
       voice_flags: self.voice_flags,
@@ -519,7 +522,7 @@ impl Unit {
     vt: &mut VoiceTone,
     vi: &VoiceInstance,
     voice_flags: u32,
-    step: f64,
+    step: f32,
     frequency: f32,
   ) {
     vt.life_count -= 1;
@@ -535,7 +538,7 @@ impl Unit {
         vt.envelope_pos = 0;
       }
     }
-    vt.sample_pos += step * frequency as f64;
+    vt.sample_pos += (step * frequency) as f64;
 
     let body = vi.body_frames as f64;
     if vt.sample_pos >= body {
