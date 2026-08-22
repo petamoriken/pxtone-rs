@@ -154,6 +154,33 @@ deno task test:rust
 deno task test:wasm
 ```
 
+## Checking against the original
+
+The snapshots under `tests/snapshots` are this port's own output, so on their
+own they only catch regressions -- never a decode that was wrong from the start.
+`tests/reference` holds what the original C++ implementation renders for the
+same inputs, and diffing the two is what turns the corpus into a correctness
+check:
+
+```sh
+deno task test:refs           # both suites
+deno task test:refs ptnoise   # one of them
+```
+
+Both sides are committed WAV files, so this needs nothing but Deno and runs in
+CI. The port does not agree with the reference everywhere yet, so the pass mark
+is `tests/reference/expected.toml`, which records how far off each file is: one
+that drifts further away fails, and one that gets closer asks to be recorded.
+
+```sh
+UPDATE_REFS=1 deno task test:refs
+```
+
+Songs are stored as their first five seconds, which is where every difference
+found so far begins; the instruments are short enough to keep whole. See
+[`tests/reference/README.md`](tests/reference/README.md) for how that side is
+produced -- the C++ is not vendored, so regenerating it is a manual step.
+
 ## License
 
 [MIT](LICENSE.md)

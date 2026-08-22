@@ -8,9 +8,10 @@
     "build:wasm:strip-impl": "deno run --allow-run --allow-read --allow-write --allow-env tools/wasm_strip_impl_exports.ts target/wasm32-unknown-unknown/release-wasm/pxtone.wasm -g --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-simd",
     "build:wasm:stub-panic": "deno run --allow-run --allow-read --allow-write --allow-env tools/wasm_stub_panic.ts target/wasm32-unknown-unknown/release-wasm/pxtone.wasm --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-simd",
     "build:wasm:opt": "wasm-opt -O3 --enable-bulk-memory-opt --enable-nontrapping-float-to-int --enable-sign-ext --enable-mutable-globals --enable-multivalue --enable-simd target/wasm32-unknown-unknown/release-wasm/pxtone.wasm -o target/wasm32-unknown-unknown/release-wasm/pxtone.wasm",
-    "test": "deno task test:rust && deno task test:wasm",
+    "test": "deno task test:rust && deno task test:wasm && deno task test:refs",
     "test:rust": "cargo test",
-    "test:wasm": "deno task build:wasm && deno test --allow-read tests/wasm_test.ts"
+    "test:wasm": "deno task build:wasm && deno test --allow-read tests/wasm_test.ts",
+    "test:refs": "deno run --allow-read --allow-write --allow-env tests/compare_reference.ts"
   },
   "imports": {
     "@std/toml": "jsr:@std/toml@^1.0.11"
