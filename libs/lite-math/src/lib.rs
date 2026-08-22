@@ -33,16 +33,27 @@ const MAX_ARGUMENT: f64 = 1.0e6;
 /// `NaN`; the decoder never produces those.
 #[inline(never)]
 pub fn sin(x: f32) -> f32 {
+  sin_f64(x as f64) as f32
+}
+
+/// Returns the sine of `x` radians without narrowing the result.
+///
+/// The reduction and the polynomial already run in `f64`; this hands back what
+/// they produced, accurate to about 3e-9 rather than to an `f64` ulp. Callers
+/// that mirror `double` arithmetic in the C++ want this rather than [`sin`],
+/// whose `f32` result is only good to 1e-7.
+#[inline(never)]
+pub fn sin_f64(x: f64) -> f64 {
   match reduce(x) {
-    Some((quadrant, r)) => quadrant_sin(quadrant, r) as f32,
-    None => f32::NAN,
+    Some((quadrant, r)) => quadrant_sin(quadrant, r),
+    None => f64::NAN,
   }
 }
 
 /// Returns the cosine of `x` radians. See [`sin`] for the accepted domain.
 #[inline(never)]
 pub fn cos(x: f32) -> f32 {
-  match reduce(x) {
+  match reduce(x as f64) {
     // cos(x) == sin(x + pi/2), one quadrant along.
     Some((quadrant, r)) => quadrant_sin(quadrant + 1, r) as f32,
     None => f32::NAN,
@@ -53,7 +64,7 @@ pub fn cos(x: f32) -> f32 {
 /// the accepted domain.
 #[inline(never)]
 pub fn sin_cos(x: f32) -> (f32, f32) {
-  let Some((quadrant, r)) = reduce(x) else {
+  let Some((quadrant, r)) = reduce(x as f64) else {
     return (f32::NAN, f32::NAN);
   };
   // Odd quadrants exchange the two polynomials, and each result is negative in
@@ -68,8 +79,7 @@ pub fn sin_cos(x: f32) -> (f32, f32) {
 
 /// Splits `x` into a quadrant index and a remainder in `[-pi/4, pi/4]`, so that
 /// `x == quadrant * pi/2 + remainder`. Returns `None` outside the domain.
-fn reduce(x: f32) -> Option<(i64, f64)> {
-  let x = x as f64;
+fn reduce(x: f64) -> Option<(i64, f64)> {
   if x.is_nan() || x.abs() > MAX_ARGUMENT {
     return None;
   }
