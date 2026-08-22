@@ -14,9 +14,15 @@ pub(crate) const MAX_GROUP_COUNT: usize = 7;
 /// Native backends strength-reduce `/` to exactly this, but the wasm backend
 /// emits `i32.div_s` and leaves the reduction to the engine. Spelling it out
 /// keeps the hot path free of a division instruction on every target.
+///
+/// `sign` is all ones when `x` is negative and zero otherwise. The mixing chain
+/// scales a sample by velocity, volume, pan and envelope, none of which is
+/// negative, so the sign holds for the whole chain and the caller works it out
+/// once. A step that reaches zero is unaffected: the correction the truncation
+/// needs is smaller than the divisor.
 #[inline(always)]
-fn div_pow2_i32<const SHIFT: u32>(x: i32) -> i32 {
-  (x + ((x >> 31) & ((1i32 << SHIFT) - 1))) >> SHIFT
+fn div_pow2_i32<const SHIFT: u32>(x: i32, sign: i32) -> i32 {
+  (x + (sign & ((1i32 << SHIFT) - 1))) >> SHIFT
 }
 
 /// The per-unit constants a block of samples shares, hoisted out of the sample
@@ -365,17 +371,19 @@ impl Unit {
         };
 
         // Velocity, volume and pan in turn, each truncating, as the C++ does.
-        // Largest intermediate is 32767 × 128, well inside i32.
-        let mut w0 = div_pow2_i32::<7>(w0 * params.velocity);
-        let mut w1 = div_pow2_i32::<7>(w1 * params.velocity);
-        w0 = div_pow2_i32::<7>(w0 * params.volume);
-        w1 = div_pow2_i32::<7>(w1 * params.volume);
-        w0 = div_pow2_i32::<6>(w0 * params.pan_volumes[0]);
-        w1 = div_pow2_i32::<6>(w1 * params.pan_volumes[1]);
+        // Largest intermediate is 32767 × 128, well inside i32. The sign holds
+        // for the whole chain, so it is taken once.
+        let (sign0, sign1) = (w0 >> 31, w1 >> 31);
+        let mut w0 = div_pow2_i32::<7>(w0 * params.velocity, sign0);
+        let mut w1 = div_pow2_i32::<7>(w1 * params.velocity, sign1);
+        w0 = div_pow2_i32::<7>(w0 * params.volume, sign0);
+        w1 = div_pow2_i32::<7>(w1 * params.volume, sign1);
+        w0 = div_pow2_i32::<6>(w0 * params.pan_volumes[0], sign0);
+        w1 = div_pow2_i32::<6>(w1 * params.pan_volumes[1], sign1);
 
         if vi.envelope_size > 0 {
-          w0 = div_pow2_i32::<7>(w0 * vt.envelope_volume);
-          w1 = div_pow2_i32::<7>(w1 * vt.envelope_volume);
+          w0 = div_pow2_i32::<7>(w0 * vt.envelope_volume, sign0);
+          w1 = div_pow2_i32::<7>(w1 * vt.envelope_volume, sign1);
         }
 
         if voice_flags & VOICE_FLAG_SMOOTH != 0 && vt.life_count < smooth_smp {
