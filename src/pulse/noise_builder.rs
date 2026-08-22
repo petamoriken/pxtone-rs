@@ -54,14 +54,16 @@ impl OscState {
       SMP_COUNT as f64 * (osc.offset as f64 / 100.0)
     };
     let volume = osc.volume as f64 / 100.0;
-    let (rdm_start, rdm_margin, rdm_index) = if ran && !rand_tbl.is_empty() {
+    // The held value starts at zero with the raw table entry in the margin; the
+    // pair only becomes a start and a difference once `increment` first wraps.
+    // The index is clamped, which the C++ does not do -- at an offset of exactly
+    // 100 it reads one past the end of the table.
+    let (rdm_margin, rdm_index) = if ran && !rand_tbl.is_empty() {
       let idx =
         ((SMP_COUNT_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_COUNT_RAND - 1);
-      let start = rand_tbl[idx];
-      let margin = rand_tbl[(idx + 1).min(SMP_COUNT_RAND - 1)] as i32 - start as i32;
-      (start, margin, idx)
+      (rand_tbl[idx] as i32, idx)
     } else {
-      (0, 0, 0)
+      (0, 0)
     };
     OscState {
       increment,
@@ -69,26 +71,27 @@ impl OscState {
       volume,
       wave_type: osc.wave_type,
       reversed: osc.reversed,
-      rdm_start,
+      rdm_start: 0,
       rdm_margin,
       rdm_index,
     }
   }
 
   fn get_sample(&self, tables: &[Option<Vec<i16>>; WAVETYPE_COUNT]) -> f64 {
-    let tbl = tables[self.wave_type as usize].as_deref().unwrap_or(&[]);
-    if tbl.is_empty() {
-      return 0.0;
-    }
     let offset = self.offset as usize;
+    // The two random types read no wave table: they interpolate between the
+    // values `increment` pulled out of the Random table, or hold the last one.
     let work = match self.wave_type {
       WaveType::Random => {
         self.rdm_start as f64 + self.rdm_margin as f64 * offset as f64 / SMP_COUNT as f64
       }
       WaveType::Random2 => self.rdm_start as f64,
       _ => {
-        let idx = offset.min(tbl.len() - 1);
-        tbl[idx] as f64
+        let tbl = tables[self.wave_type as usize].as_deref().unwrap_or(&[]);
+        if tbl.is_empty() {
+          return 0.0;
+        }
+        tbl[offset.min(tbl.len() - 1)] as f64
       }
     };
     let work = if self.reversed { -work } else { work };
@@ -102,7 +105,10 @@ impl OscState {
       if self.offset >= SMP_COUNT as f64 {
         self.offset = 0.0;
       }
-      if matches!(self.wave_type, WaveType::Random | WaveType::Random2) {
+      // `build_table` gives both random types the Random table, so this only
+      // finds it empty for a disabled unit, which never gets here. Guarded the
+      // same way as `OscState::from_design` regardless.
+      if matches!(self.wave_type, WaveType::Random | WaveType::Random2) && !rand_tbl.is_empty() {
         self.rdm_start = rand_tbl[self.rdm_index];
         self.rdm_index = (self.rdm_index + 1) % SMP_COUNT_RAND;
         self.rdm_margin = rand_tbl[self.rdm_index] as i32 - self.rdm_start as i32;
@@ -139,13 +145,17 @@ impl NoiseBuilder {
   }
 
   /// Builds the wave table for `wave_type` if not already built.
-  /// `WaveType::Random2` is left empty intentionally (returns 0 in get_sample,
-  /// matching the original C++ behaviour where it shares the Random pointer
-  /// but is used differently).
+  ///
+  /// `WaveType::Random2` has no table of its own: like `Random` it holds values
+  /// taken from the Random table rather than reading a waveform, so asking for
+  /// it builds that one. The C++ allocates every table up front and hands the
+  /// Random one to both types as a separate pointer.
   fn build_table(&mut self, wave_type: WaveType) {
-    if matches!(wave_type, WaveType::Random2) {
-      return;
-    }
+    let wave_type = if matches!(wave_type, WaveType::Random2) {
+      WaveType::Random
+    } else {
+      wave_type
+    };
     let idx = wave_type as usize;
     if self.tables[idx].is_some() {
       return;
@@ -470,5 +480,51 @@ impl NoiseBuilder {
     }
 
     Ok(pcm)
+  }
+}
+
+#[cfg(test)]
+mod tests {
+  use super::*;
+  use crate::pulse::noise::{NoiseOscillator, NoisePoint, NoiseUnit};
+
+  fn osc(wave_type: WaveType) -> NoiseOscillator {
+    NoiseOscillator {
+      wave_type,
+      frequency: 1000.0,
+      volume: 100.0,
+      offset: 0.0,
+      reversed: false,
+    }
+  }
+
+  /// `Random2` reads no table of its own but holds values taken from
+  /// `Random`'s, so asking for it has to build that one. Rendering silence here
+  /// would mean the table went missing.
+  #[test]
+  fn sounds_a_design_made_only_of_random2() {
+    let mut noise = Noise::new();
+    noise.frame_count_44k = 44100 / 10;
+    let mut envelopes = tinyvec::ArrayVec::new();
+    // A unit with no envelope point renders silence whatever its oscillators do.
+    envelopes.push(NoisePoint { x: 0, y: 100 });
+    noise.units.push(NoiseUnit {
+      enabled: true,
+      pan: 0,
+      envelopes,
+      main: osc(WaveType::Random2),
+      frequency: osc(WaveType::Random2),
+      volume: osc(WaveType::Random2),
+    });
+
+    let frequency = FrequencyTable::new();
+    let pcm = NoiseBuilder::new()
+      .build_noise(&mut noise, 2, 44100, 16, &frequency)
+      .expect("a Random2 design should render");
+    assert_eq!(pcm.samples().len(), 44100 / 10 * 2 * 2);
+    assert!(
+      pcm.samples().iter().any(|&b| b != 0),
+      "a Random2 oscillator should sound"
+    );
   }
 }
