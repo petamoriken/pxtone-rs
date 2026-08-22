@@ -54,14 +54,16 @@ impl OscState {
       SMP_COUNT as f64 * (osc.offset as f64 / 100.0)
     };
     let volume = osc.volume as f64 / 100.0;
-    let (rdm_start, rdm_margin, rdm_index) = if ran && !rand_tbl.is_empty() {
+    // The held value starts at zero with the raw table entry in the margin; the
+    // pair only becomes a start and a difference once `increment` first wraps.
+    // The index is clamped, which the C++ does not do -- at an offset of exactly
+    // 100 it reads one past the end of the table.
+    let (rdm_margin, rdm_index) = if ran && !rand_tbl.is_empty() {
       let idx =
         ((SMP_COUNT_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_COUNT_RAND - 1);
-      let start = rand_tbl[idx];
-      let margin = rand_tbl[(idx + 1).min(SMP_COUNT_RAND - 1)] as i32 - start as i32;
-      (start, margin, idx)
+      (rand_tbl[idx] as i32, idx)
     } else {
-      (0, 0, 0)
+      (0, 0)
     };
     OscState {
       increment,
@@ -69,7 +71,7 @@ impl OscState {
       volume,
       wave_type: osc.wave_type,
       reversed: osc.reversed,
-      rdm_start,
+      rdm_start: 0,
       rdm_margin,
       rdm_index,
     }
