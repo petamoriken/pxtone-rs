@@ -1,0 +1,270 @@
+# Where each snapshot stands against tests/reference, as recorded by
+# `UPDATE_REFS=1 deno task test:refs`. A file that drifts further from
+# the reference fails the check; one that gets closer asks to be
+# recorded here.
+
+
+[[file]]
+path = "ptcop/5LOVE[Quois]"
+differing = 143378
+worst = 22
+
+[[file]]
+path = "ptcop/Aisatsu[Rusk]"
+differing = 261778
+worst = 42329
+
+[[file]]
+path = "ptcop/ComputerXXsan[gensai]"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptcop/Fuwafuwa[PEPO]"
+differing = 269790
+worst = 50
+
+[[file]]
+path = "ptcop/overworld2_nes[Se-ko]"
+differing = 219408
+worst = 2074
+
+[[file]]
+path = "ptcop/overworld2_orche[Se-ko]"
+differing = 199473
+worst = 1074
+
+[[file]]
+path = "ptnoise/drum_bass1"
+differing = 17398
+worst = 55573
+
+[[file]]
+path = "ptnoise/drum_bass2"
+differing = 17362
+worst = 35200
+
+[[file]]
+path = "ptnoise/drum_bass3"
+differing = 17422
+worst = 40883
+
+[[file]]
+path = "ptnoise/drum_bass4"
+differing = 7952
+worst = 37580
+
+[[file]]
+path = "ptnoise/drum_bass5"
+differing = 8078
+worst = 52988
+
+[[file]]
+path = "ptnoise/drum_bass6"
+differing = 8112
+worst = 53757
+
+[[file]]
+path = "ptnoise/drum_snare1"
+differing = 8780
+worst = 40508
+
+[[file]]
+path = "ptnoise/drum_snare2"
+differing = 662
+worst = 243
+
+[[file]]
+path = "ptnoise/drum_snare3"
+differing = 17132
+worst = 38511
+
+[[file]]
+path = "ptnoise/drum_snare4"
+differing = 26392
+worst = 25499
+
+[[file]]
+path = "ptnoise/drum_tom1_hi"
+differing = 21998
+worst = 31899
+
+[[file]]
+path = "ptnoise/drum_tom1_low"
+differing = 21982
+worst = 36033
+
+[[file]]
+path = "ptnoise/drum_tom1_midle"
+differing = 21994
+worst = 34896
+
+[[file]]
+path = "ptnoise/hat1_close"
+differing = 366
+worst = 1
+
+[[file]]
+path = "ptnoise/hat1_open"
+differing = 2808
+worst = 1
+
+[[file]]
+path = "ptnoise/hat1_pedal"
+differing = 214
+worst = 1
+
+[[file]]
+path = "ptnoise/hat2_close"
+differing = 202
+worst = 1
+
+[[file]]
+path = "ptnoise/mokugyo1"
+differing = 90
+worst = 1
+
+[[file]]
+path = "ptnoise/noise1_mono"
+differing = 17356
+worst = 1
+
+[[file]]
+path = "ptnoise/noise1_stereo"
+differing = 49097
+worst = 15819
+
+[[file]]
+path = "ptnoise/noise2_mono"
+differing = 25968
+worst = 1
+
+[[file]]
+path = "ptnoise/noise2_stereo"
+differing = 54424
+worst = 31357
+
+[[file]]
+path = "ptnoise/pad1"
+differing = 13182
+worst = 2601
+
+[[file]]
+path = "ptnoise/pad2"
+differing = 11500
+worst = 3419
+
+[[file]]
+path = "ptnoise/suzu1"
+differing = 5728
+worst = 130
+
+[[file]]
+path = "ptnoise/taiko1"
+differing = 16176
+worst = 34
+
+[[file]]
+path = "ptnoise/telephone_0"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_1"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_2"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_3"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_4"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_5"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_6"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_7"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_8"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_9"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_ast"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_error"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_idle"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/telephone_sha"
+differing = 0
+worst = 0
+
+[[file]]
+path = "ptnoise/triangle1_free"
+differing = 79106
+worst = 15300
+
+[[file]]
+path = "ptnoise/triangle1_mute"
+differing = 8372
+worst = 13658
+
+[[file]]
+path = "ptnoise/water_bubble1"
+differing = 8378
+worst = 15589
+
+[[file]]
+path = "ptnoise/water_drop1"
+differing = 4190
+worst = 15164
+
+[[file]]
+path = "ptnoise/water_drop2"
+differing = 4188
+worst = 15695
+
+[[file]]
+path = "ptnoise/water_drop3"
+differing = 1808
+worst = 20144
+
+[[file]]
+path = "ptnoise/wood1"
+differing = 5190
+worst = 31025

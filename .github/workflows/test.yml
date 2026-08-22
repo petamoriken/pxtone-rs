@@ -23,6 +23,17 @@ jobs:
       - name: Run Rust tests
         run: cargo test
 
+  test-refs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7.0.1
+
+      - name: Setup Deno
+        uses: denoland/setup-deno@v2.0.5
+
+      - name: Compare the snapshots against the reference renders
+        run: deno task test:refs
+
   test-wasm:
     runs-on: ubuntu-latest
     steps:
