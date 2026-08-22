@@ -8,6 +8,8 @@ const BASIC_SAMPLE_RATE: f64 = 44100.0;
 const BASIC_FREQUENCY: f64 = 100.0;
 const SAMPLING_TOP: i16 = 32767;
 const SMP_COUNT_RAND: usize = 44100;
+/// 40 key, the range a frequency oscillator's table read is scaled into.
+const KEY_TOP: i32 = 0x3200;
 const SMP_COUNT: usize = (BASIC_SAMPLE_RATE / BASIC_FREQUENCY) as usize; // 441
 
 // ---- PRNG ----
@@ -48,19 +50,23 @@ impl OscState {
     let ran = matches!(osc.wave_type, WaveType::Random | WaveType::Random2);
     let increment =
       (BASIC_SAMPLE_RATE / sample_rate as f64) * (osc.frequency as f64 / BASIC_FREQUENCY);
+    // The design holds these as `f32` and the C++ divides by an integer literal,
+    // so the division happens in `f32` and only the result widens. Doing it in
+    // `f64` lands `rdm_index` an entry further along for some offsets, which
+    // shifts the whole random sequence of that oscillator.
     let offset = if ran {
       0.0
     } else {
-      SMP_COUNT as f64 * (osc.offset as f64 / 100.0)
+      SMP_COUNT as f64 * (osc.offset / 100.0) as f64
     };
-    let volume = osc.volume as f64 / 100.0;
+    let volume = (osc.volume / 100.0) as f64;
     // The held value starts at zero with the raw table entry in the margin; the
     // pair only becomes a start and a difference once `increment` first wraps.
     // The index is clamped, which the C++ does not do -- at an offset of exactly
     // 100 it reads one past the end of the table.
     let (rdm_margin, rdm_index) = if ran && !rand_tbl.is_empty() {
       let idx =
-        ((SMP_COUNT_RAND as f64 * osc.offset as f64 / 100.0) as usize).min(SMP_COUNT_RAND - 1);
+        ((SMP_COUNT_RAND as f64 * (osc.offset / 100.0) as f64) as usize).min(SMP_COUNT_RAND - 1);
       (rand_tbl[idx] as i32, idx)
     } else {
       (0, 0)
@@ -77,13 +83,20 @@ impl OscState {
     }
   }
 
-  fn get_sample(&self, tables: &[Option<Vec<i16>>; WAVETYPE_COUNT]) -> f64 {
+  /// One sample, in the shape the C++ computes it.
+  ///
+  /// The two random types read no wave table: they ramp between the values
+  /// `increment` pulled out of the Random table, or hold the last one. That ramp
+  /// is integer arithmetic there, truncating, so it is here too.
+  ///
+  /// `FREQUENCY` marks the oscillator that drives the playback rate rather than
+  /// the waveform. A table read of its scales down into the key range; the
+  /// random types do not.
+  fn get_sample<const FREQUENCY: bool>(&self, tables: &[Option<Vec<i16>>; WAVETYPE_COUNT]) -> f64 {
     let offset = self.offset as usize;
-    // The two random types read no wave table: they interpolate between the
-    // values `increment` pulled out of the Random table, or hold the last one.
     let work = match self.wave_type {
       WaveType::Random => {
-        self.rdm_start as f64 + self.rdm_margin as f64 * offset as f64 / SMP_COUNT as f64
+        (self.rdm_start as i32 + self.rdm_margin * offset as i32 / SMP_COUNT as i32) as f64
       }
       WaveType::Random2 => self.rdm_start as f64,
       _ => {
@@ -91,7 +104,12 @@ impl OscState {
         if tbl.is_empty() {
           return 0.0;
         }
-        tbl[offset.min(tbl.len() - 1)] as f64
+        let sample = tbl[offset.min(tbl.len() - 1)] as i32;
+        if FREQUENCY {
+          (KEY_TOP * sample / SAMPLING_TOP as i32) as f64
+        } else {
+          sample as f64
+        }
       }
     };
     let work = if self.reversed { -work } else { work };
@@ -411,8 +429,8 @@ impl NoiseBuilder {
           .iter()
           .filter(|u| u.enabled)
           .map(|u| {
-            let main = u.main.get_sample(&self.tables);
-            let vol = u.volume.get_sample(&self.tables);
+            let main = u.main.get_sample::<false>(&self.tables);
+            let vol = u.volume.get_sample::<false>(&self.tables);
             let work = main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0) * u.pan[c];
             let envelope = if u.enve_index < u.enves.len() {
               let smp = u.enves[u.enve_index].0;
@@ -445,11 +463,8 @@ impl NoiseBuilder {
           continue;
         }
         // freq → fre
-        let fre = {
-          let po = &u.frequency;
-
-          po.get_sample(&self.tables) // already scaled by volume in get_sample
-        };
+        // Already reversed and scaled by volume in `get_sample`.
+        let fre = u.frequency.get_sample::<true>(&self.tables);
         let main_inc = u.main.increment * frequency.get(fre as i32) as f64;
         u.main.increment(main_inc, rand_tbl);
         let freq_inc = u.frequency.increment;
