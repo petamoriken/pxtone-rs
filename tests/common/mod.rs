@@ -10,14 +10,13 @@ pub fn wav_matches(actual: &[u8], expected: &[u8]) -> bool {
   if actual[..WAV_HEADER_LEN] != expected[..WAV_HEADER_LEN] {
     return false;
   }
-  actual[WAV_HEADER_LEN..]
-    .chunks_exact(2)
-    .zip(expected[WAV_HEADER_LEN..].chunks_exact(2))
-    .all(|(a, e)| {
-      let av = i16::from_le_bytes([a[0], a[1]]) as i32;
-      let ev = i16::from_le_bytes([e[0], e[1]]) as i32;
-      (av - ev).abs() <= WAV_PCM_TOLERANCE
-    })
+  let (actual_samples, _) = actual[WAV_HEADER_LEN..].as_chunks::<2>();
+  let (expected_samples, _) = expected[WAV_HEADER_LEN..].as_chunks::<2>();
+  actual_samples.iter().zip(expected_samples).all(|(&a, &e)| {
+    let av = i16::from_le_bytes(a) as i32;
+    let ev = i16::from_le_bytes(e) as i32;
+    (av - ev).abs() <= WAV_PCM_TOLERANCE
+  })
 }
 
 pub fn pcm_to_wav(samples: &[u8], channels: u8, sample_rate: u32) -> Vec<u8> {

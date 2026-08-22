@@ -92,10 +92,18 @@ This runs the following pipeline:
 | 2    | `build:wasm:merge`      | Compiles WAT wrappers and merges them into `pxtone.wasm`         |
 | 3    | `build:wasm:strip-impl` | Strips internal `_`-prefixed exports from the binary             |
 | 4    | `build:wasm:stub-panic` | Traps in the panic paths and clears the messages they pointed at |
-| 5    | `build:wasm:opt`        | Optimizes with `wasm-opt -O3`                                    |
+| 5    | `build:wasm:opt`        | Optimizes with `wasm-opt -Oz --converge`                         |
 
 Panics therefore trap in the wasm build rather than aborting with a message,
 which nothing could observe anyway: the module imports nothing to write to.
+
+The last step optimizes for size rather than speed, because the module is meant
+to be base64'd into a JavaScript bundle. `-Oz --converge` is 3,319 bytes smaller
+than `-O3` and costs at most 1.2% of `moo` time on the sample songs — running
+Binaryen's size passes over output LLVM already compiled at `-O3` is nothing
+like lowering the Rust `opt-level`. Note also that the `release-wasm` profile
+sets `strip = "debuginfo"` rather than stripping everything, since step 4 needs
+the name section to find the panic entry points.
 
 The compiled module exports a C FFI interface with WebAssembly multi-value
 returns. Memory management uses explicit `alloc`/`dealloc` exports. See
@@ -152,6 +160,9 @@ deno task test:rust
 
 # WebAssembly tests
 deno task test:wasm
+
+# Regenerate the reference WAV and TOML snapshots
+UPDATE_SNAPSHOTS=1 cargo test
 ```
 
 ## Checking against the original
@@ -180,6 +191,66 @@ Songs are stored as their first five seconds, which is where every difference
 found so far begins; the instruments are short enough to keep whole. See
 [`tests/reference/README.md`](tests/reference/README.md) for how that side is
 produced -- the C++ is not vendored, so regenerating it is a manual step.
+
+`deno task test:rust` runs `cargo test`, which covers the root `pxtone` crate
+only; the vendored crates need naming explicitly (`cargo test -p lite-math`,
+`-p lewton`, `-p ogg`). Unit tests live next to the code they cover, in
+`src/reader.rs`, `src/sort.rs`, `src/service.rs` and `src/pulse/frequency.rs`.
+Most of them exist to hold the port bit for bit against the C++, so an
+optimization that reorders arithmetic belongs there with a comparison against
+the previous implementation.
+
+Always go through `deno task test:wasm`. Invoking
+`cargo build --target wasm32-unknown-unknown` directly overwrites
+`target/.../pxtone.wasm` with a module the WAT wrappers were never merged into,
+and the tests then fail on missing exports.
+
+## Performance
+
+```sh
+# One module for absolute timings, two to compare them
+deno run --allow-read tools/bench_wasm.ts <wasm> [baseline_wasm]
+```
+
+The benchmark renders three of the sample songs to completion and reports the
+median of ten runs. For load time or a per-function breakdown, profile a native
+release build instead: put a harness under `examples/` and run it under macOS
+`sample`. Everything inlines into `main` there, so getting attribution means
+replacing `#[inline(always)]` and `#[inline]` with `#[inline(never)]` across
+`src/`, which makes `moo` 2.1x slower but keeps the proportions readable. Trust
+only the functions with substantial bodies: a helper of a few instructions looks
+expensive once every call to it is real.
+
+`moo` has no single hot spot left — `tone_sample` 22%, `step_advance` 15%,
+`tone_supple` 8%, `step_envelope` 8%, `get_frame` 6%, the delay effect 5%, the
+rest below 5% each. What used to sit alongside them, the frequency table lookup
+and the portamento step, is gone: everything the mixing pass reads off a unit
+holds for a whole block, so `ToneParams` reads it once instead of once per
+sample.
+
+### Optimizations considered and rejected
+
+| Option                                           | Result                                         |
+| ------------------------------------------------ | ---------------------------------------------- |
+| `f32`/`f64` `algebraic_*` (Rust 1.98)            | 37 bytes smaller, time within noise            |
+| `-C target-feature=+simd128`                     | 1,385 bytes larger, up to 3.7% slower          |
+| `wasm-opt --low-memory-unused`                   | 1,925 bytes smaller, but unsound here          |
+| `wasm-opt -O4`                                   | Larger than `-O3`                              |
+| `opt-level = "s"` / `"z"` for the `pxtone` crate | 5.6KB / 10.4KB smaller, `moo` 22% / 78% slower |
+
+wasm has no scalar FMA, so the algebraic operators have no contraction to
+perform, and enabling simd128 does not help either: of the 560 v128 instructions
+LLVM then emits, 479 are `v128.load`, `v128.store` and `v128.const` — widened
+memory moves that bulk memory already covers — and the arithmetic amounts to
+eight `i32x4.add` with no float lanes at all. The mixing loop is integer work in
+which each sample depends on the state the previous one left behind.
+`libs/lite-math` additionally documents bit identical results on every platform,
+which a deliberately non-deterministic optimization cannot promise.
+
+`--low-memory-unused` is out because rustc links the shadow stack first:
+`__stack_pointer` starts at 1 MiB with the data segment above it, so the low
+page is the bottom of the stack rather than unused, and the flag would quietly
+compromise stack overflow detection.
 
 ## License
 
