@@ -12,14 +12,8 @@ pub(crate) const MAX_GROUP_COUNT: usize = 7;
 /// `x / 2^SHIFT`, truncating toward zero, written out as shifts.
 ///
 /// Native backends strength-reduce `/` to exactly this, but the wasm backend
-/// emits `i64.div_s` and leaves the reduction to the engine. Spelling it out
+/// emits `i32.div_s` and leaves the reduction to the engine. Spelling it out
 /// keeps the hot path free of a division instruction on every target.
-#[inline(always)]
-fn div_pow2_i64<const SHIFT: u32>(x: i64) -> i64 {
-  (x + ((x >> 63) & ((1i64 << SHIFT) - 1))) >> SHIFT
-}
-
-/// `x / 2^SHIFT`, truncating toward zero. See [`div_pow2_i64`].
 #[inline(always)]
 fn div_pow2_i32<const SHIFT: u32>(x: i32) -> i32 {
   (x + ((x >> 31) & ((1i32 << SHIFT) - 1))) >> SHIFT
@@ -32,10 +26,12 @@ fn div_pow2_i32<const SHIFT: u32>(x: i32) -> i32 {
 /// them.
 #[derive(Clone, Copy)]
 pub(crate) struct ToneParams {
-  /// velocity × volume × pan, per channel, so that the voice loop needs a
-  /// single i64 multiply and shift.
-  /// Max intermediate: 32768 × 128 × 128 × 128 = 68_719_476_736 < i64::MAX ✓
-  factors: [i64; MAX_CHANNEL],
+  /// Velocity, volume and pan, kept apart because the C++ divides by each in
+  /// turn and every one of those divisions truncates. Folding them into a single
+  /// factor and shifting once rounds differently.
+  velocity: i32,
+  volume: i32,
+  pan_volumes: [i32; MAX_CHANNEL],
   /// `offset_frequency × tuning` per voice, the block-invariant half of the
   /// step [`Unit::step_advance`] adds to the sample position. Splitting it out
   /// keeps the order of the two multiplications the C++ uses.
@@ -344,8 +340,6 @@ impl Unit {
     }
     self.quiet_run = 0;
 
-    let [f0, f1] = params.factors;
-
     let mut buf0 = 0i32;
     let mut buf1 = 0i32;
 
@@ -367,9 +361,14 @@ impl Unit {
           (s0, s1)
         };
 
-        // / (128 * 128 * 64) == >> 20
-        let mut w0 = div_pow2_i64::<20>(w0 as i64 * f0) as i32;
-        let mut w1 = div_pow2_i64::<20>(w1 as i64 * f1) as i32;
+        // Velocity, volume and pan in turn, each truncating, as the C++ does.
+        // Largest intermediate is 32767 × 128, well inside i32.
+        let mut w0 = div_pow2_i32::<7>(w0 * params.velocity);
+        let mut w1 = div_pow2_i32::<7>(w1 * params.velocity);
+        w0 = div_pow2_i32::<7>(w0 * params.volume);
+        w1 = div_pow2_i32::<7>(w1 * params.volume);
+        w0 = div_pow2_i32::<6>(w0 * params.pan_volumes[0]);
+        w1 = div_pow2_i32::<6>(w1 * params.pan_volumes[1]);
 
         if vi.envelope_size > 0 {
           w0 = div_pow2_i32::<7>(w0 * vt.envelope_volume);
@@ -457,12 +456,10 @@ impl Unit {
   /// Reads the constants a block of samples shares. See [`ToneParams`].
   #[inline]
   pub(crate) fn tone_params(&self, mute_by_unit: bool) -> ToneParams {
-    let sv = self.velocity as i64 * self.volume as i64;
     ToneParams {
-      factors: [
-        sv * self.pan_volumes[0] as i64,
-        sv * self.pan_volumes[1] as i64,
-      ],
+      velocity: self.velocity as i32,
+      volume: self.volume as i32,
+      pan_volumes: [self.pan_volumes[0] as i32, self.pan_volumes[1] as i32],
       steps: [
         self.tones[0].offset_frequency as f64 * self.tuning as f64,
         self.tones[1].offset_frequency as f64 * self.tuning as f64,
