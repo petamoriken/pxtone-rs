@@ -183,14 +183,10 @@ impl VoiceInstance {
 /// Reinterprets an interleaved stereo 16-bit little-endian PCM byte buffer as frames.
 /// A trailing partial frame (if any) is dropped.
 fn frames_from_le_bytes(bytes: &[u8]) -> Vec<[i16; 2]> {
-  bytes
-    .chunks_exact(4)
-    .map(|f| {
-      [
-        i16::from_le_bytes([f[0], f[1]]),
-        i16::from_le_bytes([f[2], f[3]]),
-      ]
-    })
+  let (frames, _) = bytes.as_chunks::<4>();
+  frames
+    .iter()
+    .map(|&[l0, l1, r0, r1]| [i16::from_le_bytes([l0, l1]), i16::from_le_bytes([r0, r1])])
     .collect()
 }
 
@@ -688,8 +684,9 @@ fn decode_ogg_into(data: &[u8], dst: &mut [u8]) -> Result<(), PxtoneError> {
   {
     let room = (dst.len() - written) / 2;
     let count = pck.len().min(room);
-    for (out, &sample) in dst[written..].chunks_exact_mut(2).zip(&pck[..count]) {
-      out.copy_from_slice(&sample.to_le_bytes());
+    let (out_frames, _) = dst[written..].as_chunks_mut::<2>();
+    for (out, &sample) in out_frames.iter_mut().zip(&pck[..count]) {
+      *out = sample.to_le_bytes();
     }
     written += count * 2;
     if count < pck.len() {

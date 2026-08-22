@@ -1036,12 +1036,13 @@ impl PxtoneService {
       let woices = &self.woices;
       let frequency = &self.frequency;
       for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
+        let params = unit.tone_params(mute_by_unit);
         if let Some(woice) = woices.get(wi) {
           if unit.is_sounding() {
             let key = unit.tone_increment_key();
             let freq = frequency.get2(key) * sample_stride;
             unit.tone_sample::<false>(
-              mute_by_unit,
+              params,
               channels,
               time_pan_idx,
               smooth_samples,
@@ -1053,7 +1054,7 @@ impl PxtoneService {
           }
         }
         if !unit.is_flushed() {
-          unit.tone_supple(&mut group_smps, channel_count, time_pan_idx);
+          unit.tone_supple(params, &mut group_smps, channel_count, time_pan_idx);
         }
       }
     }
