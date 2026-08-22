@@ -13,8 +13,8 @@ the Rust decoder.
 
 ## Where this port deliberately differs
 
-`pxtnService_moo.cpp` computes the samples-per-tick rate in `double` and then
-keeps it in a `float`:
+`pxtnService_moo.cpp` computes the samples-per-tick rate in `double` and keeps
+it in a `float`:
 
 ```c
 float    _moo_clock_rate  ; // as the sample
@@ -24,13 +24,14 @@ _moo_clock_rate = (float)( 60.0f * (double)_dst_sps / ( (double)_moo_bt_tempo * 
 
 Every use promotes it back, so the narrowing buys nothing and only costs
 precision -- for a tempo of 145 the rate lands on 38.017242431640625 instead of
-38.017241379310342. This port holds the `f64`, on purpose.
+38.017241379310342. This port holds the `f64`.
 
-That is not what keeps the five songs off zero, though. Rendering the reference
-with the field widened to `double` moves them no closer: the worst difference on
-`Aisatsu[Rusk]` goes 243 to 245 and on `overworld2_nes[Se-ko]` 2074 to 2351. So
-whatever is left in those songs is something else, and this choice costs nothing
-measurable.
+Holding it is also what matches: narrowing to `f32` the way the C++ does takes
+two of the fifty-three renders off exact. Why the reference agrees with the
+wider value is not pinned down -- the rate only feeds integer tick and lifetime
+arithmetic, so a difference of one part in a hundred million has to cross an
+integer boundary to show at all. Worth knowing before anyone `f32`s it to look
+more faithful.
 
 ## Regenerating
 
