@@ -189,6 +189,16 @@ found so far begins; the instruments are short enough to keep whole. See
 [`tests/reference/README.md`](tests/reference/README.md) for how that side is
 produced -- the C++ is not vendored, so regenerating it is a manual step.
 
+### The stepped noise waves are filled by walking the boundaries
+
+`Saw6` and `Saw8` are staircases, and the C++ builds them by walking the step
+boundaries and filling up to each -- `a = _smp_num * k / n`, truncated. Picking
+the step per entry with `s * n / _smp_num` rounds the other way, so the entry
+sitting exactly on a boundary lands in the previous step: 7 of `Saw8`'s 8
+boundaries on a 441 entry table, each 9362 out. None of the committed noise
+instruments uses either wave, which is how that survived to be found in a song
+instead.
+
 ### OGGV voices are held against libvorbis
 
 pxtone decodes an OGGV voice with libvorbis'

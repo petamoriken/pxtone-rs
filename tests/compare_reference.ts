@@ -9,8 +9,8 @@
 //
 //   deno task test:refs [ptcop|ptnoise|ogg]
 //
-// See tests/reference/README.md for how the reference side was produced and for
-// the one place this port diverges on purpose.
+// See tests/reference/README.md for how each reference side was produced -- the
+// OGG Vorbis one needs a particular build of libvorbis.
 
 const WAV_HEADER_LEN = 44;
 

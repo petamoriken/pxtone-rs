@@ -168,6 +168,24 @@ impl NoiseBuilder {
     }
   }
 
+  /// Builds a table of `values.len()` equal steps, the way the C++ does:
+  ///
+  ///   a = _smp_num * k / n; for( s; s < a; s++ ){ *p = v; p++; }
+  ///
+  /// The boundary is the truncated `_smp_num * k / n` and the fill runs up to
+  /// it, which is not the same as picking the step with `s * n / _smp_num`:
+  /// that rounds the other way and lands one sample per boundary in the
+  /// previous step. On a 441 entry table the two disagree on 7 of the 8 step
+  /// boundaries.
+  fn steps(values: &[i16]) -> Vec<i16> {
+    let mut table = Vec::with_capacity(SMP_COUNT);
+    for (k, &value) in values.iter().enumerate() {
+      let end = SMP_COUNT * (k + 1) / values.len();
+      table.resize(end, value);
+    }
+    table
+  }
+
   /// Builds the wave table for `wave_type` if not already built.
   ///
   /// `WaveType::Random2` has no table of its own: like `Random` it holds values
@@ -199,18 +217,7 @@ impl NoiseBuilder {
           .map(|s| (SAMPLING_TOP as f64 - top2 * s as f64 / SMP_COUNT as f64) as i16)
           .collect()
       }
-      WaveType::Rect => {
-        let half = SMP_COUNT / 2;
-        (0..SMP_COUNT)
-          .map(|s| {
-            if s < half {
-              SAMPLING_TOP
-            } else {
-              -SAMPLING_TOP
-            }
-          })
-          .collect()
-      }
+      WaveType::Rect => Self::steps(&[SAMPLING_TOP, -SAMPLING_TOP]),
       WaveType::Random => {
         let mut rng = Rand::new();
         (0..SMP_COUNT_RAND).map(|_| rng.get()).collect()
@@ -288,67 +295,31 @@ impl NoiseBuilder {
           .map(|s| if s < t16 { SAMPLING_TOP } else { -SAMPLING_TOP })
           .collect()
       }
-      WaveType::Saw3 => {
-        let t1 = SMP_COUNT / 3;
-        let t2 = SMP_COUNT * 2 / 3;
-        (0..SMP_COUNT)
-          .map(|s| {
-            if s < t1 {
-              SAMPLING_TOP
-            } else if s < t2 {
-              0
-            } else {
-              -SAMPLING_TOP
-            }
-          })
-          .collect()
-      }
-      WaveType::Saw4 => {
-        let a1 = SMP_COUNT / 4;
-        let a2 = SMP_COUNT * 2 / 4;
-        let a3 = SMP_COUNT * 3 / 4;
-        (0..SMP_COUNT)
-          .map(|s| {
-            if s < a1 {
-              SAMPLING_TOP
-            } else if s < a2 {
-              SAMPLING_TOP / 3
-            } else if s < a3 {
-              -(SAMPLING_TOP / 3)
-            } else {
-              -SAMPLING_TOP
-            }
-          })
-          .collect()
-      }
-      WaveType::Saw6 => {
-        let seg6 = [
-          SAMPLING_TOP,
-          (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 2 / 5) as i16,
-          (SAMPLING_TOP / 5),
-          -(SAMPLING_TOP / 5),
-          (-(SAMPLING_TOP as i32) + SAMPLING_TOP as i32 * 2 / 5) as i16,
-          -SAMPLING_TOP,
-        ];
-        (0..SMP_COUNT)
-          .map(|s| seg6[(s * 6 / SMP_COUNT).min(5)])
-          .collect()
-      }
-      WaveType::Saw8 => {
-        let seg8 = [
-          SAMPLING_TOP,
-          (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 2 / 7) as i16,
-          (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 4 / 7) as i16,
-          SAMPLING_TOP / 7,
-          -SAMPLING_TOP / 7,
-          (-SAMPLING_TOP as i32 + SAMPLING_TOP as i32 * 4 / 7) as i16,
-          (-SAMPLING_TOP as i32 + SAMPLING_TOP as i32 * 2 / 7) as i16,
-          -SAMPLING_TOP,
-        ];
-        (0..SMP_COUNT)
-          .map(|s| seg8[(s * 8 / SMP_COUNT).min(7)])
-          .collect()
-      }
+      WaveType::Saw3 => Self::steps(&[SAMPLING_TOP, 0, -SAMPLING_TOP]),
+      WaveType::Saw4 => Self::steps(&[
+        SAMPLING_TOP,
+        SAMPLING_TOP / 3,
+        -(SAMPLING_TOP / 3),
+        -SAMPLING_TOP,
+      ]),
+      WaveType::Saw6 => Self::steps(&[
+        SAMPLING_TOP,
+        (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 2 / 5) as i16,
+        (SAMPLING_TOP / 5),
+        -(SAMPLING_TOP / 5),
+        (-(SAMPLING_TOP as i32) + SAMPLING_TOP as i32 * 2 / 5) as i16,
+        -SAMPLING_TOP,
+      ]),
+      WaveType::Saw8 => Self::steps(&[
+        SAMPLING_TOP,
+        (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 2 / 7) as i16,
+        (SAMPLING_TOP as i32 - SAMPLING_TOP as i32 * 4 / 7) as i16,
+        SAMPLING_TOP / 7,
+        -SAMPLING_TOP / 7,
+        (-SAMPLING_TOP as i32 + SAMPLING_TOP as i32 * 4 / 7) as i16,
+        (-SAMPLING_TOP as i32 + SAMPLING_TOP as i32 * 2 / 7) as i16,
+        -SAMPLING_TOP,
+      ]),
       WaveType::Random2 => unreachable!(),
     };
     self.tables[idx] = Some(table);
@@ -508,6 +479,33 @@ impl NoiseBuilder {
 mod tests {
   use super::*;
   use crate::pulse::noise::{NoiseOscillator, NoisePoint, NoiseUnit};
+
+  /// The C++ fills each step up to the truncated boundary `_smp_num * k / n`,
+  /// so the entry sitting exactly on a boundary belongs to the step that starts
+  /// there. Selecting the step per entry with `s * n / _smp_num` rounds the
+  /// other way and puts it in the step before -- 7 of the 8 boundaries here.
+  #[test]
+  fn a_step_starts_on_its_boundary() {
+    let mut builder = NoiseBuilder::new();
+    builder.build_table(WaveType::Saw8);
+    let table = builder.tables[WaveType::Saw8 as usize].as_deref().unwrap();
+    assert_eq!(table.len(), SMP_COUNT);
+    for k in 1..8 {
+      let boundary = SMP_COUNT * k / 8;
+      assert_ne!(
+        table[boundary - 1],
+        table[boundary],
+        "the step should change at {boundary}"
+      );
+      assert_eq!(
+        table[boundary],
+        table[boundary + 1],
+        "and not a sample later"
+      );
+    }
+    assert_eq!(table[0], SAMPLING_TOP);
+    assert_eq!(table[SMP_COUNT - 1], -SAMPLING_TOP);
+  }
 
   fn osc(wave_type: WaveType) -> NoiseOscillator {
     NoiseOscillator {
