@@ -92,8 +92,18 @@ impl Sample for f32 {
 }
 
 impl Sample for i16 {
+	// libvorbis' `ov_read` is what pxtone converts an OGGV voice with, and it
+	// scales by 32768, rounds halves toward +inf and then clamps:
+	//
+	//   val = vorbis_ftoi( pcm[i][j] * 32768.f );
+	//   if( val >  32767 ) val =  32767;
+	//   else if( val < -32768 ) val = -32768;
+	//
+	// Truncating instead is a sample out for every negative value, and rounding
+	// halves to even is out on the exact halves, so this port spells the
+	// rounding out as `floor(x + 0.5)` rather than leaving it to a cast.
 	fn from_float(fl: f32) -> Self {
-		let fl = fl * 32768.0;
+		let fl = lite_math::floor(fl * 32768.0 + 0.5);
 		if fl > 32767. {
 			32767
 		} else if fl < -32768. {

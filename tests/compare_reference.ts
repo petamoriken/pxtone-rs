@@ -1,11 +1,13 @@
 // Requires every snapshot in tests/snapshots to be sample for sample what the
-// original C++ implementation renders, held in tests/reference.
+// original implementation renders, held in tests/reference: the C++ for the
+// songs and instruments, libvorbis for the OGG Vorbis material the C++ decodes
+// through it.
 //
 // Both sides are committed WAV files, so this needs nothing but Deno and runs in
 // CI. The whole corpus matches, so anything at all is a failure: a decode that
 // drifts from the original is a bug in the port, and this is what catches it.
 //
-//   deno task test:refs [ptcop|ptnoise]
+//   deno task test:refs [ptcop|ptnoise|ogg]
 //
 // See tests/reference/README.md for how the reference side was produced and for
 // the one place this port diverges on purpose.
@@ -22,6 +24,11 @@ const SUITES = [
     kind: "ptnoise",
     reference: "tests/reference/ptnoise",
     snapshots: "tests/snapshots/ptnoise",
+  },
+  {
+    kind: "ogg",
+    reference: "tests/reference/ogg",
+    snapshots: "tests/snapshots/ogg",
   },
 ];
 

@@ -11,6 +11,29 @@ instead of only against its own previous output.
 Both are 16-bit stereo at 44100 Hz, matching what `tests/decode_test.rs` asks of
 the Rust decoder.
 
+## The OGG Vorbis material
+
+`ogg/` is not a C++ render: it is what libvorbis 1.3.7 gives for the fixtures in
+`tests/sample/ogg`, which is what the C++ decodes an OGGV voice with
+(`ov_read( &vf, pcmout, 4096, 0, 2, 1, &sec )`). `libs/lewton` is a
+reimplementation of Vorbis rather than a port of libvorbis, so this is the side
+of the port that had to be built rather than inherited, and it is now exact.
+
+Regenerate it by compiling libvorbis from source **with `-ffp-contract=off`**.
+That flag is the whole story: clang fuses `a*b + c*d` by default on a target
+that has a fused multiply-add, and a libvorbis built that way lands about 2e-6
+from the C it was built from -- the installed dylib on an arm64 Mac does. The
+port follows the C, which is also what a build without a fused multiply-add
+gives, including every x86-64 SSE2 build and wasm.
+
+```sh
+clang -O2 -ffp-contract=off -I include -I lib \
+  dump.c $(ls lib/*.c | grep -vE "barkmel|psytune|tone\.c") -logg -o dump
+```
+
+where `dump.c` opens the file with `ov_fopen` and writes what `ov_read` returns
+after a 44 byte WAV header.
+
 ## The samples-per-tick rate
 
 `pxtnService_moo.cpp` computes it in `double` and keeps it in a `float`:

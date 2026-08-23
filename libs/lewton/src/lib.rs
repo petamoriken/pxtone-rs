@@ -165,7 +165,3 @@ fn test_ilog() {
 	assert_eq!(ilog(4), 3);
 	assert_eq!(ilog(7), 3);
 }
-
-fn bit_reverse(n: u32) -> u32 {
-	n.reverse_bits()
-}

@@ -181,12 +181,55 @@ deno task test:refs ptnoise   # one of them
 Both sides are committed WAV files, so this needs nothing but Deno and runs in
 CI. Every snapshot matches its reference render sample for sample, so the check
 is exact: any difference at all fails, because it means the decode has drifted
-from the original.
+from the original. The `ogg` suite is the same idea with libvorbis standing in
+for the C++, since that is what the C++ decodes an OGGV voice with.
 
 Songs are stored as their first five seconds, which is where every difference
 found so far begins; the instruments are short enough to keep whole. See
 [`tests/reference/README.md`](tests/reference/README.md) for how that side is
 produced -- the C++ is not vendored, so regenerating it is a manual step.
+
+### OGGV voices are held against libvorbis
+
+pxtone decodes an OGGV voice with libvorbis'
+`ov_read( &vf, pcmout, 4096, 0, 2,
+1, &sec )`, and `libs/lewton` is a
+reimplementation of Vorbis rather than a port of libvorbis, so agreement there
+has to be built rather than inherited.
+
+libvorbis' dylib exports the symbols its own translation units share, which is
+what makes the comparison possible without the source:
+
+```sh
+nm -gU /opt/homebrew/opt/libvorbis/lib/libvorbis.dylib | grep -iE "window|mdct"
+```
+
+Declaring `_vorbis_window_get` and `mdct_init` reads back the exact window and
+twiddle tables even without the source, and `ov_read_float` alongside `ov_read`
+pins the float-to-i16 conversion down to its tie-breaking. What that turned up:
+the conversion is `floor(f * 32768 + 0.5)` clamped to `[-32768, 32767]`, halves
+going toward positive infinity; a stream's last packet is trimmed against the
+samples handed out rather than against the last page's granule position; and
+both the window and the MDCT twiddle factors are computed in double and stored
+as floats, down to how the products are grouped. The twiddle factors now match
+at every blocksize, and `libs/lewton/src/header_cached_test.rs` holds them there
+alongside the transform's own output.
+
+The MDCT is a port of `lib/mdct.c`'s backward transform rather than the
+stb_vorbis one lewton carried, because only the same operation order gives the
+same floats; it is bit exact against that file at every blocksize. And where
+libvorbis' window tables are literals in `window.c` that no computation
+reproduces, the 151 entries of 8160 that differ are carried as they are -- worth
+only 1e-10 each, but a table is meant to be the same table. Decoded voices are
+now bit identical to libvorbis as floats, which also says the floor, residue,
+coupling, windowing and overlap-add around the MDCT were already right.
+
+Matching it means compiling the C with `-ffp-contract=off`, which is not a
+detail. Clang fuses `a*b + c*d` by default on a target with a fused
+multiply-add, so a libvorbis built that way sits about 2e-6 from the C it was
+built from. This port follows the C, which is what a build without one gives --
+every x86-64 SSE2 build, and wasm, where there is no scalar fused multiply-add
+to fuse into. `tests/reference/ogg` is generated accordingly.
 
 `deno task test:rust` runs `cargo test`, which covers the root `pxtone` crate
 only; the vendored crates need naming explicitly (`cargo test -p lite-math`,

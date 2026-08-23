@@ -115,29 +115,47 @@ fn negate_if(value: f64, negate: bool) -> f64 {
   f64::from_bits(value.to_bits() ^ ((negate as u64) << 63))
 }
 
-/// Chebyshev fit of `sin(r)/r` over `[-pi/4, pi/4]`: 3.1e-9, or 0.03 f32 ulp.
+/// Maclaurin series for `sin(r)/r`, truncated where the next term falls under
+/// an `f64` ulp over `[-pi/4, pi/4]`: `r^16/17!` is 6.5e-17 of the result.
+///
+/// A shorter fit is enough for an `f32` result, and this used to carry one, but
+/// [`sin_f64`] and [`cos_f64`] hand the `f64` back and callers narrow it
+/// themselves. An error of 0.03 `f32` ulp then lands on the wrong side of the
+/// rounding boundary for about one argument in fifty, which is what kept the
+/// window and MDCT tables from matching the ones libvorbis builds with the
+/// platform libm. The exact rational coefficients need no fitting and cost a
+/// handful of multiplies in what are all cold table-building loops.
 #[inline(never)]
 fn sin_poly(r: f64) -> f64 {
-  const S0: f64 = 0.999_999_996_945_006;
-  const S1: f64 = -0.166_666_507_065_048_93;
-  const S2: f64 = 0.008_332_036_654_645_55;
-  const S3: f64 = -0.000_195_039_634_174_997_2;
+  const S0: f64 = 1.0;
+  const S1: f64 = -0.166_666_666_666_666_66;
+  const S2: f64 = 0.008_333_333_333_333_333;
+  const S3: f64 = -0.000_198_412_698_412_698_4;
+  const S4: f64 = 2.755_731_922_398_589_3e-6;
+  const S5: f64 = -2.505_210_838_544_172e-8;
+  const S6: f64 = 1.605_904_383_682_161_3e-10;
+  const S7: f64 = -7.647_163_731_819_816e-13;
 
   let r2 = r * r;
-  r * (S0 + r2 * (S1 + r2 * (S2 + r2 * S3)))
+  r * (S0 + r2 * (S1 + r2 * (S2 + r2 * (S3 + r2 * (S4 + r2 * (S5 + r2 * (S6 + r2 * S7)))))))
 }
 
-/// Chebyshev fit of `cos(r)` over `[-pi/4, pi/4]`: 4.8e-11.
+/// Maclaurin series for `cos(r)`, truncated the same way: `r^18/18!` is 2.2e-18
+/// of the result over `[-pi/4, pi/4]`. See [`sin_poly`].
 #[inline(never)]
 fn cos_poly(r: f64) -> f64 {
-  const C0: f64 = 0.999_999_999_953_015_9;
-  const C1: f64 = -0.499_999_996_159_102_57;
-  const C2: f64 = 0.041_666_616_745_679_55;
-  const C3: f64 = -0.001_388_661_892_894_610_3;
-  const C4: f64 = 2.437_988_057_747_178e-5;
+  const C0: f64 = 1.0;
+  const C1: f64 = -0.5;
+  const C2: f64 = 0.041_666_666_666_666_664;
+  const C3: f64 = -0.001_388_888_888_888_889;
+  const C4: f64 = 2.480_158_730_158_73e-5;
+  const C5: f64 = -2.755_731_922_398_589e-7;
+  const C6: f64 = 2.087_675_698_786_81e-9;
+  const C7: f64 = -1.147_074_559_772_972_5e-11;
+  const C8: f64 = 4.779_477_332_387_385e-14;
 
   let r2 = r * r;
-  C0 + r2 * (C1 + r2 * (C2 + r2 * (C3 + r2 * C4)))
+  C0 + r2 * (C1 + r2 * (C2 + r2 * (C3 + r2 * (C4 + r2 * (C5 + r2 * (C6 + r2 * (C7 + r2 * C8)))))))
 }
 
 /// The `f32.sqrt` and `f32.floor` instructions, assembled by `build.rs` from
