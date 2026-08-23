@@ -1036,7 +1036,8 @@ impl PxtoneService {
       let woices = &self.woices;
       let frequency = &self.frequency;
       for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
-        let params = unit.tone_params(mute_by_unit);
+        let instances = woices.get(wi).map_or(&[][..], |w| w.instances.as_slice());
+        let params = unit.tone_params(mute_by_unit, instances);
         if let Some(woice) = woices.get(wi) {
           if unit.is_sounding() {
             let key = unit.tone_increment_key();
