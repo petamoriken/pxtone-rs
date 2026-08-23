@@ -1,8 +1,13 @@
 //! Helpers shared by the snapshot based integration tests.
 
 pub const WAV_HEADER_LEN: usize = 44;
-pub const WAV_PCM_TOLERANCE: i32 = 2;
 
+/// Whether two WAV files hold the same samples.
+///
+/// Exactly the same: there is nothing platform dependent left in the decode.
+/// `lite-math` computes its own trigonometry rather than calling out to a libm
+/// that varies, and everything else on the path is integer work or IEEE `f32`
+/// and `f64` arithmetic, which is specified to the bit.
 pub fn wav_matches(actual: &[u8], expected: &[u8]) -> bool {
   if actual.len() != expected.len() {
     return false;
@@ -12,11 +17,10 @@ pub fn wav_matches(actual: &[u8], expected: &[u8]) -> bool {
   }
   let (actual_samples, _) = actual[WAV_HEADER_LEN..].as_chunks::<2>();
   let (expected_samples, _) = expected[WAV_HEADER_LEN..].as_chunks::<2>();
-  actual_samples.iter().zip(expected_samples).all(|(&a, &e)| {
-    let av = i16::from_le_bytes(a) as i32;
-    let ev = i16::from_le_bytes(e) as i32;
-    (av - ev).abs() <= WAV_PCM_TOLERANCE
-  })
+  actual_samples
+    .iter()
+    .zip(expected_samples)
+    .all(|(a, e)| a == e)
 }
 
 pub fn pcm_to_wav(samples: &[u8], channels: u8, sample_rate: u32) -> Vec<u8> {
