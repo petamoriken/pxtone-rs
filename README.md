@@ -294,24 +294,73 @@ and the portamento step, is gone: everything the mixing pass reads off a unit
 holds for a whole block, so `ToneParams` reads it once instead of once per
 sample.
 
+Ablation says the remainder is spread thin. Disabling the whole unit loop leaves
+4.5 of 35 ns a frame, so 87 to 95% of the pass is in there and 58 to 78% is the
+voice loop inside it, at 2.4 to 3.0 ns per live voice. Within that, no piece is
+worth much on its own: the velocity/volume/pan chain can be **run twice over for
+free**, so there is no shortage of ALU slots, while breaking the sequential walk
+through the wave costs 28%. What still buys anything is not touching `self` from
+inside the sample loop.
+
+### What the sample loop must not read
+
+The wins left in the mixing pass all have the same shape: a value that holds for
+a whole block, loaded back through `&mut self` on every sample. wasm pays
+several times what a native build does for one — LLVM keeps the field in a
+register there and the engine's allocator often does not — so measure both.
+
+- The **effects run effect by effect** rather than sample by sample. An
+  overdrive is stateless and each delay still walks its ring in sample order, so
+  every sample sees the same sequence, all the overdrives then the delays in
+  order. What changes is that the group index, the rate, the ring offset and the
+  buffer bound are read once for the block. Each effect owns the sample loop
+  itself and is `#[inline(never)]`, which is both smaller and faster than
+  inlining it into the two `GROUPS` instantiations of the caller.
+- **`is_flushed` is taken from what the frame did** instead of read back.
+  Rendering a frame clears the quiet run, so the unit is not flushed.
+
+Together: 2,658 bytes smaller and `moo` 8 to 13% faster on wasm, 3 to 11% on
+native.
+
 ### Optimizations considered and rejected
 
 | Option                                           | Result                                         |
 | ------------------------------------------------ | ---------------------------------------------- |
 | `f32`/`f64` `algebraic_*` (Rust 1.98)            | 37 bytes smaller, time within noise            |
-| `-C target-feature=+simd128`                     | 1,385 bytes larger, up to 3.7% slower          |
+| `-C target-feature=+simd128`                     | 3,799 bytes larger, `moo` within noise         |
+| Fixed width SIMD in `libs/lite-math`             | Nothing to speed up: `moo` never calls it      |
 | `wasm-opt --low-memory-unused`                   | 1,925 bytes smaller, but unsound here          |
 | `wasm-opt -O4`                                   | Larger than `-O3`                              |
 | `opt-level = "s"` / `"z"` for the `pxtone` crate | 5.6KB / 10.4KB smaller, `moo` 22% / 78% slower |
 
 wasm has no scalar FMA, so the algebraic operators have no contraction to
-perform, and enabling simd128 does not help either: of the 560 v128 instructions
-LLVM then emits, 479 are `v128.load`, `v128.store` and `v128.const` — widened
-memory moves that bulk memory already covers — and the arithmetic amounts to
-eight `i32x4.add` with no float lanes at all. The mixing loop is integer work in
-which each sample depends on the state the previous one left behind.
-`libs/lite-math` additionally documents bit identical results on every platform,
-which a deliberately non-deterministic optimization cannot promise.
+perform, and enabling simd128 does not help either: of the 763 v128 instructions
+LLVM then emits, 550 are `v128.load`, `v128.store` and `v128.const` — widened
+memory moves that bulk memory already covers — and the float arithmetic amounts
+to eight `f32x4.div` and eight lane conversions. The mixing loop is integer work
+in which each sample depends on the state the previous one left behind.
+
+Vectorizing `libs/lite-math` by hand does not pay either, and not for a reason
+of precision: lane wise IEEE multiplies and adds are the same operations in the
+same order, so a two lane version of these series is bit identical to the scalar
+one, which is what separates this from the algebraic operators above. It is that
+there is no time there to win. Counting the calls shows **`moo` reaching
+`lite-math` zero times** on every sample song — the frequency table is built
+from literal octave bases and the mixing pass holds no transcendental at all.
+Every call happens while loading: 1,600 to 90,000 of them per song, which is 0.2
+to 1.0 ms of `tones_ready` against 30 to 112 ms of `moo`. `sin` costs 4.79 ns a
+call, 2.98 ns once its three `#[inline(never)]` hops collapse into one, and 1.96
+ns as a branch free body that the caller's loop can keep two arguments in flight
+through — so the entire headroom is about one nanosecond times at most 90,000
+calls, under 0.1 ms per file loaded. The `#[inline]` step alone costs 366 bytes
+of wasm, and the `wide` crate gates its wasm backend on
+`cfg(target_feature = "simd128")`, so reaching it at all means the whole-build
+flag in the row above.
+
+The overtone oscillator, which makes most of those calls, cannot use wider lanes
+in place anyway: it sums the harmonics into one accumulator, and that order is
+what the C++ fixes. Lanes would have to run across output samples instead, one
+accumulator each.
 
 `--low-memory-unused` is out because rustc links the shadow stack first:
 `__stack_pointer` starts at 1 MiB with the data segment above it, so the low
