@@ -1,6 +1,6 @@
 use crate::error::PxtoneError;
 use crate::reader::Reader;
-use crate::unit::MAX_GROUP_COUNT;
+use crate::unit::{MAX_CHANNEL, MAX_GROUP_COUNT};
 
 const CUT_MIN: f32 = 0.0;
 const CUT_MAX: f32 = 100.0;
@@ -37,7 +37,17 @@ impl OverDrive {
     self.cut_16bit_top = (32767.0 * (100.0 - self.cut) / 100.0) as i32;
   }
 
-  pub(crate) fn tone_supple<const GROUPS: usize>(&self, group_smps: &mut [i32; GROUPS]) {
+  /// Clips and amplifies one group across a block of samples.
+  ///
+  /// Stateless, so the block only has to be walked in some order, not in sample
+  /// order; running it here rather than at the call site keeps the group index,
+  /// the clip bound and the gain out of the per-sample path.
+  #[inline(never)]
+  pub(crate) fn tone_supple<const GROUPS: usize>(
+    &self,
+    mix: &mut [[[i32; GROUPS]; MAX_CHANNEL]],
+    channels: usize,
+  ) {
     if !self.played {
       return;
     }
@@ -45,8 +55,15 @@ impl OverDrive {
     // group is in range; spelling that out lets GROUPS == 1 fold to index 0.
     debug_assert!(self.group < GROUPS);
     let group = if GROUPS == 1 { 0 } else { self.group };
-    let work = group_smps[group].clamp(-self.cut_16bit_top, self.cut_16bit_top);
-    group_smps[group] = (work as f32 * self.amp) as i32;
+    let cut = self.cut_16bit_top;
+    let amp = self.amp;
+
+    for group_smps in mix.iter_mut() {
+      for groups in group_smps.iter_mut().take(channels) {
+        let work = groups[group].clamp(-cut, cut);
+        groups[group] = (work as f32 * amp) as i32;
+      }
+    }
   }
 
   /// Reads a (20-byte) overdrive structure

@@ -1085,7 +1085,7 @@ impl PxtoneService {
     }
 
     // ---- 4. Effects → output ----
-    self.moo_effects(&mut group_smps, channel_count);
+    self.moo_effects(core::slice::from_mut(&mut group_smps), channel_count);
     self.moo_output(&group_smps, channel_count, out);
 
     // ---- 5. Increment ----
@@ -1116,24 +1116,28 @@ impl PxtoneService {
     true
   }
 
-  /// Runs the overdrives and delays over one sample's group accumulator.
-  /// Overdrive is per-channel and stateless; each delay walks both channels in
-  /// one call so its buffer/rate/group state is loaded once per sample instead
-  /// of once per channel. Within a channel the overdrive -> delay order is
-  /// unchanged, and neither effect reads the other channel's groups.
-  #[inline(always)]
+  /// Runs the overdrives and delays over a block of group accumulators.
+  ///
+  /// Effect by effect rather than sample by sample. Each sample still sees the
+  /// same sequence -- all the overdrives, then the delays in order -- because an
+  /// overdrive is stateless and each delay still walks its ring in sample order.
+  /// What changes is that the group index, the rate, the ring offset and the
+  /// buffer bounds are read once for the whole block instead of being loaded
+  /// back through `&mut self` on every sample.
+  ///
+  /// Out of line: the block path calls it once per block and the event path once
+  /// per sample, so its size is worth more than the call.
+  #[inline(never)]
   fn moo_effects<const GROUPS: usize>(
     &mut self,
-    group_smps: &mut [[i32; GROUPS]; MAX_CHANNEL],
+    mix: &mut [[[i32; GROUPS]; MAX_CHANNEL]],
     channel_count: usize,
   ) {
-    for groups in group_smps.iter_mut().take(channel_count) {
-      for od in &self.overdrives {
-        od.tone_supple(groups);
-      }
+    for od in &self.overdrives {
+      od.tone_supple(mix, channel_count);
     }
     for d in &mut self.delays {
-      d.tone_supple(group_smps, channel_count);
+      d.tone_supple(mix, channel_count);
     }
   }
 
@@ -1215,9 +1219,9 @@ impl PxtoneService {
       }
     }
 
-    for (i, groups) in mix.iter_mut().enumerate() {
-      self.moo_effects(groups, channel_count);
+    self.moo_effects(mix, channel_count);
 
+    for (i, groups) in mix.iter().enumerate() {
       let mut sample = [0i16; 2];
       self.moo_output(groups, channel_count, &mut sample);
       write_frame(buf, i, byte_per_smp, sample);

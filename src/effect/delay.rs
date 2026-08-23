@@ -90,42 +90,51 @@ impl Delay {
     }
   }
 
-  /// Applies the delay to every channel's group samples and advances the ring
-  /// buffer. Both channels share the same `offset`, `rate` and `group`, so
-  /// handling them together loads that state once per sample.
-  #[inline(always)]
+  /// Applies the delay to a block of group samples, advancing the ring buffer by
+  /// one slot per sample.
+  ///
+  /// The whole block runs inside the delay so that the rate, the group, the
+  /// buffer bound and the ring offset are read once instead of once per sample.
+  /// Both channels are handled together for the same reason. Samples are still
+  /// visited in order, which is what the ring requires.
+  #[inline(never)]
   pub(crate) fn tone_supple<const GROUPS: usize>(
     &mut self,
-    group_smps: &mut [[i32; GROUPS]; MAX_CHANNEL],
+    mix: &mut [[[i32; GROUPS]; MAX_CHANNEL]],
     channels: usize,
   ) {
-    if self.buffer_size == 0 {
+    let buffer_size = self.buffer_size;
+    if buffer_size == 0 {
       return;
     }
-    let offset = self.offset;
     let rate = self.rate_s32;
     // `PxtoneService::calc_group_count` sizes GROUPS so that every effect's
     // group is in range; spelling that out lets GROUPS == 1 fold to index 0.
     debug_assert!(self.group < GROUPS);
     let group = if GROUPS == 1 { 0 } else { self.group };
     let played = self.played;
+    let mut offset = self.offset;
 
-    for (buf, groups) in self
-      .bufs
-      .iter_mut()
-      .zip(group_smps.iter_mut())
-      .take(channels)
-    {
-      let slot = &mut buf[offset];
-      let a = *slot * rate / 100;
-      if played {
-        groups[group] += a;
+    for group_smps in mix.iter_mut() {
+      for (buf, groups) in self
+        .bufs
+        .iter_mut()
+        .zip(group_smps.iter_mut())
+        .take(channels)
+      {
+        let slot = &mut buf[offset];
+        let a = *slot * rate / 100;
+        if played {
+          groups[group] += a;
+        }
+        *slot = groups[group];
       }
-      *slot = groups[group];
+
+      let next = offset + 1;
+      offset = if next < buffer_size { next } else { 0 };
     }
 
-    let next = offset + 1;
-    self.offset = if next < self.buffer_size { next } else { 0 };
+    self.offset = offset;
   }
 
   pub(crate) fn tone_clear(&mut self) {

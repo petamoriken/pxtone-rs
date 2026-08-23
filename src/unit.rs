@@ -491,7 +491,12 @@ impl Unit {
         freq = frequency.get2(key) * sample_stride;
         have_freq = true;
       }
-      if self.is_sounding() {
+      // Taken from what the frame did rather than read back out of `self`.
+      // Rendering one clears the quiet run, so the unit is not flushed; a muted
+      // unit writes silence instead and could still be, but saying otherwise
+      // only costs it a `tone_supple`, and that adds zero: draining zeroes all
+      // 64 ring slots on both channels before it reports itself flushed.
+      let flushed = if self.is_sounding() {
         self.tone_sample::<true>(
           params,
           channels,
@@ -500,10 +505,12 @@ impl Unit {
           freq,
           instances,
         );
+        false
       } else {
         self.tone_silence(time_pan_index);
-      }
-      if !self.is_flushed() {
+        self.is_flushed()
+      };
+      if !flushed {
         self.tone_supple(params, groups, channel_count, time_pan_index);
       }
     }
