@@ -14,9 +14,15 @@ pub(crate) const MAX_GROUP_COUNT: usize = 7;
 /// Native backends strength-reduce `/` to exactly this, but the wasm backend
 /// emits `i32.div_s` and leaves the reduction to the engine. Spelling it out
 /// keeps the hot path free of a division instruction on every target.
+///
+/// `sign` is all ones when `x` is negative and zero otherwise. The mixing chain
+/// scales a sample by velocity, volume, pan and envelope, none of which is
+/// negative, so the sign holds for the whole chain and the caller works it out
+/// once. A step that reaches zero is unaffected: the correction the truncation
+/// needs is smaller than the divisor.
 #[inline(always)]
-fn div_pow2_i32<const SHIFT: u32>(x: i32) -> i32 {
-  (x + ((x >> 31) & ((1i32 << SHIFT) - 1))) >> SHIFT
+fn div_pow2_i32<const SHIFT: u32>(x: i32, sign: i32) -> i32 {
+  (x + (sign & ((1i32 << SHIFT) - 1))) >> SHIFT
 }
 
 /// The per-unit constants a block of samples shares, hoisted out of the sample
@@ -45,6 +51,11 @@ pub(crate) struct ToneParams {
   muted: bool,
   group_index: usize,
   pan_delays: [usize; MAX_CHANNEL],
+  /// Whether each voice's instrument carries an envelope, and how long its wave
+  /// body is. Both live on the instrument rather than the unit, so the sample
+  /// loop was reading them through the instance slice every time round.
+  has_envelope: [bool; MAX_UNIT_CONTROL_VOICE],
+  bodies: [f64; MAX_UNIT_CONTROL_VOICE],
 }
 
 /// Runtime playback state for a single voice layer within a unit.
@@ -310,6 +321,72 @@ impl Unit {
     }
   }
 
+  /// One live voice's contribution to one sample, on both channels, advancing
+  /// its envelope and playback position by the sample.
+  ///
+  /// `vt.life_count > 0` must already hold. Shared by the sample-major and the
+  /// voice-major block paths so the arithmetic the C++ pins down lives in one
+  /// place.
+  #[inline(always)]
+  #[allow(clippy::too_many_arguments)]
+  fn voice_sample<const ENVELOPE: bool>(
+    vt: &mut VoiceTone,
+    vi: &VoiceInstance,
+    params: &ToneParams,
+    v: usize,
+    channels: u8,
+    smooth_smp: u32,
+    frequency: f32,
+  ) -> [i32; MAX_CHANNEL] {
+    let voice_flags = params.voice_flags[v];
+    if ENVELOPE && params.has_envelope[v] {
+      Self::step_envelope(vt, vi);
+    }
+    let [s0, s1] = vi.get_frame(vt.sample_pos as usize);
+    let (s0, s1) = (s0 as i32, s1 as i32);
+
+    // For mono output, ch=0 gets the average of both wave channels.
+    // ch=1 keeps the raw ch=1 sample (unused when channel_count=1).
+    let (w0, w1) = if channels == 1 {
+      ((s0 + s1) / 2, s1)
+    } else {
+      (s0, s1)
+    };
+
+    // Velocity, volume and pan in turn, each truncating, as the C++ does.
+    // Largest intermediate is 32767 × 128, well inside i32. The sign holds
+    // for the whole chain, so it is taken once.
+    let (sign0, sign1) = (w0 >> 31, w1 >> 31);
+    let mut w0 = div_pow2_i32::<7>(w0 * params.velocity, sign0);
+    let mut w1 = div_pow2_i32::<7>(w1 * params.velocity, sign1);
+    w0 = div_pow2_i32::<7>(w0 * params.volume, sign0);
+    w1 = div_pow2_i32::<7>(w1 * params.volume, sign1);
+    w0 = div_pow2_i32::<6>(w0 * params.pan_volumes[0], sign0);
+    w1 = div_pow2_i32::<6>(w1 * params.pan_volumes[1], sign1);
+
+    if params.has_envelope[v] {
+      w0 = div_pow2_i32::<7>(w0 * vt.envelope_volume, sign0);
+      w1 = div_pow2_i32::<7>(w1 * vt.envelope_volume, sign1);
+    }
+
+    if voice_flags & VOICE_FLAG_SMOOTH != 0 && vt.life_count < smooth_smp {
+      let lc = vt.life_count as i32;
+      let sm = smooth_smp as i32;
+      w0 = w0 * lc / sm;
+      w1 = w1 * lc / sm;
+    }
+
+    Self::step_advance(
+      vt,
+      params.has_envelope[v],
+      params.bodies[v],
+      voice_flags,
+      params.steps[v],
+      frequency,
+    );
+    [w0, w1]
+  }
+
   /// Runs one sample for this unit: envelope, mixing into `pan_delay_buffers`,
   /// and lifetime/position advance. All three stages share a single pass over
   /// the voice layers, since the loop scaffolding costs more than the arithmetic.
@@ -347,48 +424,12 @@ impl Unit {
     let mut buf1 = 0i32;
 
     for (v, vi) in instances.iter().enumerate().take(params.voice_count) {
-      let voice_flags = params.voice_flags[v];
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
-        if ENVELOPE && vi.envelope_size > 0 {
-          Self::step_envelope(vt, vi);
-        }
-        let [s0, s1] = vi.get_frame(vt.sample_pos as usize);
-        let (s0, s1) = (s0 as i32, s1 as i32);
-
-        // For mono output, ch=0 gets the average of both wave channels.
-        // ch=1 keeps the raw ch=1 sample (unused when channel_count=1).
-        let (w0, w1) = if channels == 1 {
-          ((s0 + s1) / 2, s1)
-        } else {
-          (s0, s1)
-        };
-
-        // Velocity, volume and pan in turn, each truncating, as the C++ does.
-        // Largest intermediate is 32767 × 128, well inside i32.
-        let mut w0 = div_pow2_i32::<7>(w0 * params.velocity);
-        let mut w1 = div_pow2_i32::<7>(w1 * params.velocity);
-        w0 = div_pow2_i32::<7>(w0 * params.volume);
-        w1 = div_pow2_i32::<7>(w1 * params.volume);
-        w0 = div_pow2_i32::<6>(w0 * params.pan_volumes[0]);
-        w1 = div_pow2_i32::<6>(w1 * params.pan_volumes[1]);
-
-        if vi.envelope_size > 0 {
-          w0 = div_pow2_i32::<7>(w0 * vt.envelope_volume);
-          w1 = div_pow2_i32::<7>(w1 * vt.envelope_volume);
-        }
-
-        if voice_flags & VOICE_FLAG_SMOOTH != 0 && vt.life_count < smooth_smp {
-          let lc = vt.life_count as i32;
-          let sm = smooth_smp as i32;
-          w0 = w0 * lc / sm;
-          w1 = w1 * lc / sm;
-        }
-
+        let [w0, w1] =
+          Self::voice_sample::<ENVELOPE>(vt, vi, &params, v, channels, smooth_smp, frequency);
         buf0 += w0;
         buf1 += w1;
-
-        Self::step_advance(vt, vi, voice_flags, params.steps[v], frequency);
       }
     }
 
@@ -419,26 +460,38 @@ impl Unit {
     instances: &[VoiceInstance],
   ) {
     if !self.is_sounding() && self.is_flushed() {
+      // The C++ increments every unit's key on every sample, sounding or not,
+      // so a portamento walks on through a rest and the key the next note
+      // starts from has moved. With no portamento in flight the increment is
+      // idempotent, so once stands in for the whole block.
+      if self.portamento_duration != 0 && self.key_delta != 0 {
+        for _ in 0..mix.len() {
+          self.tone_increment_key();
+        }
+      } else {
+        self.tone_increment_key();
+      }
       return;
     }
 
-    let params = self.tone_params(mute_by_unit);
+    let params = self.tone_params(mute_by_unit, instances);
     // The key only moves while a portamento is in flight; otherwise it, and the
     // playback rate that comes out of the frequency table, are the same for
     // every sample in the block. `tone_increment_key` is idempotent in that
     // case, so calling it once leaves the same state behind.
     let steady = self.portamento_duration == 0 || self.key_delta == 0;
+
     let mut freq = 0.0f32;
     let mut have_freq = false;
 
     for (i, groups) in mix.iter_mut().enumerate() {
       let time_pan_index = (time_pan_index + i) & (BUFSIZE_TIMEPAN - 1);
+      if !have_freq || !steady {
+        let key = self.tone_increment_key();
+        freq = frequency.get2(key) * sample_stride;
+        have_freq = true;
+      }
       if self.is_sounding() {
-        if !have_freq || !steady {
-          let key = self.tone_increment_key();
-          freq = frequency.get2(key) * sample_stride;
-          have_freq = true;
-        }
         self.tone_sample::<true>(
           params,
           channels,
@@ -458,7 +511,9 @@ impl Unit {
 
   /// Reads the constants a block of samples shares. See [`ToneParams`].
   #[inline]
-  pub(crate) fn tone_params(&self, mute_by_unit: bool) -> ToneParams {
+  pub(crate) fn tone_params(&self, mute_by_unit: bool, instances: &[VoiceInstance]) -> ToneParams {
+    let envelope_of = |v: usize| instances.get(v).is_some_and(|vi| vi.envelope_size > 0);
+    let body_of = |v: usize| instances.get(v).map_or(0.0, |vi| vi.body_frames as f64);
     ToneParams {
       velocity: self.velocity as i32,
       volume: self.volume as i32,
@@ -472,6 +527,8 @@ impl Unit {
       muted: mute_by_unit && !self.played,
       group_index: self.group_index,
       pan_delays: [self.pan_delays[0] as usize, self.pan_delays[1] as usize],
+      has_envelope: [envelope_of(0), envelope_of(1)],
+      bodies: [body_of(0), body_of(1)],
     }
   }
 
@@ -501,9 +558,14 @@ impl Unit {
     if self.portamento_duration != 0 && self.key_delta != 0 {
       if self.portamento_pos < self.portamento_duration {
         self.portamento_pos += 1;
-        self.key = self.key_start
-          + (self.key_delta as f64 * self.portamento_pos as f64 / self.portamento_duration as f64)
-            as i32;
+        // The C++ truncates the whole sum, not just the fraction:
+        //   _key_now = (int32_t)( _key_start + (double)_key_margin * pos / num );
+        // For a downward portamento the margin is negative, and truncating
+        // toward zero after the addition lands a key lower than truncating
+        // before it.
+        self.key = (self.key_start as f64
+          + self.key_delta as f64 * self.portamento_pos as f64 / self.portamento_duration as f64)
+          as i32;
       } else {
         self.key = self.key_start + self.key_delta;
         self.key_start = self.key;
@@ -520,7 +582,8 @@ impl Unit {
   #[inline(always)]
   fn step_advance(
     vt: &mut VoiceTone,
-    vi: &VoiceInstance,
+    has_envelope: bool,
+    body: f64,
     voice_flags: u32,
     step: f32,
     frequency: f32,
@@ -533,14 +596,13 @@ impl Unit {
       vt.on_count -= 1;
       // Trigger release phase exactly once, when on_count first reaches 0.
       // (C++ uses int32_t which goes negative, so this condition fires only once.)
-      if vt.on_count == 0 && vi.envelope_size > 0 {
+      if vt.on_count == 0 && has_envelope {
         vt.envelope_start = vt.envelope_volume;
         vt.envelope_pos = 0;
       }
     }
     vt.sample_pos += (step * frequency) as f64;
 
-    let body = vi.body_frames as f64;
     if vt.sample_pos >= body {
       if voice_flags & VOICE_FLAG_WAVELOOP != 0 {
         vt.sample_pos -= body;
@@ -561,11 +623,19 @@ impl Unit {
     frequency: f32,
     instances: &[VoiceInstance],
   ) {
-    for (v, vi) in instances.iter().enumerate().take(params.voice_count) {
+    // Bounded by the instrument as well as the unit, as the mixing pass is.
+    for v in 0..params.voice_count.min(instances.len()) {
       let voice_flags = params.voice_flags[v];
       let vt = &mut self.tones[v];
       if vt.life_count > 0 {
-        Self::step_advance(vt, vi, voice_flags, params.steps[v], frequency);
+        Self::step_advance(
+          vt,
+          params.has_envelope[v],
+          params.bodies[v],
+          voice_flags,
+          params.steps[v],
+          frequency,
+        );
       }
     }
   }

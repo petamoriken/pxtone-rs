@@ -21,7 +21,7 @@ decoded in this mod.
 */
 
 use crate::bitpacking::BitpackCursor;
-use crate::header_cached::{CachedBlocksizeDerived, compute_bark_map_cos_omega};
+use crate::header_cached::{CachedBlocksizeDerived, compute_bark_map};
 use crate::huffman_tree::{HuffmanError, VorbisHuffmanTree};
 use alloc::vec::Vec;
 
@@ -369,13 +369,17 @@ pub(crate) enum Floor {
 }
 
 #[derive(Clone)]
-pub(crate) struct FloorTypeZero {
+pub struct FloorTypeZero {
 	pub floor0_order: u8,
 	pub floor0_amplitude_bits: u8,
 	pub floor0_amplitude_offset: u8,
 	pub floor0_number_of_books: u8,
 	pub floor0_book_list: Vec<u8>,
-	pub cached_bark_cos_omega: [Vec<f32>; 2],
+	pub floor0_bark_map_size: u16,
+	/// The bark scale bin per spectral line, one map per blocksize. libvorbis
+	/// keeps this rather than a cosine per line: runs of equal bins share a
+	/// curve value, and `wdel * bin` is what the cosine is taken of.
+	pub bark_map: [Vec<i32>; 2],
 }
 
 #[derive(Clone)]
@@ -760,9 +764,10 @@ fn read_floor(rdr: &mut BitpackCursor, codebook_cnt: u16, blocksizes: (u8, u8)) 
 				floor0_amplitude_offset,
 				floor0_number_of_books,
 				floor0_book_list,
-				cached_bark_cos_omega: [
-					compute_bark_map_cos_omega(1 << (blocksizes.0 - 1), floor0_rate, floor0_bark_map_size),
-					compute_bark_map_cos_omega(1 << (blocksizes.1 - 1), floor0_rate, floor0_bark_map_size),
+				floor0_bark_map_size,
+				bark_map: [
+					compute_bark_map(1 << (blocksizes.0 - 1), floor0_rate, floor0_bark_map_size),
+					compute_bark_map(1 << (blocksizes.1 - 1), floor0_rate, floor0_bark_map_size),
 				],
 			}))
 		},

@@ -12,6 +12,10 @@ Audio packet decoding
 This module decodes the audio packets given to it.
 */
 
+#[cfg(test)]
+#[path = "audio_floor0_test.rs"]
+mod floor0_test;
+
 use crate::bitpacking::BitpackCursor;
 use crate::header::{
 	Codebook, Floor, FloorTypeOne, FloorTypeZero, HuffmanVqReadErr, IdentHeader, Mapping, Residue, SetupHeader,
@@ -104,8 +108,12 @@ impl From<HuffmanVqReadErr> for FloorSpecialCase {
 	}
 }
 
-// Note that the output vector contains the cosine values of the coefficients,
-// not the bare values like in the spec. This is in order to optimize.
+// The vector holds `2 * cos(coefficient)` rather than the bare values, which is
+// what libvorbis' `vorbis_lsp_to_curve` turns them into before it starts:
+//
+//   for(i=0;i<m;i++)lsp[i]=2.f*cos(lsp[i]);
+//
+// The cosine is `f64` and the doubling with it, and only the result narrows.
 fn floor_zero_decode(
 	rdr: &mut BitpackCursor,
 	codebooks: &[Codebook],
@@ -134,12 +142,12 @@ fn floor_zero_decode(
 				if temp_vector.len() + coefficients.len() < fl.floor0_order as usize {
 					// Little optimisation: we don't have to care about the >= case here
 					for &e in temp_vector {
-						coefficients.push(lite_math::cos(last + e as f32));
+						coefficients.push((2.0 * lite_math::cos((last + e as f32) as f64)) as f32);
 						last_new = e as f32;
 					}
 				} else {
 					for &e in temp_vector {
-						coefficients.push(lite_math::cos(last + e as f32));
+						coefficients.push((2.0 * lite_math::cos((last + e as f32) as f64)) as f32);
 						last_new = e as f32;
 						// This rule makes sure that coefficients doesn't get
 						// larger than floor0_order and saves an allocation
@@ -159,58 +167,67 @@ fn floor_zero_decode(
 	unreachable!();
 }
 
-fn floor_zero_compute_curve(
-	cos_coefficients: &[f32],
-	amplitude: u64,
-	fl: &FloorTypeZero,
-	blockflag: bool,
-	n: u16,
-) -> Vec<f32> {
-	let cached_bark_cos_omega = &fl.cached_bark_cos_omega[blockflag as usize];
-	let mut i = 0;
+/// libvorbis' `vorbis_lsp_to_curve`, operation for operation.
+///
+/// The spec factors the curve differently -- `(1-cos w)/2` times a product of
+/// `4(cos c - cos w)^2` terms -- and the two agree to about 1e-6, which is not
+/// the same as agreeing. This is the arrangement the decoder pxtone uses runs:
+///
+///   float w = 2.f*cos(wdel*k);
+///   for(j=1;j<m;j+=2){ q *= w-lsp[j-1]; p *= w-lsp[j]; }
+///   if(j==m){ q*=w-lsp[j-1]; p*=p*(4.f-w*w); q*=q; }
+///   else    { p*=p*(2.f-w);  q*=q*(2.f+w); }
+///   q = fromdB(amp/sqrt(p+q)-ampoffset);
+///
+/// with `fromdB(x)` being `exp(x*.11512925f)`. Everything is `f32` up to the
+/// square root, which is `f64` along with the division, the subtraction and the
+/// exponential; only the result narrows.
+fn floor_zero_compute_curve(lsp: &[f32], amplitude: u64, fl: &FloorTypeZero, blockflag: bool, n: u16) -> Vec<f32> {
+	/// `.11512925f`, promoted the way the C promotes it.
+	const FROM_DB: f64 = 0.11512925f32 as f64;
+
+	let map = &fl.bark_map[blockflag as usize];
+	let m = fl.floor0_order as usize;
+	// amp = (float)ampraw/maxval*info->ampdB, an f32 division and an f32 product.
+	let maxval = ((1u64 << fl.floor0_amplitude_bits) - 1) as f32;
+	let amp = amplitude as f32 / maxval * fl.floor0_amplitude_offset as f32;
+	let ampoffset = fl.floor0_amplitude_offset as f32;
+	let wdel = (core::f64::consts::PI / fl.floor0_bark_map_size as f64) as f32;
+
 	let mut output = Vec::with_capacity(n as usize);
-	let lfv_common_term =
-		amplitude as f32 * fl.floor0_amplitude_offset as f32 / ((1 << fl.floor0_amplitude_bits) - 1) as f32;
+	let mut i = 0usize;
 	while i < n as usize {
-		let cos_omega = cached_bark_cos_omega[i];
+		let k = map[i];
+		let w = (2.0 * lite_math::cos((wdel * k as f32) as f64)) as f32;
 
-		// Compute p and q
-		let (p_upper_border, q_upper_border) = if fl.floor0_order & 1 == 1 {
-			((fl.floor0_order as usize - 3) / 2, (fl.floor0_order as usize - 1) / 2)
-		} else {
-			let v = (fl.floor0_order as usize - 2) / 2;
-			(v, v)
-		};
-		let (mut p, mut q) = if fl.floor0_order & 1 == 1 {
-			(1.0 - cos_omega * cos_omega, 0.25)
-		} else {
-			((1.0 - cos_omega) / 2.0, (1.0 + cos_omega) / 2.0)
-		};
-		for j in 0..p_upper_border + 1 {
-			let pm = cos_coefficients[2 * j + 1] - cos_omega;
-			p *= 4.0 * pm * pm;
+		let (mut p, mut q) = (0.5f32, 0.5f32);
+		let mut j = 1;
+		while j < m {
+			q *= w - lsp[j - 1];
+			p *= w - lsp[j];
+			j += 2;
 		}
-		for j in 0..q_upper_border + 1 {
-			let qm = cos_coefficients[2 * j] - cos_omega;
-			q *= 4.0 * qm * qm;
+		if j == m {
+			// Odd order filter, slightly asymmetric.
+			q *= w - lsp[j - 1];
+			p *= p * (4.0 - w * w);
+			q *= q;
+		} else {
+			// Even order filter, still symmetric.
+			p *= p * (2.0 - w);
+			q *= q * (2.0 + w);
 		}
+		let value = lite_math::exp((amp as f64 / lite_math::sqrt((p + q) as f64) - ampoffset as f64) * FROM_DB) as f32;
 
-		// Compute linear_floor_value
-		let linear_floor_value =
-			lite_math::exp(0.11512925 * (lfv_common_term / lite_math::sqrt(p + q) - fl.floor0_amplitude_offset as f32));
-
-		// Write into output
-		let mut iteration_condition = cos_omega;
-		while cos_omega == iteration_condition {
-			output.push(linear_floor_value);
+		// One value for the whole run of lines sharing this bin.
+		output.push(value);
+		i += 1;
+		while i < n as usize && map[i] == k {
+			output.push(value);
 			i += 1;
-			iteration_condition = match cached_bark_cos_omega.get(i) {
-				Some(v) => *v,
-				None => break,
-			};
 		}
 	}
-	return output;
+	output
 }
 
 // Returns Err if the floor is "unused"
@@ -818,7 +835,7 @@ fn dct_iv_slow(buffer: &mut [f32]) {
 	let n = buffer.len();
 	let nmask = (n << 3) - 1;
 	let mcos = (0..8 * n)
-		.map(|i| lite_math::cos(core::f32::consts::FRAC_PI_4 * (i as f32) / (n as f32)))
+		.map(|i| lite_math::cos_f32(core::f32::consts::FRAC_PI_4 * (i as f32) / (n as f32)))
 		.collect::<Vec<_>>();
 	for i in 0..n {
 		let mut acc = 0.;

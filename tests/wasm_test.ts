@@ -45,7 +45,6 @@ interface PtcopSnapshot {
 }
 
 const WAV_HEADER_LEN = 44;
-const WAV_PCM_TOLERANCE = 2;
 
 function wavMatches(
   actual: Uint8Array,
@@ -64,7 +63,8 @@ function wavMatches(
     const diff = Math.abs(a - e);
     if (diff > maxDiff) maxDiff = diff;
   }
-  return { ok: maxDiff <= WAV_PCM_TOLERANCE, maxDiff };
+  // Exactly: nothing on the decode path varies by platform or by target.
+  return { ok: maxDiff === 0, maxDiff };
 }
 
 function pcmToWav(

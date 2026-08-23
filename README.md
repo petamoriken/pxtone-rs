@@ -181,20 +181,90 @@ deno task test:refs ptnoise   # one of them
 Both sides are committed WAV files, so this needs nothing but Deno and runs in
 CI. Every snapshot matches its reference render sample for sample, so the check
 is exact: any difference at all fails, because it means the decode has drifted
-from the original.
+from the original. The `ogg` suite is the same idea with libvorbis standing in
+for the C++, since that is what the C++ decodes an OGGV voice with.
 
 Songs are stored as their first five seconds, which is where every difference
 found so far begins; the instruments are short enough to keep whole. See
 [`tests/reference/README.md`](tests/reference/README.md) for how that side is
 produced -- the C++ is not vendored, so regenerating it is a manual step.
 
+### The stepped noise waves are filled by walking the boundaries
+
+`Saw6` and `Saw8` are staircases, and the C++ builds them by walking the step
+boundaries and filling up to each -- `a = _smp_num * k / n`, truncated. Picking
+the step per entry with `s * n / _smp_num` rounds the other way, so the entry
+sitting exactly on a boundary lands in the previous step: 7 of `Saw8`'s 8
+boundaries on a 441 entry table, each 9362 out. None of the committed noise
+instruments uses either wave, which is how that survived to be found in a song
+instead.
+
+### Floor 0 follows libvorbis' factorization, not the spec's
+
+No encoder emits Vorbis floor 0 -- vorbisenc has only ever written floor 1, and
+all 23 streams to hand use it -- so nothing in the corpus reaches that code. It
+still has to agree with libvorbis, and it did not: the spec factors the curve as
+`(1-cos w)/2` times a product of `4(cos c - cos w)^2` terms while
+`vorbis_lsp_to_curve` factors it around `w = 2 cos w` and squares the products,
+and the two agree only to about 1e-6. `libs/lewton` now carries libvorbis'
+arrangement, down to where the precision changes, and its bark map is libvorbis'
+integer bins rather than a cosine per spectral line -- the map is floored to an
+integer, so an f32 arctangent behind it moves a bin boundary rather than a last
+bit. Bit exact across 160 configurations, with one of each filter parity pinned
+in `libs/lewton/src/audio_floor0_test.rs`.
+
+What is still unmeasured there is the bitstream side: reading the amplitude, the
+book number and the coefficients. Nothing produces a stream to read.
+
+### OGGV voices are held against libvorbis
+
+pxtone decodes an OGGV voice with libvorbis'
+`ov_read( &vf, pcmout, 4096, 0, 2,
+1, &sec )`, and `libs/lewton` is a
+reimplementation of Vorbis rather than a port of libvorbis, so agreement there
+has to be built rather than inherited.
+
+libvorbis' dylib exports the symbols its own translation units share, which is
+what makes the comparison possible without the source:
+
+```sh
+nm -gU /opt/homebrew/opt/libvorbis/lib/libvorbis.dylib | grep -iE "window|mdct"
+```
+
+Declaring `_vorbis_window_get` and `mdct_init` reads back the exact window and
+twiddle tables even without the source, and `ov_read_float` alongside `ov_read`
+pins the float-to-i16 conversion down to its tie-breaking. What that turned up:
+the conversion is `floor(f * 32768 + 0.5)` clamped to `[-32768, 32767]`, halves
+going toward positive infinity; a stream's last packet is trimmed against the
+samples handed out rather than against the last page's granule position; and
+both the window and the MDCT twiddle factors are computed in double and stored
+as floats, down to how the products are grouped. The twiddle factors now match
+at every blocksize, and `libs/lewton/src/header_cached_test.rs` holds them there
+alongside the transform's own output.
+
+The MDCT is a port of `lib/mdct.c`'s backward transform rather than the
+stb_vorbis one lewton carried, because only the same operation order gives the
+same floats; it is bit exact against that file at every blocksize. And where
+libvorbis' window tables are literals in `window.c` that no computation
+reproduces, the 151 entries of 8160 that differ are carried as they are -- worth
+only 1e-10 each, but a table is meant to be the same table. Decoded voices are
+now bit identical to libvorbis as floats, which also says the floor, residue,
+coupling, windowing and overlap-add around the MDCT were already right.
+
+Matching it means compiling the C with `-ffp-contract=off`, which is not a
+detail. Clang fuses `a*b + c*d` by default on a target with a fused
+multiply-add, so a libvorbis built that way sits about 2e-6 from the C it was
+built from. This port follows the C, which is what a build without one gives --
+every x86-64 SSE2 build, and wasm, where there is no scalar fused multiply-add
+to fuse into. `tests/reference/ogg` is generated accordingly.
+
 `deno task test:rust` runs `cargo test`, which covers the root `pxtone` crate
 only; the vendored crates need naming explicitly (`cargo test -p lite-math`,
 `-p lewton`, `-p ogg`). Unit tests live next to the code they cover, in
-`src/reader.rs`, `src/sort.rs`, `src/service.rs` and `src/pulse/frequency.rs`.
-Most of them exist to hold the port bit for bit against the C++, so an
-optimization that reorders arithmetic belongs there with a comparison against
-the previous implementation.
+`src/reader.rs`, `src/service.rs` and `src/pulse/frequency.rs`. Most of them
+exist to hold the port bit for bit against the C++, so an optimization that
+reorders arithmetic belongs there with a comparison against the previous
+implementation.
 
 Always go through `deno task test:wasm`. Invoking
 `cargo build --target wasm32-unknown-unknown` directly overwrites

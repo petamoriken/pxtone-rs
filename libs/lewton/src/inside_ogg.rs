@@ -70,6 +70,11 @@ pub struct OggStreamReader<'a> {
 	pub setup_hdr: SetupHeader,
 
 	cur_absgp: Option<u64>,
+	/// Samples handed out for this logical stream so far. `cur_absgp` cannot
+	/// stand in for it: it stays `None` until a page ends, so a stream whose
+	/// audio all sits in one final page had nothing to trim the last packet
+	/// against.
+	emitted: u64,
 }
 
 impl<'a> OggStreamReader<'a> {
@@ -90,6 +95,7 @@ impl<'a> OggStreamReader<'a> {
 			setup_hdr,
 			stream_serial,
 			cur_absgp: None,
+			emitted: 0,
 		});
 	}
 	pub fn into_inner(self) -> PacketReader<'a> {
@@ -123,6 +129,7 @@ impl<'a> OggStreamReader<'a> {
 					self.setup_hdr = setup_hdr;
 					self.stream_serial = pck.stream_serial();
 					self.cur_absgp = None;
+					self.emitted = 0;
 
 					// Now, read the first audio packet to prime the pwr
 					// and discard the packet.
@@ -201,15 +208,17 @@ impl<'a> OggStreamReader<'a> {
 			&mut self.pwr
 		));
 
-		// If this is the last packet in the logical bitstream,
-		// we need to truncate it so that its ending matches
-		// the absgp of the current page.
-		// This is what the spec mandates and also the behaviour
-		// of libvorbis.
-		if let (Some(absgp), true) = (self.cur_absgp, pck.last_in_stream()) {
-			let target_length = pck.absgp_page().saturating_sub(absgp) as usize;
+		// If this is the last packet in the logical bitstream, we need to
+		// truncate it so that its ending matches the absgp of the current page.
+		// This is what the spec mandates and also the behaviour of libvorbis.
+		// The granule position counts from the start of the stream, so it is
+		// measured against everything handed out so far rather than against the
+		// last page's position, which is unknown until a page has ended.
+		if pck.last_in_stream() {
+			let target_length = pck.absgp_page().saturating_sub(self.emitted) as usize;
 			decoded_pck.truncate(target_length);
 		}
+		self.emitted += decoded_pck.num_samples() as u64;
 		if pck.last_in_page() {
 			self.cur_absgp = Some(pck.absgp_page());
 		} else if let &mut Some(ref mut absgp) = &mut self.cur_absgp {
@@ -252,9 +261,9 @@ impl<'a> OggStreamReader<'a> {
 			// the absgp of the current page.
 			// This is what the spec mandates and also the behaviour
 			// of libvorbis.
-			if let (Some(absgp), true) = (self.cur_absgp, next_pck.last_in_stream()) {
+			if next_pck.last_in_stream() {
 				last_pck = None;
-				let target_length = next_pck.absgp_page().saturating_sub(absgp) as usize;
+				let target_length = next_pck.absgp_page().saturating_sub(self.emitted) as usize;
 				sample_cnt = sample_cnt.min(target_length);
 			}
 			if to_skip < sample_cnt {
@@ -276,6 +285,7 @@ impl<'a> OggStreamReader<'a> {
 			if let &mut Some(ref mut absgp) = &mut self.cur_absgp {
 				*absgp += sample_cnt as u64;
 			}
+			self.emitted += sample_cnt as u64;
 			last_pck = Some(next_pck);
 		}
 	}

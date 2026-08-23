@@ -241,7 +241,14 @@ pub struct PxtoneService {
   /// it always stay zero, so the per-sample mixing loop skips them.
   moo_group_count: usize,
 
-  moo_samples_per_tick: f64,
+  /// Samples per tick, as `float _moo_clock_rate`.
+  ///
+  /// The C++ computes it in `double` and keeps it in a `float`, and every use
+  /// but the song length is `int * float` or `int / float`, so the arithmetic
+  /// runs in `f32` too. Holding the `f64` moves an event by a sample wherever
+  /// the quotient lands near a tick boundary, which is exactly where notes
+  /// start.
+  moo_samples_per_tick: f32,
   moo_sample_stride: f32,
   moo_sample_count: u32,
   moo_sample_end: u32,
@@ -291,7 +298,7 @@ impl PxtoneService {
       unit_woice_idxs: Vec::new(),
       moo_group_count: MAX_GROUP_COUNT,
 
-      moo_samples_per_tick: 0.0,
+      moo_samples_per_tick: 0.0f32,
       moo_sample_stride: 1.0,
       moo_sample_count: 0,
       moo_sample_end: 0,
@@ -792,15 +799,16 @@ impl PxtoneService {
     self.moo_ticks_per_beat = self.master.ticks_per_beat;
     self.moo_beats_per_measure = self.master.beats_per_measure;
     self.moo_beat_tempo = self.master.beat_tempo;
-    self.moo_samples_per_tick = 60.0 * self.dst_sample_rate as f64
-      / (self.moo_beat_tempo as f64 * self.moo_ticks_per_beat as f64);
+    self.moo_samples_per_tick = (60.0 * self.dst_sample_rate as f64
+      / (self.moo_beat_tempo as f64 * self.moo_ticks_per_beat as f64))
+      as f32;
     self.moo_sample_stride = 44100.0 / self.dst_sample_rate as f32;
     self.moo_output_clip = 0x7fff;
     self.moo_time_pan_index = 0;
 
     let samples_per_measure = self.moo_beats_per_measure as f64
       * self.moo_ticks_per_beat as f64
-      * self.moo_samples_per_tick;
+      * self.moo_samples_per_tick as f64;
     self.moo_sample_end = (measure_end as f64 * samples_per_measure) as u32;
     self.moo_sample_repeat = (measure_repeat as f64 * samples_per_measure) as u32;
 
@@ -930,7 +938,7 @@ impl PxtoneService {
       };
 
       let env_rls_ticks = if samples_per_tick > 0.0 {
-        (envelope_release as f64 / samples_per_tick) as u32
+        (envelope_release as f32 / samples_per_tick) as u32
       } else {
         0
       };
@@ -950,15 +958,29 @@ impl PxtoneService {
   /// event fires, end-of-stream is reached, or a fade-out completes.
   /// Processing this many samples is safe without event/boundary checks.
   fn moo_safe_count(&self) -> u32 {
-    // Samples until the next event would fire.
-    // Event fires when floor(sample_count / samples_per_tick) >= ev_tick,
-    // i.e. sample_count >= ev_tick * samples_per_tick.
-    let event_safe = if self.moo_event_index < self.events.records().len() {
-      let next_ev_tick = self.events.records()[self.moo_event_index].tick as f64;
-      let threshold = (next_ev_tick * self.moo_samples_per_tick) as u32;
-      threshold.saturating_sub(self.moo_sample_count)
-    } else {
+    // Samples until the next event would fire. The dispatch fires it on the
+    // first sample whose tick, worked out as `(count as f32 / rate) as i32`,
+    // has reached the event's. Multiplying back gives an estimate, not that
+    // sample: the product and the quotient round in different directions, and
+    // at large counts they disagree by a sample or two. So the estimate is
+    // walked onto the sample the division itself fires on. Both walks take a
+    // handful of steps -- the disagreement is of the order of `count * 2^-23`.
+    let rate = self.moo_samples_per_tick;
+    let event_safe = if self.moo_event_index >= self.events.records().len() {
       u32::MAX
+    } else if rate <= 0.0 {
+      0
+    } else {
+      let ev_tick = self.events.records()[self.moo_event_index].tick;
+      let fires = |count: u32| ((count as f32 / rate) as i32) >= ev_tick;
+      let mut fire = (ev_tick as f32 * rate) as u32;
+      while fire < u32::MAX && !fires(fire) {
+        fire += 1;
+      }
+      while fire > self.moo_sample_count && fires(fire - 1) {
+        fire -= 1;
+      }
+      fire.saturating_sub(self.moo_sample_count)
     };
 
     // Samples until the loop/end boundary (the boundary sample itself must go
@@ -1011,7 +1033,7 @@ impl PxtoneService {
     }
 
     // ---- 2. Event processing ----
-    let tick = (self.moo_sample_count as f64 / samples_per_tick) as i32;
+    let tick = (self.moo_sample_count as f32 / samples_per_tick) as i32;
     let event_count = self.events.records().len();
 
     while self.moo_event_index < event_count {
@@ -1036,10 +1058,13 @@ impl PxtoneService {
       let woices = &self.woices;
       let frequency = &self.frequency;
       for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
-        let params = unit.tone_params(mute_by_unit);
+        let instances = woices.get(wi).map_or(&[][..], |w| w.instances.as_slice());
+        let params = unit.tone_params(mute_by_unit, instances);
+        // The C++ increments every unit's key on every sample, sounding or not,
+        // so a portamento walks on through a rest.
+        let key = unit.tone_increment_key();
         if let Some(woice) = woices.get(wi) {
           if unit.is_sounding() {
-            let key = unit.tone_increment_key();
             let freq = frequency.get2(key) * sample_stride;
             unit.tone_sample::<false>(
               params,
@@ -1215,11 +1240,11 @@ impl PxtoneService {
     u: usize,
     tick: i32,
     sample_end: u32,
-    samples_per_tick: f64,
+    samples_per_tick: f32,
   ) {
     match ev.kind {
       EVENT_KIND_ON => {
-        let on_count = ((ev.tick + ev.value - tick) as f64 * samples_per_tick) as i32;
+        let on_count = ((ev.tick + ev.value - tick) as f32 * samples_per_tick) as i32;
         if on_count <= 0 {
           self.units[u].tone_zero_lives();
           return;
@@ -1271,26 +1296,32 @@ impl PxtoneService {
             .unwrap_or(0) as i32;
 
           let life_count = if envelope_release > 0 {
-            let max_life1 = ((ev.value - (tick - ev.tick)) as f64 * samples_per_tick) as i32
+            let max_life1 = ((ev.value - (tick - ev.tick)) as f32 * samples_per_tick) as i32
               + envelope_release as i32;
             let c_limit = ev.tick + ev.value + tone_rls_ticks;
-            let mut max_life2 = sample_end as i32 - (tick as f64 * samples_per_tick) as i32;
+            let mut max_life2 = sample_end as i32 - (tick as f32 * samples_per_tick) as i32;
 
             if let Some(ne) = self.events.records()[self.moo_event_index..]
               .iter()
               .take_while(|e| e.tick <= c_limit)
               .find(|e| e.unit_index == ev.unit_index && e.kind == EVENT_KIND_ON)
             {
-              max_life2 = ((ne.tick - tick) as f64 * samples_per_tick) as i32;
+              max_life2 = ((ne.tick - tick) as f32 * samples_per_tick) as i32;
             }
             max_life1.min(max_life2)
           } else {
-            ((ev.value - (tick - ev.tick)) as f64 * samples_per_tick) as i32
+            ((ev.value - (tick - ev.tick)) as f32 * samples_per_tick) as i32
           };
 
-          if life_count > 0
-            && let Some(tone) = self.units[u].tones.get_mut(v)
-          {
+          if let Some(tone) = self.units[u].tones.get_mut(v) {
+            // The C++ assigns the count whatever it came out to and only then
+            // asks whether it is positive, so a note whose life works out
+            // non-positive silences the tone. Writing it only when positive
+            // leaves whatever was ringing before still alive.
+            tone.life_count = life_count.max(0) as u32;
+            if life_count <= 0 {
+              continue;
+            }
             tone.on_count = on_count as u32;
 
             // When seeking into the middle of a note, advance sample_pos by the
@@ -1298,7 +1329,7 @@ impl PxtoneService {
             // This keeps PCM/OGG voices in sync with the song position.
             if elapsed > 0 {
               let step = tone.offset_frequency as f64 * unit_tuning as f64 * unit_freq as f64;
-              let initial_pos = elapsed as f64 * samples_per_tick * step;
+              let initial_pos = elapsed as f64 * samples_per_tick as f64 * step;
               let body = body_frames as f64;
               if body > 0.0 && !wave_loop && initial_pos >= body {
                 // Non-looping voice whose sample data is already exhausted.
@@ -1338,7 +1369,7 @@ impl PxtoneService {
       EVENT_KIND_VELOCITY => self.units[u].tone_velocity(ev.value as u32),
       EVENT_KIND_VOLUME => self.units[u].tone_volume(ev.value as u32),
       EVENT_KIND_PORTAMENT => {
-        let v = (ev.value as f64 * samples_per_tick) as u32;
+        let v = (ev.value as f32 * samples_per_tick) as u32;
         self.units[u].tone_portament(v);
       }
       EVENT_KIND_VOICE_NO => self.moo_reset_voice_on(u, ev.value as usize),
@@ -1430,7 +1461,7 @@ impl PxtoneService {
   #[inline]
   pub fn moo_get_now_tick(&self) -> u32 {
     if self.moo_samples_per_tick > 0.0 {
-      (self.moo_sample_count as f64 / self.moo_samples_per_tick) as u32
+      (self.moo_sample_count as f32 / self.moo_samples_per_tick) as u32
     } else {
       0
     }
@@ -1440,7 +1471,7 @@ impl PxtoneService {
   #[inline]
   pub fn moo_get_end_tick(&self) -> u32 {
     if self.moo_samples_per_tick > 0.0 {
-      (self.moo_sample_end as f64 / self.moo_samples_per_tick) as u32
+      (self.moo_sample_end as f32 / self.moo_samples_per_tick) as u32
     } else {
       0
     }

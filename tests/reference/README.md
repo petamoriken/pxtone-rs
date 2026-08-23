@@ -11,10 +11,32 @@ instead of only against its own previous output.
 Both are 16-bit stereo at 44100 Hz, matching what `tests/decode_test.rs` asks of
 the Rust decoder.
 
-## Where this port deliberately differs
+## The OGG Vorbis material
 
-`pxtnService_moo.cpp` computes the samples-per-tick rate in `double` and keeps
-it in a `float`:
+`ogg/` is not a C++ render: it is what libvorbis 1.3.7 gives for the fixtures in
+`tests/sample/ogg`, which is what the C++ decodes an OGGV voice with
+(`ov_read( &vf, pcmout, 4096, 0, 2, 1, &sec )`). `libs/lewton` is a
+reimplementation of Vorbis rather than a port of libvorbis, so this is the side
+of the port that had to be built rather than inherited, and it is now exact.
+
+Regenerate it by compiling libvorbis from source **with `-ffp-contract=off`**.
+That flag is the whole story: clang fuses `a*b + c*d` by default on a target
+that has a fused multiply-add, and a libvorbis built that way lands about 2e-6
+from the C it was built from -- the installed dylib on an arm64 Mac does. The
+port follows the C, which is also what a build without a fused multiply-add
+gives, including every x86-64 SSE2 build and wasm.
+
+```sh
+clang -O2 -ffp-contract=off -I include -I lib \
+  dump.c $(ls lib/*.c | grep -vE "barkmel|psytune|tone\.c") -logg -o dump
+```
+
+where `dump.c` opens the file with `ov_fopen` and writes what `ov_read` returns
+after a 44 byte WAV header.
+
+## The samples-per-tick rate
+
+`pxtnService_moo.cpp` computes it in `double` and keeps it in a `float`:
 
 ```c
 float    _moo_clock_rate  ; // as the sample
@@ -22,16 +44,53 @@ float    _moo_clock_rate  ; // as the sample
 _moo_clock_rate = (float)( 60.0f * (double)_dst_sps / ( (double)_moo_bt_tempo * (double)_moo_bt_clock ) );
 ```
 
-Every use promotes it back, so the narrowing buys nothing and only costs
-precision -- for a tempo of 145 the rate lands on 38.017242431640625 instead of
-38.017241379310342. This port holds the `f64`.
+Narrowing looks pointless -- every use promotes it back -- but the uses are
+`int * float` and `int / float`, so they run in `f32` as well. Only the song
+length, loop point and start are worked out in `double`, and those cast to it
+explicitly.
 
-Holding it is also what matches: narrowing to `f32` the way the C++ does takes
-two of the fifty-three renders off exact. Why the reference agrees with the
-wider value is not pinned down -- the rate only feeds integer tick and lifetime
-arithmetic, so a difference of one part in a hundred million has to cross an
-integer boundary to show at all. Worth knowing before anyone `f32`s it to look
-more faithful.
+That matters because `clock = smp_count / rate` is compared against event ticks:
+where the quotient lands near a tick boundary, an `f64` division floors to a
+different tick and a note starts a sample early or late. This port held the
+`f64` for a while on the grounds that the narrowing was a mistake in the
+original. It is not one to reproduce selectively: narrowing the stored value
+while dividing in `f64` is worse than either, which is how the wrong conclusion
+was reached the first time.
+
+The same `f32` division is what decides when an event fires, and this port
+splits the sample loop into event-free blocks, so it also has to work out
+_which_ sample that is ahead of time. Multiplying the tick back by the rate does
+not give it: the product and the quotient round in different directions, and at
+large sample counts they disagree by a sample or two. A tempo of 250 puts the
+rate at 22.05, and tick 1048800 then has an `f32` product of 23126040 while the
+quotient already reads 1048800 at sample 23126038.
+`PxtoneService::moo_safe_count` therefore walks its estimate onto the sample the
+division fires on rather than trusting the product; anything that recomputes
+that bound has to keep doing so.
+
+## The output settings
+
+Everything committed here is 16-bit stereo at 44100 Hz, which is the one setting
+`tests/decode_test.rs` asks for. `PxtoneService::new` takes any sample rate and
+one or two channels, and the setting reaches further than the interleaving: mono
+averages the two wave channels and drops the pan delay, and the rate scales the
+playback stride, the tick rate, the smoothing tail, the fade length and the
+delay buffers.
+
+Checked by hand against the C++ rather than committed, since a reference per
+setting would multiply what this directory holds. Render both sides with
+`set_destination_quality( ch, sps )` and the matching `DestinationQuality`, and
+compare. As of the last run, seven settings -- 1 and 2 channels across 8000,
+11025, 22050, 44100 and 48000 Hz -- agree sample for sample on all six committed
+songs and on four more carrying OGGV material.
+
+Note that `Moo` zero-fills the tail of its last buffer while this port returns a
+short count, so the C++ side runs up to a buffer longer. Compare the shorter of
+the two and check that what the C++ has past it is silence.
+
+The material side of that plumbing is already covered here: the committed songs
+carry 8-bit materials, mono materials and materials at 11025 and 22050 Hz, so
+`pxtnPulse_PCM::Convert`'s three conversions all run inside the strict gate.
 
 ## Regenerating
 

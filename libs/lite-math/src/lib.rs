@@ -7,7 +7,7 @@
 //! needs, a few hundred bytes, and bit-identical on every platform.
 //!
 //! No FMA (wasm has no scalar one, so `mul_add` would call libm) and no SIMD
-//! (the callers are cold table-building loops). [`sqrt`] and [`floor`] are
+//! (the callers are cold table-building loops). [`sqrt`] and [`floor_f32`] are
 //! single wasm instructions that stable Rust cannot emit, so `src/wasm.s`
 //! spells them out and `build.rs` links that in; other targets use the
 //! portable implementations here.
@@ -17,9 +17,13 @@
 
 /// 2/pi, used to find the quadrant of the argument.
 const FRAC_2_PI: f64 = 0.636_619_772_367_581_3;
-/// pi/2, split so that the reduction keeps the bits `PI_2_HI` cannot hold.
-const PI_2_HI: f64 = core::f64::consts::FRAC_PI_2;
-const PI_2_LO: f64 = 6.123_233_995_736_766e-17;
+/// pi/2, split so that `n * PI_2_HI` is exact: the high half carries 33
+/// significant bits, which leaves room for any quadrant index the domain below
+/// can produce. Splitting at the full f64 instead leaves the product's own
+/// rounding in the reduced argument -- 4e-14 by an argument of 625, which is
+/// far more than the series that follows is worth.
+const PI_2_HI: f64 = 1.570_796_326_734_125_6;
+const PI_2_LO: f64 = 6.077_100_506_506_192e-11;
 
 /// Largest argument the single reduction step stays accurate for.
 ///
@@ -32,34 +36,34 @@ const MAX_ARGUMENT: f64 = 1.0e6;
 /// Arguments that are not finite, or whose magnitude exceeds `1e6`, return
 /// `NaN`; the decoder never produces those.
 #[inline]
-pub fn sin(x: f32) -> f32 {
-  sin_f64(x as f64) as f32
+pub fn sin_f32(x: f32) -> f32 {
+  sin(x as f64) as f32
 }
 
 /// Returns the sine of `x` radians without narrowing the result.
 ///
 /// The reduction and the polynomial already run in `f64`; this hands back what
 /// they produced, accurate to about 3e-9 rather than to an `f64` ulp. Callers
-/// that mirror `double` arithmetic in the C++ want this rather than [`sin`],
+/// that mirror `double` arithmetic in the C++ want this rather than [`sin_f32`],
 /// whose `f32` result is only good to 1e-7.
 #[inline(never)]
-pub fn sin_f64(x: f64) -> f64 {
+pub fn sin(x: f64) -> f64 {
   match reduce(x) {
     Some((quadrant, r)) => quadrant_sin(quadrant, r),
     None => f64::NAN,
   }
 }
 
-/// Returns the cosine of `x` radians. See [`sin`] for the accepted domain.
+/// Returns the cosine of `x` radians. See [`sin_f32`] for the accepted domain.
 #[inline]
-pub fn cos(x: f32) -> f32 {
-  cos_f64(x as f64) as f32
+pub fn cos_f32(x: f32) -> f32 {
+  cos(x as f64) as f32
 }
 
 /// Returns the cosine of `x` radians without narrowing the result. See
-/// [`sin_f64`] for what that is worth.
+/// [`sin`] for what that is worth.
 #[inline(never)]
-pub fn cos_f64(x: f64) -> f64 {
+pub fn cos(x: f64) -> f64 {
   match reduce(x) {
     // cos(x) == sin(x + pi/2), one quadrant along.
     Some((quadrant, r)) => quadrant_sin(quadrant + 1, r),
@@ -67,10 +71,10 @@ pub fn cos_f64(x: f64) -> f64 {
   }
 }
 
-/// Returns `(sin(x), cos(x))`, sharing the argument reduction. See [`sin`] for
+/// Returns `(sin(x), cos(x))`, sharing the argument reduction. See [`sin_f32`] for
 /// the accepted domain.
 #[inline(never)]
-pub fn sin_cos(x: f32) -> (f32, f32) {
+pub fn sin_cos_f32(x: f32) -> (f32, f32) {
   let Some((quadrant, r)) = reduce(x as f64) else {
     return (f32::NAN, f32::NAN);
   };
@@ -115,29 +119,47 @@ fn negate_if(value: f64, negate: bool) -> f64 {
   f64::from_bits(value.to_bits() ^ ((negate as u64) << 63))
 }
 
-/// Chebyshev fit of `sin(r)/r` over `[-pi/4, pi/4]`: 3.1e-9, or 0.03 f32 ulp.
+/// Maclaurin series for `sin(r)/r`, truncated where the next term falls under
+/// an `f64` ulp over `[-pi/4, pi/4]`: `r^16/17!` is 6.5e-17 of the result.
+///
+/// A shorter fit is enough for an `f32` result, and this used to carry one, but
+/// [`sin`] and [`cos`] hand the `f64` back and callers narrow it
+/// themselves. An error of 0.03 `f32` ulp then lands on the wrong side of the
+/// rounding boundary for about one argument in fifty, which is what kept the
+/// window and MDCT tables from matching the ones libvorbis builds with the
+/// platform libm. The exact rational coefficients need no fitting and cost a
+/// handful of multiplies in what are all cold table-building loops.
 #[inline(never)]
 fn sin_poly(r: f64) -> f64 {
-  const S0: f64 = 0.999_999_996_945_006;
-  const S1: f64 = -0.166_666_507_065_048_93;
-  const S2: f64 = 0.008_332_036_654_645_55;
-  const S3: f64 = -0.000_195_039_634_174_997_2;
+  const S0: f64 = 1.0;
+  const S1: f64 = -0.166_666_666_666_666_66;
+  const S2: f64 = 0.008_333_333_333_333_333;
+  const S3: f64 = -0.000_198_412_698_412_698_4;
+  const S4: f64 = 2.755_731_922_398_589_3e-6;
+  const S5: f64 = -2.505_210_838_544_172e-8;
+  const S6: f64 = 1.605_904_383_682_161_3e-10;
+  const S7: f64 = -7.647_163_731_819_816e-13;
 
   let r2 = r * r;
-  r * (S0 + r2 * (S1 + r2 * (S2 + r2 * S3)))
+  r * (S0 + r2 * (S1 + r2 * (S2 + r2 * (S3 + r2 * (S4 + r2 * (S5 + r2 * (S6 + r2 * S7)))))))
 }
 
-/// Chebyshev fit of `cos(r)` over `[-pi/4, pi/4]`: 4.8e-11.
+/// Maclaurin series for `cos(r)`, truncated the same way: `r^18/18!` is 2.2e-18
+/// of the result over `[-pi/4, pi/4]`. See [`sin_poly`].
 #[inline(never)]
 fn cos_poly(r: f64) -> f64 {
-  const C0: f64 = 0.999_999_999_953_015_9;
-  const C1: f64 = -0.499_999_996_159_102_57;
-  const C2: f64 = 0.041_666_616_745_679_55;
-  const C3: f64 = -0.001_388_661_892_894_610_3;
-  const C4: f64 = 2.437_988_057_747_178e-5;
+  const C0: f64 = 1.0;
+  const C1: f64 = -0.5;
+  const C2: f64 = 0.041_666_666_666_666_664;
+  const C3: f64 = -0.001_388_888_888_888_889;
+  const C4: f64 = 2.480_158_730_158_73e-5;
+  const C5: f64 = -2.755_731_922_398_589e-7;
+  const C6: f64 = 2.087_675_698_786_81e-9;
+  const C7: f64 = -1.147_074_559_772_972_5e-11;
+  const C8: f64 = 4.779_477_332_387_385e-14;
 
   let r2 = r * r;
-  C0 + r2 * (C1 + r2 * (C2 + r2 * (C3 + r2 * C4)))
+  C0 + r2 * (C1 + r2 * (C2 + r2 * (C3 + r2 * (C4 + r2 * (C5 + r2 * (C6 + r2 * (C7 + r2 * C8)))))))
 }
 
 /// The `f32.sqrt` and `f32.floor` instructions, assembled by `build.rs` from
@@ -146,12 +168,12 @@ fn cos_poly(r: f64) -> f64 {
 #[allow(unsafe_code, reason = "calls into the hand written wasm assembly")]
 mod wasm {
   unsafe extern "C" {
-    safe fn lite_math_sqrt_f32(x: f32) -> f32;
+    safe fn lite_math_sqrt_f64(x: f64) -> f64;
     safe fn lite_math_floor_f32(x: f32) -> f32;
   }
 
-  pub(super) fn sqrt(x: f32) -> f32 {
-    lite_math_sqrt_f32(x)
+  pub(super) fn sqrt(x: f64) -> f64 {
+    lite_math_sqrt_f64(x)
   }
 
   pub(super) fn floor(x: f32) -> f32 {
@@ -161,38 +183,35 @@ mod wasm {
 
 /// Returns the square root of `x`.
 #[cfg(wasm_instructions)]
-pub fn sqrt(x: f32) -> f32 {
+pub fn sqrt(x: f64) -> f64 {
   wasm::sqrt(x)
 }
 
-/// Returns the square root of `x`, by Newton-Raphson in `f64`.
+/// Returns the square root of `x`, from the platform's libm.
+///
+/// IEEE 754 requires a correctly rounded square root, so this and the
+/// `f64.sqrt` above agree on every bit -- which the callers need, because they
+/// mirror `double` arithmetic in the C. Newton-Raphson in `f64` does not: its
+/// fixed point sits an ulp out for arguments such as 0.125, and closing that
+/// costs more code than the one call does.
 #[cfg(not(wasm_instructions))]
-pub fn sqrt(x: f32) -> f32 {
-  if x.is_nan() || x < 0.0 {
-    return f32::NAN;
+#[allow(unsafe_code, reason = "calls the platform's libm")]
+pub fn sqrt(x: f64) -> f64 {
+  unsafe extern "C" {
+    safe fn sqrt(x: f64) -> f64;
   }
-  if x == 0.0 || x == f32::INFINITY {
-    return x;
-  }
-  let x = x as f64;
-  // Halving the exponent gives a seed within a few percent, and every
-  // iteration doubles the number of correct digits from there.
-  let mut y = f64::from_bits((x.to_bits() >> 1) + (1023u64 << 51));
-  for _ in 0..5 {
-    y = 0.5 * (y + x / y);
-  }
-  y as f32
+  sqrt(x)
 }
 
 /// Returns the largest integer less than or equal to `x`.
 #[cfg(wasm_instructions)]
-pub fn floor(x: f32) -> f32 {
+pub fn floor_f32(x: f32) -> f32 {
   wasm::floor(x)
 }
 
 /// Returns the largest integer less than or equal to `x`.
 #[cfg(not(wasm_instructions))]
-pub fn floor(x: f32) -> f32 {
+pub fn floor_f32(x: f32) -> f32 {
   // Every f32 of magnitude 2^23 or above is already an integer, which also
   // covers the infinities and NaN.
   if x.is_nan() || x.abs() >= 8_388_608.0 {
@@ -213,12 +232,12 @@ pub fn floor(x: f32) -> f32 {
 }
 
 /// Returns `2` raised to the power of `x`.
-pub fn exp2(x: f32) -> f32 {
-  exp2_f64(x as f64)
+pub fn exp2_f32(x: f32) -> f32 {
+  exp2_narrowing(x as f64)
 }
 
-/// Shared body of [`exp2`] and [`exp`], taking the exponent in `f64`.
-fn exp2_f64(x: f64) -> f32 {
+/// Shared body of [`exp2_f32`] and [`exp`], taking the exponent in `f64`.
+fn exp2_narrowing(x: f64) -> f32 {
   if x.is_nan() {
     return f32::NAN;
   }
@@ -240,11 +259,72 @@ fn exp2_f64(x: f64) -> f32 {
   (exp2_poly(r) * scale) as f32
 }
 
-/// Returns `e` raised to the power of `x`.
-pub fn exp(x: f32) -> f32 {
-  // The conversion to the base two exponent happens in f64: doing it in f32
-  // would lose about seven digits of the exponent before exp2 even starts.
-  exp2_f64(x as f64 * core::f64::consts::LOG2_E)
+/// Returns `e` raised to the power of `x`, without narrowing the result.
+///
+/// Its one caller mirrors a `double` `exp` in the C and narrows afterwards, so
+/// the `f32` grade fit behind [`exp2_f32`] is not enough: an error of 1e-10 lands
+/// on the wrong side of an `f32` rounding boundary about once in six hundred
+/// values.
+#[inline(never)]
+pub fn exp(x: f64) -> f64 {
+  if x.is_nan() {
+    return x;
+  }
+  // f64 saturates outside of this range.
+  if x >= 710.0 {
+    return f64::INFINITY;
+  }
+  if x <= -746.0 {
+    return 0.0;
+  }
+
+  // e^x = 2^k * e^r with k integral and |r| <= ln(2)/2. Subtracting the two
+  // halves of ln 2 separately keeps the cancellation error out of `r`, which
+  // the series then only has to be accurate about.
+  // Split so that `n * LN_2_HI` is exact: the high half carries 32 significant
+  // bits, leaving room for any `n` this can produce. Splitting at the full f64
+  // instead leaves 1.8e-15 of the product's own rounding in `r`, which is the
+  // whole error budget.
+  const LN_2_HI: f64 = 0.693_147_180_369_123_8;
+  const LN_2_LO: f64 = 1.908_214_929_270_587_7e-10;
+  let k = (x * core::f64::consts::LOG2_E + if x < 0.0 { -0.5 } else { 0.5 }) as i64;
+  let n = k as f64;
+  let r = (x - n * LN_2_HI) - n * LN_2_LO;
+  // 2^k straight from the exponent field; k stays inside the range by the
+  // checks above.
+  let scale = f64::from_bits(((k + 1023) as u64) << 52);
+  exp_poly(r) * scale
+}
+
+/// Maclaurin series for `e^r`, truncated where the next term falls under an
+/// `f64` ulp over `[-ln(2)/2, ln(2)/2]`: `r^14/14!` is 4.1e-18.
+#[inline(never)]
+fn exp_poly(r: f64) -> f64 {
+  const C: [f64; 14] = [
+    1.0,
+    1.0,
+    0.5,
+    0.166_666_666_666_666_66,
+    0.041_666_666_666_666_664,
+    0.008_333_333_333_333_333,
+    0.001_388_888_888_888_889,
+    0.000_198_412_698_412_698_4,
+    2.480_158_730_158_73e-5,
+    2.755_731_922_398_589_3e-6,
+    2.755_731_922_398_589e-7,
+    2.505_210_838_544_172e-8,
+    2.087_675_698_786_81e-9,
+    1.605_904_383_682_161_3e-10,
+  ];
+  let mut acc = C[13];
+  let mut i = 12;
+  loop {
+    acc = C[i] + r * acc;
+    if i == 0 {
+      return acc;
+    }
+    i -= 1;
+  }
 }
 
 /// Chebyshev fit of `2^r` over `[-1/2, 1/2]`, accurate to 1.4e-10 relative.
@@ -261,8 +341,9 @@ fn exp2_poly(r: f64) -> f64 {
   E0 + r * (E1 + r * (E2 + r * (E3 + r * (E4 + r * (E5 + r * (E6 + r * E7))))))
 }
 
-/// Returns the arctangent of `x`, in radians.
-pub fn atan(x: f32) -> f32 {
+/// Returns the arctangent of `x`, in radians, without narrowing the result.
+#[inline(never)]
+pub fn atan(x: f64) -> f64 {
   /// tan(pi/8)
   const TAN_PI_8: f64 = 0.414_213_562_373_095_1;
   /// tan(3*pi/8)
@@ -271,7 +352,7 @@ pub fn atan(x: f32) -> f32 {
   if x.is_nan() {
     return x;
   }
-  let magnitude = (x as f64).abs();
+  let magnitude = x.abs();
 
   // Fold the argument into [0, tan(pi/8)] with the two standard identities.
   let (offset, reduced) = if magnitude > TAN_3PI_8 {
@@ -285,22 +366,52 @@ pub fn atan(x: f32) -> f32 {
     (0.0, magnitude)
   };
 
-  let value = (offset + atan_poly(reduced)) as f32;
+  let value = offset + atan_poly(reduced);
   if x < 0.0 { -value } else { value }
 }
 
-/// Chebyshev fit of `atan(t)/t` over `[-tan(pi/8), tan(pi/8)]`, accurate to
-/// 5.2e-10 absolute.
+/// Maclaurin series for `atan(t)/t`, truncated where the next term falls under
+/// an `f64` ulp over `[-tan(pi/8), tan(pi/8)]`: `t^44/45` is 3.2e-19.
+///
+/// The series converges slowly enough at the end of that range to want 22
+/// terms, where an `f32` result needs six. The coefficients are exact
+/// reciprocals of the odd integers, so there is nothing to fit.
+#[inline(never)]
 fn atan_poly(t: f64) -> f64 {
-  const A0: f64 = 0.999_999_998_654_900_5;
-  const A1: f64 = -0.333_332_998_986_727;
-  const A2: f64 = 0.199_980_142_902_063_04;
-  const A3: f64 = -0.142_381_227_922_909_25;
-  const A4: f64 = 0.105_665_137_014_591_02;
-  const A5: f64 = -0.060_295_272_537_596_964;
-
+  const C: [f64; 22] = [
+    1.0,
+    -0.333_333_333_333_333_3,
+    0.2,
+    -0.142_857_142_857_142_85,
+    0.111_111_111_111_111_1,
+    -0.090_909_090_909_090_91,
+    0.076_923_076_923_076_93,
+    -0.066_666_666_666_666_67,
+    0.058_823_529_411_764_705,
+    -0.052_631_578_947_368_42,
+    0.047_619_047_619_047_616,
+    -0.043_478_260_869_565_216,
+    0.04,
+    -0.037_037_037_037_037_035,
+    0.034_482_758_620_689_655,
+    -0.032_258_064_516_129_03,
+    0.030_303_030_303_030_304,
+    -0.028_571_428_571_428_57,
+    0.027_027_027_027_027_03,
+    -0.025_641_025_641_025_64,
+    0.024_390_243_902_439_025,
+    -0.023_255_813_953_488_372,
+  ];
   let t2 = t * t;
-  t * (A0 + t2 * (A1 + t2 * (A2 + t2 * (A3 + t2 * (A4 + t2 * A5)))))
+  let mut acc = C[21];
+  let mut i = 20;
+  loop {
+    acc = C[i] + t2 * acc;
+    if i == 0 {
+      return t * acc;
+    }
+    i -= 1;
+  }
 }
 
 #[cfg(test)]
@@ -331,7 +442,7 @@ mod tests {
   #[test]
   fn matches_the_reference_sine() {
     for x in samples() {
-      let ours = super::sin(x);
+      let ours = super::sin_f32(x);
       let reference = (x as f64).sin() as f32;
       assert!(
         (ours - reference).abs() <= TOLERANCE,
@@ -343,7 +454,7 @@ mod tests {
   #[test]
   fn matches_the_reference_cosine() {
     for x in samples() {
-      let ours = super::cos(x);
+      let ours = super::cos_f32(x);
       let reference = (x as f64).cos() as f32;
       assert!(
         (ours - reference).abs() <= TOLERANCE,
@@ -355,64 +466,71 @@ mod tests {
   #[test]
   fn sin_cos_matches_the_separate_functions() {
     for x in samples() {
-      assert_eq!(super::sin_cos(x), (super::sin(x), super::cos(x)), "x = {x}");
+      assert_eq!(
+        super::sin_cos_f32(x),
+        (super::sin_f32(x), super::cos_f32(x)),
+        "x = {x}"
+      );
     }
   }
 
-  /// The `f64` entry points are what the reduction and the polynomial produce,
-  /// so they hold to the fit's accuracy rather than to an `f64` ulp.
+  /// The `f64` entry points hand back what the reduction and the series
+  /// produce, which is what the callers mirroring `double` arithmetic in the
+  /// C want. Both series run to under an `f64` ulp over the reduced range, so
+  /// what is left is the reduction and the Horner sum.
   #[test]
   fn matches_the_reference_in_f64() {
-    /// The sine fit is good to 3.1e-9 and the cosine one to 4.8e-11.
-    const TOLERANCE_F64: f64 = 1.0e-8;
+    const TOLERANCE_F64: f64 = 1.0e-15;
 
     for i in -20_000..20_000i32 {
       let x = i as f64 * 0.031_25;
-      assert!(
-        (super::sin_f64(x) - x.sin()).abs() <= TOLERANCE_F64,
-        "sin_f64({x})"
-      );
-      assert!(
-        (super::cos_f64(x) - x.cos()).abs() <= TOLERANCE_F64,
-        "cos_f64({x})"
-      );
+      assert!((super::sin(x) - x.sin()).abs() <= TOLERANCE_F64, "sin({x})");
+      assert!((super::cos(x) - x.cos()).abs() <= TOLERANCE_F64, "cos({x})");
     }
-    assert!(super::sin_f64(f64::NAN).is_nan());
-    assert!(super::cos_f64(1.0e7).is_nan());
+    assert!(super::sin(f64::NAN).is_nan());
+    assert!(super::cos(1.0e7).is_nan());
   }
 
   #[test]
   fn keeps_the_sign_of_zero() {
-    assert_eq!(super::sin(0.0).to_bits(), 0.0f32.to_bits());
-    assert_eq!(super::sin(-0.0).to_bits(), (-0.0f32).to_bits());
-    assert_eq!(super::cos(0.0), 1.0);
+    assert_eq!(super::sin_f32(0.0).to_bits(), 0.0f32.to_bits());
+    assert_eq!(super::sin_f32(-0.0).to_bits(), (-0.0f32).to_bits());
+    assert_eq!(super::cos_f32(0.0), 1.0);
   }
 
+  /// `f64.sqrt` is correctly rounded, so this has to be too: the caller mirrors
+  /// a `double` square root in the C.
   #[test]
-  fn matches_the_reference_square_root() {
-    for i in 0..200_000u32 {
-      let x = (i as f32) * 0.0625;
-      let ours = super::sqrt(x);
-      let reference = (x as f64).sqrt() as f32;
-      assert!(
-        close_enough(ours, reference),
-        "sqrt({x}): {ours} vs {reference}"
-      );
+  fn matches_libm_sqrt() {
+    for i in 0..200_000u64 {
+      let x = (i as f64) * 0.0625;
+      assert_eq!(super::sqrt(x).to_bits(), x.sqrt().to_bits(), "sqrt({x})");
     }
-    for x in [f32::MIN_POSITIVE, 1e-30, 1e30, f32::MAX] {
-      let reference = (x as f64).sqrt() as f32;
-      assert!(close_enough(super::sqrt(x), reference), "sqrt({x})");
+    let mut state = 0x2545_F491_4F6C_DD1Du64;
+    for _ in 0..200_000 {
+      state ^= state << 13;
+      state ^= state >> 7;
+      state ^= state << 17;
+      // Mantissas across a wide span of exponents.
+      let x = f64::from_bits((state >> 12) | (((state >> 52) & 0x3ff) + 512) << 52);
+      if !x.is_finite() {
+        continue;
+      }
+      assert_eq!(super::sqrt(x).to_bits(), x.sqrt().to_bits(), "sqrt({x})");
+    }
+    for x in [f64::MIN_POSITIVE, 1e-300, 1e300, f64::MAX] {
+      assert_eq!(super::sqrt(x).to_bits(), x.sqrt().to_bits(), "sqrt({x})");
     }
     assert_eq!(super::sqrt(0.0), 0.0);
     assert!(super::sqrt(-1.0).is_nan());
-    assert_eq!(super::sqrt(f32::INFINITY), f32::INFINITY);
+    assert_eq!(super::sqrt(f64::INFINITY), f64::INFINITY);
   }
 
   #[test]
   fn matches_the_reference_floor() {
     for i in -100_000..100_000i32 {
       let x = (i as f32) * 0.125;
-      assert_eq!(super::floor(x), x.floor(), "floor({x})");
+      assert_eq!(super::floor_f32(x), x.floor(), "floor({x})");
     }
     for x in [
       0.0,
@@ -423,9 +541,13 @@ mod tests {
       f32::INFINITY,
       f32::NEG_INFINITY,
     ] {
-      assert_eq!(super::floor(x).to_bits(), x.floor().to_bits(), "floor({x})");
+      assert_eq!(
+        super::floor_f32(x).to_bits(),
+        x.floor().to_bits(),
+        "floor({x})"
+      );
     }
-    assert!(super::floor(f32::NAN).is_nan());
+    assert!(super::floor_f32(f32::NAN).is_nan());
   }
 
   /// Compares against a reference value, allowing a relative error and
@@ -441,49 +563,54 @@ mod tests {
   fn matches_the_reference_exponentials() {
     for i in -15_000..12_800i32 {
       let x = (i as f32) * 0.01;
-      let ours = super::exp2(x);
+      let ours = super::exp2_f32(x);
       let reference = (x as f64).exp2() as f32;
       assert!(
         close_enough(ours, reference),
         "exp2({x}): {ours} vs {reference}"
       );
-
-      let ours = super::exp(x);
-      let reference = (x as f64).exp() as f32;
-      assert!(
-        close_enough(ours, reference),
-        "exp({x}): {ours} vs {reference}"
-      );
     }
-    assert_eq!(super::exp2(0.0), 1.0);
-    assert_eq!(super::exp2(10.0), 1024.0);
-    assert_eq!(super::exp2(-160.0), 0.0);
-    assert_eq!(super::exp2(200.0), f32::INFINITY);
-    assert!(super::exp2(f32::NAN).is_nan());
+    assert_eq!(super::exp2_f32(0.0), 1.0);
+    assert_eq!(super::exp2_f32(10.0), 1024.0);
+    assert_eq!(super::exp2_f32(-160.0), 0.0);
+    assert_eq!(super::exp2_f32(200.0), f32::INFINITY);
+    assert!(super::exp2_f32(f32::NAN).is_nan());
   }
 
+  /// `exp` and `atan` hand the `f64` back, and their callers mirror
+  /// `double` arithmetic in the C, so they are held to a few `f64` ulps rather
+  /// than to an `f32` one.
   #[test]
-  fn matches_the_reference_arctangent() {
-    for i in -200_000..200_000i32 {
-      let x = (i as f32) * 0.001;
-      let ours = super::atan(x);
-      let reference = (x as f64).atan() as f32;
-      assert!(
-        (ours - reference).abs() <= TOLERANCE,
-        "atan({x}): {ours} vs {reference}"
-      );
+  fn matches_libm_in_f64() {
+    /// Room for a handful of ulps of the reduction and the Horner sum.
+    const TOLERANCE_F64: f64 = 1.0e-15;
+
+    fn close(ours: f64, reference: f64) -> bool {
+      (ours - reference).abs() <= reference.abs().max(1.0) * TOLERANCE_F64
     }
-    for x in [0.0, -0.0, 1e20, -1e20, f32::INFINITY, f32::NEG_INFINITY] {
-      let reference = (x as f64).atan() as f32;
-      assert!((super::atan(x) - reference).abs() <= TOLERANCE, "atan({x})");
+
+    for i in -70_000..70_000i32 {
+      let x = (i as f64) * 0.01;
+      assert!(close(super::exp(x), x.exp()), "exp({x})");
     }
-    assert!(super::atan(f32::NAN).is_nan());
+    for i in -400_000..400_000i32 {
+      let x = (i as f64) * 0.001;
+      assert!(close(super::atan(x), x.atan()), "atan({x})");
+    }
+    for x in [0.0, -0.0, 1e20, -1e20, f64::INFINITY, f64::NEG_INFINITY] {
+      assert!(close(super::atan(x), x.atan()), "atan({x})");
+    }
+    assert_eq!(super::exp(0.0), 1.0);
+    assert_eq!(super::exp(1000.0), f64::INFINITY);
+    assert_eq!(super::exp(-1000.0), 0.0);
+    assert!(super::exp(f64::NAN).is_nan());
+    assert!(super::atan(f64::NAN).is_nan());
   }
 
   #[test]
   fn rejects_arguments_outside_the_domain() {
-    assert!(super::sin(f32::NAN).is_nan());
-    assert!(super::cos(f32::INFINITY).is_nan());
+    assert!(super::sin(f64::NAN).is_nan());
+    assert!(super::cos(1.0e7).is_nan());
     assert!(super::sin(1.0e7).is_nan());
   }
 }
