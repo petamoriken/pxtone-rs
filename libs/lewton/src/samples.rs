@@ -103,7 +103,7 @@ impl Sample for i16 {
 	// halves to even is out on the exact halves, so this port spells the
 	// rounding out as `floor(x + 0.5)` rather than leaving it to a cast.
 	fn from_float(fl: f32) -> Self {
-		let fl = lite_math::floor(fl * 32768.0 + 0.5);
+		let fl = lite_math::floor_f32(fl * 32768.0 + 0.5);
 		if fl > 32767. {
 			32767
 		} else if fl < -32768. {

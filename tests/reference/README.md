@@ -68,6 +68,30 @@ quotient already reads 1048800 at sample 23126038.
 division fires on rather than trusting the product; anything that recomputes
 that bound has to keep doing so.
 
+## The output settings
+
+Everything committed here is 16-bit stereo at 44100 Hz, which is the one setting
+`tests/decode_test.rs` asks for. `PxtoneService::new` takes any sample rate and
+one or two channels, and the setting reaches further than the interleaving: mono
+averages the two wave channels and drops the pan delay, and the rate scales the
+playback stride, the tick rate, the smoothing tail, the fade length and the
+delay buffers.
+
+Checked by hand against the C++ rather than committed, since a reference per
+setting would multiply what this directory holds. Render both sides with
+`set_destination_quality( ch, sps )` and the matching `DestinationQuality`, and
+compare. As of the last run, seven settings -- 1 and 2 channels across 8000,
+11025, 22050, 44100 and 48000 Hz -- agree sample for sample on all six committed
+songs and on four more carrying OGGV material.
+
+Note that `Moo` zero-fills the tail of its last buffer while this port returns a
+short count, so the C++ side runs up to a buffer longer. Compare the shorter of
+the two and check that what the C++ has past it is silence.
+
+The material side of that plumbing is already covered here: the committed songs
+carry 8-bit materials, mono materials and materials at 11025 and 22050 Hz, so
+`pxtnPulse_PCM::Convert`'s three conversions all run inside the strict gate.
+
 ## Regenerating
 
 The C++ sources are not vendored, so this is a manual step: put them in

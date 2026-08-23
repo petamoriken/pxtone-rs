@@ -60,16 +60,16 @@ fn compute_trig(bs: u8) -> Vec<f32> {
 	let mut t = alloc::vec![0f32; n + n / 4];
 	for i in 0..n / 4 {
 		let arg = pi_n * (4 * i) as f64;
-		t[i * 2] = lite_math::cos_f64(arg) as f32;
-		t[i * 2 + 1] = -lite_math::sin_f64(arg) as f32;
+		t[i * 2] = lite_math::cos(arg) as f32;
+		t[i * 2 + 1] = -lite_math::sin(arg) as f32;
 		let arg = pi_2n * (2 * i + 1) as f64;
-		t[n2 + i * 2] = lite_math::cos_f64(arg) as f32;
-		t[n2 + i * 2 + 1] = lite_math::sin_f64(arg) as f32;
+		t[n2 + i * 2] = lite_math::cos(arg) as f32;
+		t[n2 + i * 2 + 1] = lite_math::sin(arg) as f32;
 	}
 	for i in 0..n / 8 {
 		let arg = pi_n * (4 * i + 2) as f64;
-		t[n + i * 2] = (lite_math::cos_f64(arg) * 0.5) as f32;
-		t[n + i * 2 + 1] = (-lite_math::sin_f64(arg) * 0.5) as f32;
+		t[n + i * 2] = (lite_math::cos(arg) * 0.5) as f32;
+		t[n + i * 2 + 1] = (-lite_math::sin(arg) * 0.5) as f32;
 	}
 	t
 }
@@ -110,8 +110,8 @@ fn win_slope(x: u16, n: u16) -> f32 {
 	// In f32 every window value carries an error of up to 1.8e-7, which is the
 	// same order as the decoder's whole disagreement with libvorbis; in f64 it
 	// falls below 1e-9.
-	let v = lite_math::sin_f64(0.5 * core::f64::consts::PI * (x as f64 + 0.5) / n as f64);
-	return lite_math::sin_f64(0.5 * core::f64::consts::PI * v * v) as f32;
+	let v = lite_math::sin(0.5 * core::f64::consts::PI * (x as f64 + 0.5) / n as f64);
+	return lite_math::sin(0.5 * core::f64::consts::PI * v * v) as f32;
 }
 
 /// Where libvorbis' window literals differ from the computed value.
@@ -311,31 +311,41 @@ fn generate_window(bs: u8) -> Vec<f32> {
 	return window;
 }
 
-fn bark(x: f32) -> f32 {
-	13.1 * lite_math::atan(0.00074 * x) + 2.24 * lite_math::atan(0.0000000185 * x * x) + 0.0001 * x
+/// libvorbis' `toBARK`, in the precision the C gives it:
+///
+///   13.1f*atan(.00074f*(n)) + 2.24f*atan((n)*(n)*1.85e-8f) + 1e-4f*(n)
+///
+/// The argument and the three products with `f` suffixed constants are `f32`;
+/// the arctangents, and so the sum, are `f64`. The `f` suffixes matter -- `13.1f`
+/// promotes to 13.100000381469727, not to 13.1 -- and so does the precision:
+/// the result is floored to an integer bin, so an `f32` arctangent moves a bin
+/// boundary rather than the last bit of a sample.
+fn to_bark(x: f32) -> f64 {
+	13.1f32 as f64 * lite_math::atan((0.00074f32 * x) as f64)
+		+ 2.24f32 as f64 * lite_math::atan((x * x * 1.85e-8f32) as f64)
+		+ (1.0e-4f32 * x) as f64
 }
 
-/// Precomputes bark map values used by floor type 0 packets
+/// The bark scale bin each spectral line falls in, as `floor0_map_lazy_init`
+/// builds it:
 ///
-/// Precomputes the cos(omega) values for use by floor type 0 computation.
+///   float scale = look->ln / toBARK(info->rate/2.f);
+///   int val = floor( toBARK((info->rate/2.f)/n*j) * scale );
+///   if( val >= look->ln ) val = look->ln - 1;
 ///
-/// Note that there is one small difference to the spec: the output
-/// vec is n elements long, not n+1. The last element (at index n)
-/// is -1 in the spec, we lack it. Users of the result of this function
-/// implementation should use it "virtually".
-pub fn compute_bark_map_cos_omega(n: u16, floor0_rate: u16, floor0_bark_map_size: u16) -> Vec<f32> {
-	let mut res = Vec::with_capacity(n as usize);
-	let hfl = floor0_rate as f32 / 2.0;
-	let hfl_dn = hfl / n as f32;
-	let foobar_const_part = floor0_bark_map_size as f32 / bark(hfl);
-	// Bark map size minus 1:
-	let bms_m1 = floor0_bark_map_size as f32 - 1.0;
-	let omega_factor = core::f32::consts::PI / floor0_bark_map_size as f32;
-	for i in 0..n {
-		let foobar = lite_math::floor(bark(i as f32 * hfl_dn) * foobar_const_part);
-		let map_elem = foobar.min(bms_m1);
-		let cos_omega = lite_math::cos(map_elem * omega_factor);
-		res.push(cos_omega);
+/// `scale` is narrowed to `f32` on the way in, and the product it goes into is
+/// `f64`. Runs of equal bins share one curve value, which is why the decoder
+/// keeps the bins rather than a cosine per line.
+pub fn compute_bark_map(n: u16, floor0_rate: u16, floor0_bark_map_size: u16) -> Vec<i32> {
+	let ln = floor0_bark_map_size as i32;
+	let half_rate = floor0_rate as f32 / 2.0;
+	let step = half_rate / n as f32;
+	let scale = (ln as f64 / to_bark(half_rate)) as f32;
+	let mut map = Vec::with_capacity(n as usize);
+	for j in 0..n {
+		// Non-negative, so truncating is the floor the C takes.
+		let val = (to_bark(step * j as f32) * scale as f64) as i32;
+		map.push(if val >= ln { ln - 1 } else { val });
 	}
-	return res;
+	map
 }

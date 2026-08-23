@@ -199,6 +199,23 @@ boundaries on a 441 entry table, each 9362 out. None of the committed noise
 instruments uses either wave, which is how that survived to be found in a song
 instead.
 
+### Floor 0 follows libvorbis' factorization, not the spec's
+
+No encoder emits Vorbis floor 0 -- vorbisenc has only ever written floor 1, and
+all 23 streams to hand use it -- so nothing in the corpus reaches that code. It
+still has to agree with libvorbis, and it did not: the spec factors the curve as
+`(1-cos w)/2` times a product of `4(cos c - cos w)^2` terms while
+`vorbis_lsp_to_curve` factors it around `w = 2 cos w` and squares the products,
+and the two agree only to about 1e-6. `libs/lewton` now carries libvorbis'
+arrangement, down to where the precision changes, and its bark map is libvorbis'
+integer bins rather than a cosine per spectral line -- the map is floored to an
+integer, so an f32 arctangent behind it moves a bin boundary rather than a last
+bit. Bit exact across 160 configurations, with one of each filter parity pinned
+in `libs/lewton/src/audio_floor0_test.rs`.
+
+What is still unmeasured there is the bitstream side: reading the amplitude, the
+book number and the coefficients. Nothing produces a stream to read.
+
 ### OGGV voices are held against libvorbis
 
 pxtone decodes an OGGV voice with libvorbis'

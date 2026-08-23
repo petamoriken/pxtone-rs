@@ -49,7 +49,7 @@ impl Oscillator {
     let mut work = 0.0f64;
     for p in &self.points {
       let sss = 2.0 * PI * p.x as f64 * index as f64 / self.sample_count as f64;
-      work += lite_math::sin_f64(sss) * p.y as f64 / p.x as f64 / 128.0;
+      work += lite_math::sin(sss) * p.y as f64 / p.x as f64 / 128.0;
     }
     work * self.volume as f64 / 128.0
   }
