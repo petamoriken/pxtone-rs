@@ -191,10 +191,10 @@ produced -- the C++ is not vendored, so regenerating it is a manual step.
 `deno task test:rust` runs `cargo test`, which covers the root `pxtone` crate
 only; the vendored crates need naming explicitly (`cargo test -p lite-math`,
 `-p lewton`, `-p ogg`). Unit tests live next to the code they cover, in
-`src/reader.rs`, `src/sort.rs`, `src/service.rs` and `src/pulse/frequency.rs`.
-Most of them exist to hold the port bit for bit against the C++, so an
-optimization that reorders arithmetic belongs there with a comparison against
-the previous implementation.
+`src/reader.rs`, `src/service.rs` and `src/pulse/frequency.rs`. Most of them
+exist to hold the port bit for bit against the C++, so an optimization that
+reorders arithmetic belongs there with a comparison against the previous
+implementation.
 
 Always go through `deno task test:wasm`. Invoking
 `cargo build --target wasm32-unknown-unknown` directly overwrites

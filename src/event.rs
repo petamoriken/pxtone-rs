@@ -1,6 +1,5 @@
 use crate::error::PxtoneError;
 use crate::reader::Reader;
-use crate::sort::stable_sort_by;
 
 // Event kind constants
 pub const EVENT_KIND_NULL: u8 = 0;
@@ -164,12 +163,13 @@ impl EventList {
       });
     }
 
-    // Sort in chronological order (priority is used as a tiebreaker).
-    // Lower numeric priority values should come first for same-tick events.
-    stable_sort_by(&mut self.events, |a, b| {
-      a.tick < b.tick || (a.tick == b.tick && compare_priority(a.kind, b.kind) <= 0)
-    });
-
+    // No sorting: `Linear_Add_i` appends and `Linear_End` links the records in
+    // the order the file stores them, so that is the order the C++ plays them
+    // in. The clocks are stored as non-negative deltas, so file order is
+    // already chronological; what a sort would change is the order of events
+    // that share a tick, and that order is audible. A note-on followed by a key
+    // starts the note at the old key and slides to the new one over the
+    // portamento, where a key followed by the note-on jumps straight to it.
     Ok(())
   }
 

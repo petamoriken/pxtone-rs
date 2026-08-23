@@ -11,10 +11,9 @@ instead of only against its own previous output.
 Both are 16-bit stereo at 44100 Hz, matching what `tests/decode_test.rs` asks of
 the Rust decoder.
 
-## Where this port deliberately differs
+## The samples-per-tick rate
 
-`pxtnService_moo.cpp` computes the samples-per-tick rate in `double` and keeps
-it in a `float`:
+`pxtnService_moo.cpp` computes it in `double` and keeps it in a `float`:
 
 ```c
 float    _moo_clock_rate  ; // as the sample
@@ -22,16 +21,29 @@ float    _moo_clock_rate  ; // as the sample
 _moo_clock_rate = (float)( 60.0f * (double)_dst_sps / ( (double)_moo_bt_tempo * (double)_moo_bt_clock ) );
 ```
 
-Every use promotes it back, so the narrowing buys nothing and only costs
-precision -- for a tempo of 145 the rate lands on 38.017242431640625 instead of
-38.017241379310342. This port holds the `f64`.
+Narrowing looks pointless -- every use promotes it back -- but the uses are
+`int * float` and `int / float`, so they run in `f32` as well. Only the song
+length, loop point and start are worked out in `double`, and those cast to it
+explicitly.
 
-Holding it is also what matches: narrowing to `f32` the way the C++ does takes
-two of the fifty-three renders off exact. Why the reference agrees with the
-wider value is not pinned down -- the rate only feeds integer tick and lifetime
-arithmetic, so a difference of one part in a hundred million has to cross an
-integer boundary to show at all. Worth knowing before anyone `f32`s it to look
-more faithful.
+That matters because `clock = smp_count / rate` is compared against event ticks:
+where the quotient lands near a tick boundary, an `f64` division floors to a
+different tick and a note starts a sample early or late. This port held the
+`f64` for a while on the grounds that the narrowing was a mistake in the
+original. It is not one to reproduce selectively: narrowing the stored value
+while dividing in `f64` is worse than either, which is how the wrong conclusion
+was reached the first time.
+
+The same `f32` division is what decides when an event fires, and this port
+splits the sample loop into event-free blocks, so it also has to work out
+_which_ sample that is ahead of time. Multiplying the tick back by the rate does
+not give it: the product and the quotient round in different directions, and at
+large sample counts they disagree by a sample or two. A tempo of 250 puts the
+rate at 22.05, and tick 1048800 then has an `f32` product of 23126040 while the
+quotient already reads 1048800 at sample 23126038.
+`PxtoneService::moo_safe_count` therefore walks its estimate onto the sample the
+division fires on rather than trusting the product; anything that recomputes
+that bound has to keep doing so.
 
 ## Regenerating
 

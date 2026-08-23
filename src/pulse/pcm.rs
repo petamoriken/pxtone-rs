@@ -180,28 +180,36 @@ impl Pcm {
     }
     let bytes_per_sample = self.channels as usize * self.bits_per_sample as usize / 8;
     let old_total = self.total_samples() as usize;
-    let new_head = ((self.head_frames as f64 * new_sample_rate as f64 + self.sample_rate as f64
-      - 1.0)
-      / self.sample_rate as f64) as usize;
-    let new_body = ((self.body_frames as f64 * new_sample_rate as f64 + self.sample_rate as f64
-      - 1.0)
-      / self.sample_rate as f64) as usize;
-    let new_tail = ((self.tail_frames as f64 * new_sample_rate as f64 + self.sample_rate as f64
-      - 1.0)
-      / self.sample_rate as f64) as usize;
-    let new_total = new_head + new_body + new_tail;
+
+    // The C++ scales the three byte counts, rounding each up, and only then
+    // divides down into frames. Scaling the frame counts instead rounds in a
+    // different place and can leave the body a frame longer, which keeps a
+    // non-looping voice sounding for a sample after the original has stopped.
+    let scale = |frames: u32| -> usize {
+      let bytes = frames as usize * bytes_per_sample;
+      ((bytes as f64 * new_sample_rate as f64 + self.sample_rate as f64 - 1.0)
+        / self.sample_rate as f64) as usize
+    };
+    let head_size = scale(self.head_frames);
+    let body_size = scale(self.body_frames);
+    let tail_size = scale(self.tail_frames);
+
+    // Frames come from the summed byte count, not from the sum of the three
+    // frame counts, and the two need not agree.
+    let new_total = (head_size + body_size + tail_size) / bytes_per_sample;
     let mut work = vec![0u8; new_total * bytes_per_sample];
     for a in 0..new_total {
       let b = (a as f64 * self.sample_rate as f64 / new_sample_rate as f64) as usize;
+      // The C++ reads past its source here rather than clamping.
       let b = b.min(old_total - 1);
       let src = &self.samples[b * bytes_per_sample..(b + 1) * bytes_per_sample];
       let dst = &mut work[a * bytes_per_sample..(a + 1) * bytes_per_sample];
       dst.copy_from_slice(src);
     }
     self.samples = work;
-    self.head_frames = new_head as u32;
-    self.body_frames = new_body as u32;
-    self.tail_frames = new_tail as u32;
+    self.head_frames = (head_size / bytes_per_sample) as u32;
+    self.body_frames = (body_size / bytes_per_sample) as u32;
+    self.tail_frames = (tail_size / bytes_per_sample) as u32;
     self.sample_rate = new_sample_rate;
     Ok(())
   }

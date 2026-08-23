@@ -70,16 +70,18 @@ impl Delay {
     self.offset = 0;
     self.rate_s32 = self.rate as i32;
 
+    // The C++ works the sample count out as an integer product divided by two
+    // floats, so both divisions run in `f32`:
+    //   _smp_num = (int32_t)( sps * 60 / beat_tempo / _freq );
+    // In `f64` the length comes out a sample longer for some tempos, which
+    // shifts the whole delay line and feeds back.
     self.buffer_size = match self.unit {
-      DelayUnit::Beat => {
-        (sample_rate as f64 * 60.0 / beat_tempo as f64 / self.frequency as f64) as usize
-      }
+      DelayUnit::Beat => ((sample_rate as i32 * 60) as f32 / beat_tempo / self.frequency) as usize,
       DelayUnit::Meas => {
-        (sample_rate as f64 * 60.0 * beats_per_measure as f64
-          / beat_tempo as f64
-          / self.frequency as f64) as usize
+        ((sample_rate as i32 * 60 * beats_per_measure as i32) as f32 / beat_tempo / self.frequency)
+          as usize
       }
-      DelayUnit::Second => (sample_rate as f64 / self.frequency as f64) as usize,
+      DelayUnit::Second => (sample_rate as f32 / self.frequency) as usize,
     };
 
     if self.buffer_size > 0 {
