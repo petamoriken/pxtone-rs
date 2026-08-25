@@ -35,19 +35,27 @@ impl Rand {
 
 // ---- Internal oscillator state ----
 #[derive(Clone)]
-struct OscState {
+struct OscState<'a> {
   increment: f64,
   offset: f64,
   volume: f64,
   wave_type: WaveType,
+  /// The wave table this oscillator reads, resolved once. Empty for the two
+  /// random types, which read none, and for a type with no table built.
+  table: &'a [i16],
   reversed: bool,
   rdm_start: i16,
   rdm_margin: i32,
   rdm_index: usize,
 }
 
-impl OscState {
-  fn from_design(osc: &NoiseOscillator, sample_rate: u32, rand_tbl: &[i16]) -> Self {
+impl<'a> OscState<'a> {
+  fn from_design(
+    osc: &NoiseOscillator,
+    sample_rate: u32,
+    tables: &'a [Option<Vec<i16>>; WAVETYPE_COUNT],
+    rand_tbl: &[i16],
+  ) -> Self {
     let ran = matches!(osc.wave_type, WaveType::Random | WaveType::Random2);
     let increment =
       (BASIC_SAMPLE_RATE / sample_rate as f64) * (osc.frequency as f64 / BASIC_FREQUENCY);
@@ -77,6 +85,7 @@ impl OscState {
       offset,
       volume,
       wave_type: osc.wave_type,
+      table: tables[osc.wave_type as usize].as_deref().unwrap_or(&[]),
       reversed: osc.reversed,
       rdm_start: 0,
       rdm_margin,
@@ -93,7 +102,7 @@ impl OscState {
   /// `FREQUENCY` marks the oscillator that drives the playback rate rather than
   /// the waveform. A table read of its scales down into the key range; the
   /// random types do not.
-  fn get_sample<const FREQUENCY: bool>(&self, tables: &[Option<Vec<i16>>; WAVETYPE_COUNT]) -> f64 {
+  fn get_sample<const FREQUENCY: bool>(&self) -> f64 {
     let offset = self.offset as usize;
     let work = match self.wave_type {
       WaveType::Random => {
@@ -101,7 +110,7 @@ impl OscState {
       }
       WaveType::Random2 => self.rdm_start as f64,
       _ => {
-        let tbl = tables[self.wave_type as usize].as_deref().unwrap_or(&[]);
+        let tbl = self.table;
         if tbl.is_empty() {
           return 0.0;
         }
@@ -143,17 +152,16 @@ impl OscState {
 }
 
 // ---- Unit state ----
-struct UnitState {
-  enabled: bool,
+struct UnitState<'a> {
   pan: [f64; 2],
   enves: Vec<(u32, f64)>, // (smp, mag)
   enve_index: usize,
   enve_mag_start: f64,
   enve_mag_margin: f64,
   enve_count: u32,
-  main: OscState,
-  frequency: OscState,
-  volume: OscState,
+  main: OscState<'a>,
+  frequency: OscState<'a>,
+  volume: OscState<'a>,
 }
 
 // ---- NoiseBuilder ----
@@ -352,9 +360,13 @@ impl NoiseBuilder {
     let frame_count = (noise.frame_count_44k as f64 / (44100.0 / sample_rate as f64)) as u32;
 
     // Build unit states
+    // The disabled ones neither sound nor advance, so leaving them out is what
+    // skipping them every sample amounted to. The rest keep their order, which
+    // is the order their samples are summed in.
     let mut units: Vec<UnitState> = noise
       .units
       .iter()
+      .filter(|du| du.enabled)
       .map(|du| {
         let pan = if du.pan == 0 {
           [1.0, 1.0]
@@ -383,16 +395,15 @@ impl NoiseBuilder {
         }
 
         UnitState {
-          enabled: du.enabled,
           pan,
           enves,
           enve_index,
           enve_mag_start,
           enve_mag_margin,
           enve_count: 0,
-          main: OscState::from_design(&du.main, sample_rate, rand_tbl),
-          frequency: OscState::from_design(&du.frequency, sample_rate, rand_tbl),
-          volume: OscState::from_design(&du.volume, sample_rate, rand_tbl),
+          main: OscState::from_design(&du.main, sample_rate, &self.tables, rand_tbl),
+          frequency: OscState::from_design(&du.frequency, sample_rate, &self.tables, rand_tbl),
+          volume: OscState::from_design(&du.volume, sample_rate, &self.tables, rand_tbl),
         }
       })
       .collect();
@@ -409,11 +420,8 @@ impl NoiseBuilder {
 
     for _ in 0..frame_count as usize {
       for (slot, u) in per_unit.iter_mut().zip(units.iter()) {
-        if !u.enabled {
-          continue;
-        }
-        let main = u.main.get_sample::<false>(&self.tables);
-        let vol = u.volume.get_sample::<false>(&self.tables);
+        let main = u.main.get_sample::<false>();
+        let vol = u.volume.get_sample::<false>();
         let envelope = if u.enve_index < u.enves.len() {
           let smp = u.enves[u.enve_index].0;
           if smp > 0 {
@@ -433,7 +441,6 @@ impl NoiseBuilder {
         let store: f64 = units
           .iter()
           .zip(per_unit.iter())
-          .filter(|(u, _)| u.enabled)
           .map(|(u, &(work, envelope))| work * u.pan[c] * envelope)
           .sum();
         let byte4 = (store as i32).clamp(-SAMPLING_TOP as i32, SAMPLING_TOP as i32);
@@ -450,12 +457,9 @@ impl NoiseBuilder {
 
       // increment all oscillators
       for u in units.iter_mut() {
-        if !u.enabled {
-          continue;
-        }
         // freq → fre
         // Already reversed and scaled by volume in `get_sample`.
-        let fre = u.frequency.get_sample::<true>(&self.tables);
+        let fre = u.frequency.get_sample::<true>();
         let main_inc = u.main.increment * frequency.get(fre as i32) as f64;
         u.main.increment(main_inc, rand_tbl);
         let freq_inc = u.frequency.increment;
