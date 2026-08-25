@@ -5,10 +5,10 @@
  *          tools/wasm_stub_panic.ts <wasm_file> [extra binaryen flags...]
  *
  * `panic = "abort"` still formats the panic message first, which keeps
- * `core::fmt` and the panic hook in the binary. Nothing can observe that
- * message here (the module imports nothing, so it has nowhere to write), so the
- * entry points are replaced by a trap and the following `wasm-opt` pass drops
- * everything that only they reached. This is what the nightly-only
+ * `core::fmt` in the binary. Nothing can observe that message here (the module
+ * imports nothing, so it has nowhere to write), so the entry points are
+ * replaced by a trap and the following `wasm-opt` pass drops everything that
+ * only they reached. This is what the nightly-only
  * `panic_immediate_abort` does, applied to the finished module.
  *
  * The `Location`s and source paths the removed calls pointed at are blanked as
@@ -19,7 +19,13 @@
  * the final `wasm-opt` run drops it again.
  */
 
-/** Mangled name fragments of the functions a panic goes through. */
+/**
+ * Mangled name fragments of the functions a panic goes through.
+ *
+ * `core` and `alloc` only: the crate is `no_std` on wasm, so `std::panicking`
+ * (`rust_panic`, `rust_start_panic`, `begin_panic`) is not linked in.
+ * `rust_begin_unwind` is the `#[panic_handler]` in `src/wasm/mod.rs`.
+ */
 const PANIC_ENTRY_POINTS = [
   "9panicking",
   "unwrap_failed",
@@ -30,9 +36,6 @@ const PANIC_ENTRY_POINTS = [
   "capacity_overflow",
   "handle_alloc_error",
   "rust_begin_unwind",
-  "rust_panic",
-  "rust_start_panic",
-  "begin_panic",
 ];
 
 const [wasmFile, ...extraFlags] = Deno.args;

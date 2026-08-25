@@ -1,5 +1,6 @@
 use crate::error::PxtoneError;
 use crate::reader::Reader;
+use alloc::vec::Vec;
 
 // Event kind constants
 pub const EVENT_KIND_NULL: u8 = 0;

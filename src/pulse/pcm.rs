@@ -2,6 +2,7 @@
 // RIFF WAV loading and channel/bit-depth/sample-rate conversion
 
 use crate::error::PxtoneError;
+use alloc::{vec, vec::Vec};
 
 #[derive(Debug)]
 pub(crate) struct Pcm {
@@ -219,18 +220,22 @@ impl Pcm {
 
 #[cfg(target_feature = "simd128")]
 mod simd {
-  use std::arch::wasm32::*;
+  use core::arch::wasm32::*;
 
   // mono 16bit → stereo 16bit: duplicate each i16 sample into both channels.
   // Processes 4 samples per iteration using i16x8_shuffle.
   pub(super) unsafe fn mono16_to_stereo(src: &[u8], dst: &mut [u8], n: usize) {
     let mut i = 0;
     while i + 4 <= n {
-      // Load 8 bytes (4 i16 mono samples), zero-extend upper 8 bytes
-      let input = v128_load64_zero(src.as_ptr().add(i * 2) as *const u64);
-      // Duplicate each lane: [s0,s1,s2,s3,_,_,_,_] → [s0,s0,s1,s1,s2,s2,s3,s3]
-      let result = i16x8_shuffle::<0, 0, 1, 1, 2, 2, 3, 3>(input, input);
-      v128_store(dst.as_mut_ptr().add(i * 4) as *mut v128, result);
+      // SAFETY: `i + 4 <= n` keeps the 8 bytes read and the 16 written inside
+      // the caller's buffers, and wasm32 allows unaligned vector access.
+      unsafe {
+        // Load 8 bytes (4 i16 mono samples), zero-extend upper 8 bytes
+        let input = v128_load64_zero(src.as_ptr().add(i * 2) as *const u64);
+        // Duplicate each lane: [s0,s1,s2,s3,_,_,_,_] → [s0,s0,s1,s1,s2,s2,s3,s3]
+        let result = i16x8_shuffle::<0, 0, 1, 1, 2, 2, 3, 3>(input, input);
+        v128_store(dst.as_mut_ptr().add(i * 4) as *mut v128, result);
+      }
       i += 4;
     }
     // Scalar tail
@@ -250,20 +255,24 @@ mod simd {
   pub(super) unsafe fn stereo16_to_mono(src: &[u8], dst: &mut [u8], n: usize) {
     let mut i = 0;
     while i + 4 <= n {
-      // Load 16 bytes = 4 stereo pairs as [L0,R0,L1,R1,L2,R2,L3,R3] in i16x8
-      let input = v128_load(src.as_ptr().add(i * 4) as *const v128);
-      // Pairwise signed add → i32x4: [(L0+R0),(L1+R1),(L2+R2),(L3+R3)]
-      let sums = i32x4_extadd_pairwise_i16x8(input);
-      // Truncation-toward-zero division by 2:
-      //   For negative odd sums, arithmetic right shift rounds toward -∞
-      //   but integer division rounds toward 0.  Correction: add 1 to negative sums.
-      let sign = i32x4_shr(sums, 31); // 0xFFFFFFFF for negative, 0 for non-negative
-      let correction = v128_and(sign, i32x4_splat(1));
-      let avgs = i32x4_shr(i32x4_add(sums, correction), 1);
-      // Narrow i32x4 → i16: lower 4 lanes from avgs, upper 4 discarded
-      let result = i16x8_narrow_i32x4(avgs, avgs);
-      // Write lower 8 bytes (4 i16 mono samples)
-      (dst.as_mut_ptr().add(i * 2) as *mut i64).write_unaligned(i64x2_extract_lane::<0>(result));
+      // SAFETY: `i + 4 <= n` keeps the 16 bytes read and the 8 written inside
+      // the caller's buffers, and wasm32 allows unaligned vector access.
+      unsafe {
+        // Load 16 bytes = 4 stereo pairs as [L0,R0,L1,R1,L2,R2,L3,R3] in i16x8
+        let input = v128_load(src.as_ptr().add(i * 4) as *const v128);
+        // Pairwise signed add → i32x4: [(L0+R0),(L1+R1),(L2+R2),(L3+R3)]
+        let sums = i32x4_extadd_pairwise_i16x8(input);
+        // Truncation-toward-zero division by 2:
+        //   For negative odd sums, arithmetic right shift rounds toward -∞
+        //   but integer division rounds toward 0.  Correction: add 1 to negative sums.
+        let sign = i32x4_shr(sums, 31); // 0xFFFFFFFF for negative, 0 for non-negative
+        let correction = v128_and(sign, i32x4_splat(1));
+        let avgs = i32x4_shr(i32x4_add(sums, correction), 1);
+        // Narrow i32x4 → i16: lower 4 lanes from avgs, upper 4 discarded
+        let result = i16x8_narrow_i32x4(avgs, avgs);
+        // Write lower 8 bytes (4 i16 mono samples)
+        (dst.as_mut_ptr().add(i * 2) as *mut i64).write_unaligned(i64x2_extract_lane::<0>(result));
+      }
       i += 4;
     }
     // Scalar tail
@@ -283,15 +292,19 @@ mod simd {
   pub(super) unsafe fn bits8_to_16(src: &[u8], dst: &mut [u8], n: usize) {
     let mut i = 0;
     while i + 8 <= n {
-      // Load 8 u8s into lower 8 lanes, upper 8 lanes = 0
-      let input = v128_load64_zero(src.as_ptr().add(i) as *const u64);
-      // Zero-extend u8×8 → i16×8: [u0..u7]
-      let extended = i16x8_extend_low_u8x16(input);
-      // Subtract 128: [-128..127]
-      let centered = i16x8_sub(extended, i16x8_splat(128));
-      // Shift left 8 (× 256): [-32768..32512]
-      let result = i16x8_shl(centered, 8);
-      v128_store(dst.as_mut_ptr().add(i * 2) as *mut v128, result);
+      // SAFETY: `i + 8 <= n` keeps the 8 bytes read and the 16 written inside
+      // the caller's buffers, and wasm32 allows unaligned vector access.
+      unsafe {
+        // Load 8 u8s into lower 8 lanes, upper 8 lanes = 0
+        let input = v128_load64_zero(src.as_ptr().add(i) as *const u64);
+        // Zero-extend u8×8 → i16×8: [u0..u7]
+        let extended = i16x8_extend_low_u8x16(input);
+        // Subtract 128: [-128..127]
+        let centered = i16x8_sub(extended, i16x8_splat(128));
+        // Shift left 8 (× 256): [-32768..32512]
+        let result = i16x8_shl(centered, 8);
+        v128_store(dst.as_mut_ptr().add(i * 2) as *mut v128, result);
+      }
       i += 8;
     }
     // Scalar tail

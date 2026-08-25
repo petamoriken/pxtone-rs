@@ -6,6 +6,7 @@ use crate::pulse::noise_builder::NoiseBuilder;
 use crate::pulse::oscillator::{Oscillator, Point};
 use crate::pulse::pcm::Pcm;
 use crate::reader::Reader;
+use alloc::{string::String, vec, vec::Vec};
 use tinyvec::TinyVec;
 
 // ---- Constants ----

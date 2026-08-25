@@ -13,8 +13,9 @@ use crate::pulse::noise::Noise;
 use crate::pulse::noise_builder::NoiseBuilder;
 use crate::reader::Reader;
 use crate::text::Text;
-use crate::unit::{MAX_CHANNEL, MAX_GROUP_COUNT, MAX_UNIT_CONTROL_VOICE, Unit};
+use crate::unit::{MAX_CHANNEL, MAX_GROUP_COUNT, MAX_UNIT_CONTROL_VOICE, MixPlanes, Unit};
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VOICE_FLAG_WAVELOOP, Woice};
+use alloc::{string::String, vec, vec::Vec};
 use tinyvec::ArrayVec;
 
 // ---- Constants ----
@@ -143,7 +144,7 @@ impl Default for VomitPreparation {
 /// `%` would call libm's `fmod` on wasm, which drags 128 bit division in. This
 /// only runs when seeking into a note, where sub-sample drift is inaudible.
 fn wrap_sample_pos(pos: f64, body: f64) -> f64 {
-  let wrapped = pos - body * (pos / body).floor();
+  let wrapped = pos - body * lite_math::floor(pos / body);
   // Rounding can put the result just outside the interval.
   if wrapped >= 0.0 && wrapped < body {
     wrapped
@@ -180,16 +181,76 @@ fn voice_name(index: usize) -> String {
   name
 }
 
-/// Writes one 16-bit LE interleaved frame at sample index `pos`.
-/// `byte_per_smp` is either 2 (mono) or 4 (stereo).
-#[inline(always)]
-fn write_frame(buf: &mut [u8], pos: usize, byte_per_smp: usize, sample: [i16; 2]) {
-  let offset = pos * byte_per_smp;
-  if byte_per_smp == 4 {
-    let packed = sample[0] as u16 as u32 | ((sample[1] as u16 as u32) << 16);
-    buf[offset..offset + 4].copy_from_slice(&packed.to_le_bytes());
-  } else {
-    buf[offset..offset + 2].copy_from_slice(&sample[0].to_le_bytes());
+/// The mixer accumulator, seen as one contiguous plane of samples per
+/// (channel, group).
+///
+/// Both mixing paths share the view: the block path backs it with `MOO_BLOCK`
+/// samples per plane, the event path with one. Resolving a group means slicing
+/// a plane once for the whole block instead of indexing one accumulator per
+/// sample, which is what lets the group count stay a runtime value -- only the
+/// planes the song actually uses are cleared, mixed and summed.
+struct MixView<'a> {
+  /// `MAX_CHANNEL * (MAX_GROUP_COUNT + 1) * stride` accumulators.
+  data: &'a mut [i32],
+  /// Samples per plane.
+  stride: usize,
+  /// Samples in the block. Never more than `stride`.
+  count: usize,
+}
+
+/// Planes per channel: the groups, plus a bin for group numbers the song never
+/// declared.
+const MIX_PLANES: usize = MAX_GROUP_COUNT + 1;
+
+impl MixView<'_> {
+  /// One group's channel planes, cut to the block.
+  ///
+  /// A group number past the last plane lands in the bin, which nothing reads:
+  /// the C++ drops the output of a unit numbered past the groups it knows
+  /// about, and writing it somewhere keeps the test out of the sample loop.
+  #[inline]
+  fn planes(&mut self, group: usize) -> MixPlanes<'_> {
+    let base = group.min(MAX_GROUP_COUNT) * self.stride;
+    let (lo, hi) = self.data.split_at_mut(MIX_PLANES * self.stride);
+    [
+      &mut lo[base..base + self.count],
+      &mut hi[base..base + self.count],
+    ]
+  }
+
+  /// Clears the planes the song uses.
+  #[inline]
+  fn clear(&mut self, group_count: usize, channels: usize) {
+    for ch in 0..channels {
+      let base = ch * MIX_PLANES * self.stride;
+      for g in 0..group_count {
+        self.data[base + g * self.stride..][..self.count].fill(0);
+      }
+    }
+  }
+
+  /// Sums the used groups of every channel into its first plane, group by group
+  /// so that each pass runs straight down a plane.
+  #[inline]
+  fn fold(&mut self, group_count: usize, channels: usize) {
+    for ch in 0..channels {
+      let base = ch * MIX_PLANES * self.stride;
+      let (head, rest) =
+        self.data[base..base + group_count * self.stride].split_at_mut(self.stride);
+      let head = &mut head[..self.count];
+      for plane in rest.chunks_exact(self.stride) {
+        for (work, &value) in head.iter_mut().zip(&plane[..self.count]) {
+          *work += value;
+        }
+      }
+    }
+  }
+
+  /// A channel's first plane, holding the sum left by [`MixView::fold`].
+  #[inline]
+  fn folded(&self, ch: usize) -> &[i32] {
+    let base = ch * MIX_PLANES * self.stride;
+    &self.data[base..base + self.count]
   }
 }
 
@@ -1000,10 +1061,10 @@ impl PxtoneService {
     event_safe.min(end_safe).min(fade_safe)
   }
 
-  /// Synthesizes the single sample on which events fire, writing it into
-  /// `out[0..channels]`. Returns `true` while playing, `false` when the end is
+  /// Synthesizes the single sample on which events fire, writing its frame to
+  /// the front of `buf`. Returns `true` while playing, `false` when the end is
   /// reached. Event-free stretches go through [`PxtoneService::moo_block`].
-  fn moo_pxtone_sample(&mut self, out: &mut [i16; 2]) -> bool {
+  fn moo_pxtone_sample(&mut self, buf: &mut [u8], byte_per_smp: usize) -> bool {
     let channel_count = self.dst_channels as usize;
     let channels = self.dst_channels;
     let samples_per_tick = self.moo_samples_per_tick;
@@ -1013,9 +1074,13 @@ impl PxtoneService {
     let sample_end = self.moo_sample_end;
     let sample_stride = self.moo_sample_stride;
 
-    // Runs once per event boundary, so it always takes the full-width
-    // accumulator rather than being monomorphized over the group count.
-    let mut group_smps = [[0i32; MAX_GROUP_COUNT]; MAX_CHANNEL];
+    // Runs once per event boundary, so the accumulator is one sample wide.
+    let mut group_smps = [[0i32; MIX_PLANES]; MAX_CHANNEL];
+    let mut mix = MixView {
+      data: group_smps.as_flattened_mut(),
+      stride: 1,
+      count: 1,
+    };
 
     // ---- 1. Envelope processing ----
     // Every unit's envelope has to be up to date before events are dispatched,
@@ -1079,14 +1144,29 @@ impl PxtoneService {
           }
         }
         if !unit.is_flushed() {
-          unit.tone_supple(params, &mut group_smps, channel_count, time_pan_idx);
+          unit.tone_supple(
+            params,
+            &mut mix.planes(params.group_index),
+            channel_count,
+            time_pan_idx,
+          );
         }
       }
     }
 
     // ---- 4. Effects → output ----
-    self.moo_effects(core::slice::from_mut(&mut group_smps), channel_count);
-    self.moo_output(&group_smps, channel_count, out);
+    let group_count = self.moo_group_count;
+    self.moo_effects(&mut mix, channel_count);
+    let fade = [(self.moo_fade_count >> 8) as i32];
+    let fading = self.moo_fade_direction != 0 && self.moo_fade_max != 0;
+    self.moo_output(
+      &mut mix,
+      group_count,
+      channel_count,
+      &fade[..usize::from(fading)],
+      buf,
+      byte_per_smp,
+    );
 
     // ---- 5. Increment ----
     self.moo_sample_count += 1;
@@ -1128,42 +1208,87 @@ impl PxtoneService {
   /// Out of line: the block path calls it once per block and the event path once
   /// per sample, so its size is worth more than the call.
   #[inline(never)]
-  fn moo_effects<const GROUPS: usize>(
-    &mut self,
-    mix: &mut [[[i32; GROUPS]; MAX_CHANNEL]],
-    channel_count: usize,
-  ) {
+  fn moo_effects(&mut self, mix: &mut MixView<'_>, channel_count: usize) {
     for od in &self.overdrives {
-      od.tone_supple(mix, channel_count);
+      od.tone_supple(&mut mix.planes(od.group), channel_count);
     }
     for d in &mut self.delays {
-      d.tone_supple(mix, channel_count);
+      d.tone_supple(&mut mix.planes(d.group), channel_count);
     }
   }
 
-  /// Sums one sample's groups and applies fade, master volume and clipping.
-  #[inline(always)]
-  fn moo_output<const GROUPS: usize>(
+  /// Sums the used groups, applies fade, master volume and clipping, and writes
+  /// the block's frames.
+  ///
+  /// `fade` holds the fade numerator of each sample it still applies to, which
+  /// is a prefix of the block: a fade-in stops partway through the block it
+  /// completes in, and `moo_safe_count` keeps a fade-out from ending inside one
+  /// at all. An empty slice means no fade is running.
+  fn moo_output(
     &self,
-    group_smps: &[[i32; GROUPS]; MAX_CHANNEL],
+    mix: &mut MixView<'_>,
+    group_count: usize,
     channel_count: usize,
-    out: &mut [i16; 2],
+    fade: &[i32],
+    buf: &mut [u8],
+    byte_per_smp: usize,
   ) {
-    for (groups, out_sample) in group_smps.iter().zip(out.iter_mut()).take(channel_count) {
-      let mut work: i32 = groups.iter().sum();
+    let count = mix.count;
+    mix.fold(group_count, channel_count);
 
-      // Fade
-      if self.moo_fade_direction != 0 && self.moo_fade_max != 0 {
-        work = work * (self.moo_fade_count >> 8) as i32 / self.moo_fade_max as i32;
+    if !fade.is_empty() {
+      let fade_max = self.moo_fade_max as i32;
+      for ch in 0..channel_count {
+        let base = ch * MIX_PLANES * mix.stride;
+        for (work, &numerator) in mix.data[base..base + count].iter_mut().zip(fade) {
+          *work = *work * numerator / fade_max;
+        }
       }
-
-      // Master volume
-      work = (work as f32 * self.moo_master_volume) as i32;
-
-      // Clip
-      work = work.clamp(-self.moo_output_clip, self.moo_output_clip);
-      *out_sample = work as i16;
     }
+
+    let volume = self.moo_master_volume;
+    let clip = self.moo_output_clip;
+    let scale = |work: i32| ((work as f32 * volume) as i32).clamp(-clip, clip) as i16;
+
+    if byte_per_smp == 4 {
+      let (left, right) = (mix.folded(0), mix.folded(1));
+      let (frames, _) = buf[..count * 4].as_chunks_mut::<4>();
+      for ((frame, &l), &r) in frames.iter_mut().zip(left).zip(right) {
+        let packed = scale(l) as u16 as u32 | ((scale(r) as u16 as u32) << 16);
+        *frame = packed.to_le_bytes();
+      }
+    } else {
+      let (frames, _) = buf[..count * 2].as_chunks_mut::<2>();
+      for (frame, &l) in frames.iter_mut().zip(mix.folded(0)) {
+        *frame = scale(l).to_le_bytes();
+      }
+    }
+  }
+
+  /// Fills `out` with the fade numerator of each sample of a block of `count`
+  /// and steps the fade on by the block. Returns how many of them the fade
+  /// still applies to, which is zero when none is running.
+  fn moo_fade_block(&mut self, out: &mut [i32; MOO_BLOCK], count: usize) -> usize {
+    if self.moo_fade_direction == 0 {
+      return 0;
+    }
+    let scaled = self.moo_fade_max != 0;
+    let mut applied = 0;
+    for slot in out[..count].iter_mut() {
+      if self.moo_fade_direction == 0 {
+        break;
+      }
+      *slot = (self.moo_fade_count >> 8) as i32;
+      applied += 1;
+      if self.moo_fade_direction < 0 {
+        // `moo_safe_count` keeps the block clear of the sample a fade-out ends
+        // on, so the count never runs out here.
+        self.moo_fade_count -= 1;
+      } else {
+        self.moo_fade_step_in();
+      }
+    }
+    if scaled { applied } else { 0 }
   }
 
   /// One step of a fade-in. Fade-outs are handled by the caller because they
@@ -1188,16 +1313,23 @@ impl PxtoneService {
   ///
   /// The caller must guarantee (via `moo_safe_count`) that no event fires and
   /// that neither the fade-out nor the end of the song lands inside the block.
-  fn moo_block<const GROUPS: usize>(&mut self, buf: &mut [u8], byte_per_smp: usize, count: usize) {
-    let mut mix = [[[0i32; GROUPS]; MAX_CHANNEL]; MOO_BLOCK];
-    let mix = &mut mix[..count];
-
+  fn moo_block(
+    &mut self,
+    mix: &mut MixView<'_>,
+    buf: &mut [u8],
+    byte_per_smp: usize,
+    count: usize,
+  ) {
     let channel_count = self.dst_channels as usize;
     let channels = self.dst_channels;
+    let group_count = self.moo_group_count;
     let mute_by_unit = self.moo_mute_by_unit;
     let smooth_samples = self.moo_sample_smooth;
     let sample_stride = self.moo_sample_stride;
     let time_pan_idx = self.moo_time_pan_index;
+
+    mix.count = count;
+    mix.clear(group_count, channel_count);
 
     {
       let woices = &self.woices;
@@ -1205,7 +1337,7 @@ impl PxtoneService {
       for (unit, &wi) in self.units.iter_mut().zip(self.unit_woice_idxs.iter()) {
         if let Some(woice) = woices.get(wi) {
           unit.tone_block(
-            mix,
+            &mut mix.planes(unit.group_index),
             mute_by_unit,
             channels,
             channel_count,
@@ -1221,17 +1353,16 @@ impl PxtoneService {
 
     self.moo_effects(mix, channel_count);
 
-    for (i, groups) in mix.iter().enumerate() {
-      let mut sample = [0i16; 2];
-      self.moo_output(groups, channel_count, &mut sample);
-      write_frame(buf, i, byte_per_smp, sample);
-
-      if self.moo_fade_direction < 0 {
-        self.moo_fade_count -= 1;
-      } else if self.moo_fade_direction > 0 {
-        self.moo_fade_step_in();
-      }
-    }
+    let mut fade = [0i32; MOO_BLOCK];
+    let applied = self.moo_fade_block(&mut fade, count);
+    self.moo_output(
+      mix,
+      group_count,
+      channel_count,
+      &fade[..applied],
+      buf,
+      byte_per_smp,
+    );
 
     self.moo_sample_count += count as u32;
     self.moo_time_pan_index = (time_pan_idx + count) & (BUFSIZE_TIMEPAN - 1);
@@ -1403,23 +1534,23 @@ impl PxtoneService {
       return 0;
     }
 
-    // Songs that route everything through group 0 get a one-element mixer
-    // accumulator. That makes the group index a constant, so the backend can
-    // keep the accumulator in registers instead of on the stack — worth a
-    // separate instantiation because the accumulator is touched by every unit
-    // and every effect on every sample.
-    if self.moo_group_count == 1 {
-      self.moo_run::<1>(buf, byte_per_smp)
-    } else {
-      self.moo_run::<MAX_GROUP_COUNT>(buf, byte_per_smp)
-    }
+    self.moo_run(buf, byte_per_smp)
   }
 
-  /// Body of [`PxtoneService::moo`], specialised on the width of the mixer
-  /// accumulator. `GROUPS` must be at least [`PxtoneService::calc_group_count`].
-  fn moo_run<const GROUPS: usize>(&mut self, buf: &mut [u8], byte_per_smp: usize) -> usize {
+  /// Body of [`PxtoneService::moo`].
+  fn moo_run(&mut self, buf: &mut [u8], byte_per_smp: usize) -> usize {
     let total = buf.len() / byte_per_smp;
     let mut pos = 0usize;
+
+    // One accumulator for the whole call. Only the planes of the groups the
+    // song uses are ever touched, so the unused ones cost nothing but address
+    // space.
+    let mut data = [0i32; MAX_CHANNEL * MIX_PLANES * MOO_BLOCK];
+    let mut mix = MixView {
+      data: &mut data,
+      stride: MOO_BLOCK,
+      count: MOO_BLOCK,
+    };
 
     while pos < total {
       // Number of consecutive samples that need no event/boundary check.
@@ -1427,19 +1558,22 @@ impl PxtoneService {
 
       while safe > 0 {
         let count = safe.min(MOO_BLOCK);
-        self.moo_block::<GROUPS>(&mut buf[pos * byte_per_smp..], byte_per_smp, count);
+        self.moo_block(
+          &mut mix,
+          &mut buf[pos * byte_per_smp..],
+          byte_per_smp,
+          count,
+        );
         pos += count;
         safe -= count;
       }
 
       // Boundary sample: run with full event dispatch.
       if pos < total {
-        let mut sample = [0i16; 2];
-        if !self.moo_pxtone_sample(&mut sample) {
+        if !self.moo_pxtone_sample(&mut buf[pos * byte_per_smp..], byte_per_smp) {
           self.playback_ended = true;
           break;
         }
-        write_frame(buf, pos, byte_per_smp, sample);
         pos += 1;
       }
     }

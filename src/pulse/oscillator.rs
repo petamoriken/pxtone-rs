@@ -1,6 +1,8 @@
 // Oscillator (pxtnPulse_Oscillator)
 // Generates samples one at a time from a waveform table
 
+use alloc::vec::Vec;
+
 #[derive(Clone, Debug)]
 pub(crate) struct Point {
   pub(crate) x: i32,
@@ -45,7 +47,7 @@ impl Oscillator {
   /// In `f64` throughout, as the C++ is: at `f32` the table entries this feeds
   /// come out one off after truncation.
   pub(crate) fn get_one_sample_overtone(&self, index: u32) -> f64 {
-    use std::f64::consts::PI;
+    use core::f64::consts::PI;
     let mut work = 0.0f64;
     for p in &self.points {
       let sss = 2.0 * PI * p.x as f64 * index as f64 / self.sample_count as f64;

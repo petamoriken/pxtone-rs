@@ -1,6 +1,7 @@
 use crate::error::PxtoneError;
 use crate::reader::Reader;
-use crate::unit::{MAX_CHANNEL, MAX_GROUP_COUNT};
+use crate::unit::{MAX_GROUP_COUNT, MixPlanes};
+use alloc::{vec, vec::Vec};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u16)]
@@ -98,40 +99,39 @@ impl Delay {
   /// Both channels are handled together for the same reason. Samples are still
   /// visited in order, which is what the ring requires.
   #[inline(never)]
-  pub(crate) fn tone_supple<const GROUPS: usize>(
-    &mut self,
-    mix: &mut [[[i32; GROUPS]; MAX_CHANNEL]],
-    channels: usize,
-  ) {
+  pub(crate) fn tone_supple(&mut self, planes: &mut MixPlanes<'_>, channels: usize) {
     let buffer_size = self.buffer_size;
     if buffer_size == 0 {
       return;
     }
     let rate = self.rate_s32;
-    // `PxtoneService::calc_group_count` sizes GROUPS so that every effect's
-    // group is in range; spelling that out lets GROUPS == 1 fold to index 0.
-    debug_assert!(self.group < GROUPS);
-    let group = if GROUPS == 1 { 0 } else { self.group };
     let played = self.played;
-    let mut offset = self.offset;
+    let start = self.offset;
+    let mut offset = start;
 
-    for group_smps in mix.iter_mut() {
-      for (buf, groups) in self
-        .bufs
-        .iter_mut()
-        .zip(group_smps.iter_mut())
-        .take(channels)
-      {
-        let slot = &mut buf[offset];
-        let a = *slot * rate / 100;
-        if played {
-          groups[group] += a;
+    // A channel's ring is its own, so walking one channel through the block and
+    // then the other visits every slot in the same order as walking the block
+    // and the channels the other way round. Cut at the wrap, each run is a
+    // straight walk of the ring against a straight walk of the plane.
+    for (buf, plane) in self.bufs.iter_mut().zip(planes.iter_mut()).take(channels) {
+      offset = start;
+      let mut rest = &mut plane[..];
+      while !rest.is_empty() {
+        let n = (buffer_size - offset).min(rest.len());
+        let (run, tail) = rest.split_at_mut(n);
+        for (slot, work) in buf[offset..offset + n].iter_mut().zip(run.iter_mut()) {
+          let a = *slot * rate / 100;
+          if played {
+            *work += a;
+          }
+          *slot = *work;
         }
-        *slot = groups[group];
+        rest = tail;
+        offset += n;
+        if offset == buffer_size {
+          offset = 0;
+        }
       }
-
-      let next = offset + 1;
-      offset = if next < buffer_size { next } else { 0 };
     }
 
     self.offset = offset;

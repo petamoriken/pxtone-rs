@@ -4,10 +4,35 @@ use crate::event::{
 };
 use crate::pulse::frequency::FrequencyTable;
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, VoiceInstance};
+use alloc::vec::Vec;
 
 pub const MAX_CHANNEL: usize = 2;
 pub const MAX_UNIT_CONTROL_VOICE: usize = 2;
 pub(crate) const MAX_GROUP_COUNT: usize = 7;
+
+/// One group's mixer accumulator over the samples of a block: `[channel][sample]`.
+///
+/// The samples of a plane are contiguous, so a unit, an effect and the output
+/// sum each walk one straight through instead of striding over the groups they
+/// do not touch.
+pub(crate) type MixPlanes<'a> = [&'a mut [i32]; MAX_CHANNEL];
+
+/// Adds `ring`, read from slot `from` onwards and wrapping once, into `dst`.
+///
+/// `dst` must be no longer than the ring. Split at the wrap the two halves are
+/// plain contiguous adds.
+#[inline]
+fn add_ring(dst: &mut [i32], ring: &[i32; BUFSIZE_TIMEPAN], from: usize) {
+  let (head, tail) = ring.split_at(from & (BUFSIZE_TIMEPAN - 1));
+  let split = tail.len().min(dst.len());
+  let (first, second) = dst.split_at_mut(split);
+  for (w, &v) in first.iter_mut().zip(tail) {
+    *w += v;
+  }
+  for (w, &v) in second.iter_mut().zip(head) {
+    *w += v;
+  }
+}
 
 /// `x / 2^SHIFT`, truncating toward zero, written out as shifts.
 ///
@@ -49,7 +74,10 @@ pub(crate) struct ToneParams {
   voice_flags: [u32; MAX_UNIT_CONTROL_VOICE],
   /// Whether this unit renders silence because it is muted.
   muted: bool,
-  group_index: usize,
+  pub(crate) group_index: usize,
+  /// Pan delay per channel, already reduced modulo the ring. The C++ lets the
+  /// delay run past the ring for sample rates below 44100, where reading it
+  /// back lands on the current turn; taking the remainder up front says so.
   pan_delays: [usize; MAX_CHANNEL],
   /// Whether each voice's instrument carries an envelope, and how long its wave
   /// body is. Both live on the instrument rather than the unit, so the sample
@@ -447,9 +475,9 @@ impl Unit {
   /// Only valid when no event fires during the block: a unit that is idle at the
   /// start then stays idle, so the whole block can be skipped for it.
   #[allow(clippy::too_many_arguments)]
-  pub(crate) fn tone_block<const GROUPS: usize>(
+  pub(crate) fn tone_block(
     &mut self,
-    mix: &mut [[[i32; GROUPS]; MAX_CHANNEL]],
+    planes: &mut MixPlanes<'_>,
     mute_by_unit: bool,
     channels: u8,
     channel_count: usize,
@@ -459,13 +487,14 @@ impl Unit {
     sample_stride: f32,
     instances: &[VoiceInstance],
   ) {
+    let count = planes[0].len();
     if !self.is_sounding() && self.is_flushed() {
       // The C++ increments every unit's key on every sample, sounding or not,
       // so a portamento walks on through a rest and the key the next note
       // starts from has moved. With no portamento in flight the increment is
       // idempotent, so once stands in for the whole block.
       if self.portamento_duration != 0 && self.key_delta != 0 {
-        for _ in 0..mix.len() {
+        for _ in 0..count {
           self.tone_increment_key();
         }
       } else {
@@ -481,38 +510,52 @@ impl Unit {
     // case, so calling it once leaves the same state behind.
     let steady = self.portamento_duration == 0 || self.key_delta == 0;
 
+    // Rendering fills the pan-delay ring and reading it back trails behind by
+    // the pan delay, so a run longer than the slots left before the ring turns
+    // over would overwrite history the later reads still need. Rendering a run
+    // of that length and then draining it into the planes keeps every read
+    // standing while leaving the drain a contiguous walk of both.
+    let chunk = BUFSIZE_TIMEPAN - params.pan_delays[0].max(params.pan_delays[1]);
+
     let mut freq = 0.0f32;
     let mut have_freq = false;
 
-    for (i, groups) in mix.iter_mut().enumerate() {
-      let time_pan_index = (time_pan_index + i) & (BUFSIZE_TIMEPAN - 1);
-      if !have_freq || !steady {
-        let key = self.tone_increment_key();
-        freq = frequency.get2(key) * sample_stride;
-        have_freq = true;
+    let mut start = 0;
+    while start < count {
+      let end = (start + chunk).min(count);
+      for i in start..end {
+        let time_pan_index = (time_pan_index + i) & (BUFSIZE_TIMEPAN - 1);
+        if !have_freq || !steady {
+          let key = self.tone_increment_key();
+          freq = frequency.get2(key) * sample_stride;
+          have_freq = true;
+        }
+        if self.is_sounding() {
+          self.tone_sample::<true>(
+            params,
+            channels,
+            time_pan_index,
+            smooth_smp,
+            freq,
+            instances,
+          );
+        } else {
+          self.tone_silence(time_pan_index);
+        }
       }
-      // Taken from what the frame did rather than read back out of `self`.
-      // Rendering one clears the quiet run, so the unit is not flushed; a muted
-      // unit writes silence instead and could still be, but saying otherwise
-      // only costs it a `tone_supple`, and that adds zero: draining zeroes all
-      // 64 ring slots on both channels before it reports itself flushed.
-      let flushed = if self.is_sounding() {
-        self.tone_sample::<true>(
-          params,
-          channels,
-          time_pan_index,
-          smooth_smp,
-          freq,
-          instances,
-        );
-        false
-      } else {
-        self.tone_silence(time_pan_index);
-        self.is_flushed()
-      };
-      if !flushed {
-        self.tone_supple(params, groups, channel_count, time_pan_index);
+
+      // Taken from what the run did rather than read back out of `self`.
+      // Rendering a frame clears the quiet run, so a unit that reports itself
+      // flushed here wrote nothing but silence for the last 64 slots, which is
+      // every slot the run reads back. A muted unit writes silence too and can
+      // report the same, and it costs nothing: those slots are all zero.
+      if !self.is_flushed() {
+        for (ch, plane) in planes.iter_mut().enumerate().take(channel_count) {
+          let from = time_pan_index + start + BUFSIZE_TIMEPAN - params.pan_delays[ch];
+          add_ring(&mut plane[start..end], &self.pan_delay_buffers[ch], from);
+        }
       }
+      start = end;
     }
   }
 
@@ -533,29 +576,29 @@ impl Unit {
       voice_flags: self.voice_flags,
       muted: mute_by_unit && !self.played,
       group_index: self.group_index,
-      pan_delays: [self.pan_delays[0] as usize, self.pan_delays[1] as usize],
+      pan_delays: [
+        self.pan_delays[0] as usize & (BUFSIZE_TIMEPAN - 1),
+        self.pan_delays[1] as usize & (BUFSIZE_TIMEPAN - 1),
+      ],
       has_envelope: [envelope_of(0), envelope_of(1)],
       bodies: [body_of(0), body_of(1)],
     }
   }
 
-  // Adds this unit's pan_delay_buffers values to the per-channel group samples.
-  // Both channels are handled in one call so the caller only walks the unit list once.
+  // Adds one sample of this unit's pan_delay_buffers into its group planes.
+  // Both channels are handled in one call so the caller only walks the unit list
+  // once. The block path drains a whole run at a time instead; see `tone_block`.
   #[inline]
-  pub(crate) fn tone_supple<const GROUPS: usize>(
+  pub(crate) fn tone_supple(
     &self,
     params: ToneParams,
-    group_smps: &mut [[i32; GROUPS]; MAX_CHANNEL],
+    planes: &mut MixPlanes<'_>,
     channels: usize,
     time_pan_index: usize,
   ) {
-    let group_index = params.group_index;
-    if group_index >= GROUPS {
-      return;
-    }
-    for (ch, groups) in group_smps.iter_mut().enumerate().take(channels) {
+    for (ch, plane) in planes.iter_mut().enumerate().take(channels) {
       let idx = (time_pan_index + BUFSIZE_TIMEPAN - params.pan_delays[ch]) & (BUFSIZE_TIMEPAN - 1);
-      groups[group_index] += self.pan_delay_buffers[ch][idx];
+      plane[0] += self.pan_delay_buffers[ch][idx];
     }
   }
 
