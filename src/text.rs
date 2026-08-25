@@ -1,5 +1,6 @@
 use crate::error::PxtoneError;
 use crate::reader::Reader;
+use alloc::{vec, vec::Vec};
 
 /// Song title and comment text loaded from the file.
 ///

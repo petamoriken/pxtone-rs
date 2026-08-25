@@ -64,6 +64,12 @@ pub fn sqrt(x: f64) -> f64 {
 
 /// Returns the largest integer less than or equal to `x`.
 #[inline]
+pub fn floor(x: f64) -> f64 {
+  math::floor(x)
+}
+
+/// Returns the largest integer less than or equal to `x`, in `f32`.
+#[inline]
 pub fn floorf(x: f32) -> f32 {
   math::floorf(x)
 }
@@ -100,6 +106,7 @@ mod sys {
       pub(super) safe fn cos(x: f64) -> f64;
       pub(super) safe fn cosf(x: f32) -> f32;
       pub(super) safe fn sqrt(x: f64) -> f64;
+      pub(super) safe fn floor(x: f64) -> f64;
       pub(super) safe fn floorf(x: f32) -> f32;
       pub(super) safe fn exp(x: f64) -> f64;
       pub(super) safe fn exp2f(x: f32) -> f32;
@@ -141,8 +148,13 @@ mod sys {
     libm::sqrt(x)
   }
 
-  /// LLVM turns this call back into the rounding instruction where the target
+  /// LLVM turns these calls back into the rounding instruction where the target
   /// has one.
+  #[inline]
+  pub(super) fn floor(x: f64) -> f64 {
+    libm::floor(x)
+  }
+
   #[inline]
   pub(super) fn floorf(x: f32) -> f32 {
     libm::floorf(x)
@@ -293,6 +305,40 @@ mod portable {
       safe fn sqrt(x: f64) -> f64;
     }
     sqrt(x)
+  }
+
+  /// `f64.floor`. See [`sqrt`] above for where it comes from.
+  #[cfg(wasm_instructions)]
+  #[allow(unsafe_code, reason = "calls into the hand written wasm assembly")]
+  #[inline]
+  pub(super) fn floor(x: f64) -> f64 {
+    unsafe extern "C" {
+      safe fn lite_math_floor(x: f64) -> f64;
+    }
+    lite_math_floor(x)
+  }
+
+  /// See [`super::floor`]. Reached by the wasm builds with no `src/wasm.s`,
+  /// and by the tests.
+  #[cfg(not(wasm_instructions))]
+  pub(super) fn floor(x: f64) -> f64 {
+    // Every f64 of magnitude 2^52 or above is already an integer, which also
+    // covers the infinities and NaN.
+    if x.is_nan() || x.abs() >= 4_503_599_627_370_496.0 {
+      return x;
+    }
+    let truncated = (x as i64) as f64;
+    let floored = if truncated > x {
+      truncated - 1.0
+    } else {
+      truncated
+    };
+    // `0 as f64` is positive zero, so restore the sign for -0.0 and -0.5..0.
+    if floored == 0.0 {
+      floored.copysign(x)
+    } else {
+      floored
+    }
   }
 
   /// `f32.floor`. See [`sqrt`] above for where it comes from.
@@ -552,6 +598,11 @@ mod tests {
         super::floorf(x).to_bits(),
         super::portable::floorf(x).to_bits()
       );
+      let wide = x as f64;
+      assert_eq!(
+        super::floor(wide).to_bits(),
+        super::portable::floor(wide).to_bits()
+      );
       let (ours, theirs) = (super::cosf(x), super::portable::cosf(x));
       let apart = (ours.to_bits() as i32 - theirs.to_bits() as i32).abs();
       if ours.is_finite() && apart > worst {
@@ -627,6 +678,25 @@ mod tests {
         assert_eq!(floor(x).to_bits(), x.floor().to_bits(), "floor({x})");
       }
       assert!(floor(f32::NAN).is_nan());
+    }
+
+    for floor in [super::floor as fn(f64) -> f64, super::portable::floor] {
+      for i in -100_000..100_000i64 {
+        let x = (i as f64) * 0.125;
+        assert_eq!(floor(x), x.floor(), "floor({x})");
+      }
+      for x in [
+        0.0,
+        -0.0,
+        1e300,
+        -1e300,
+        f64::MAX,
+        f64::INFINITY,
+        f64::NEG_INFINITY,
+      ] {
+        assert_eq!(floor(x).to_bits(), x.floor().to_bits(), "floor({x})");
+      }
+      assert!(floor(f64::NAN).is_nan());
     }
   }
 

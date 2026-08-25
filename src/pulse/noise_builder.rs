@@ -3,6 +3,7 @@ use crate::pulse::frequency::FrequencyTable;
 use crate::pulse::noise::{Noise, NoiseOscillator, WAVETYPE_COUNT, WaveType};
 use crate::pulse::oscillator::{Oscillator, Point};
 use crate::pulse::pcm::Pcm;
+use alloc::{vec, vec::Vec};
 
 const BASIC_SAMPLE_RATE: f64 = 44100.0;
 const BASIC_FREQUENCY: f64 = 100.0;
@@ -164,7 +165,7 @@ pub(crate) struct NoiseBuilder {
 impl NoiseBuilder {
   pub(crate) fn new() -> Self {
     Self {
-      tables: std::array::from_fn(|_| None),
+      tables: core::array::from_fn(|_| None),
     }
   }
 

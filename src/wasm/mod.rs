@@ -3,7 +3,8 @@ use crate::reader::Reader;
 use crate::service::{
   DestinationQuality, PxtoneService, StartPos, VomitPrepFlags, VomitPreparation,
 };
-use std::alloc::{Layout, alloc as sys_alloc, dealloc as sys_dealloc};
+use alloc::alloc::{Layout, alloc as sys_alloc, dealloc as sys_dealloc};
+use alloc::boxed::Box;
 
 #[cfg(not(target_feature = "atomics"))]
 use talc::wasm::{WasmDynamicTalc, new_wasm_dynamic_allocator};
@@ -11,6 +12,13 @@ use talc::wasm::{WasmDynamicTalc, new_wasm_dynamic_allocator};
 #[cfg(not(target_feature = "atomics"))]
 #[global_allocator]
 static TALC: WasmDynamicTalc = new_wasm_dynamic_allocator();
+
+/// Traps rather than unwinding, which the wasm build has no machinery for.
+/// `tools/wasm_stub_panic.ts` then blanks whatever message data is left.
+#[panic_handler]
+fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
+  core::arch::wasm32::unreachable()
+}
 
 #[inline(always)]
 fn pack_ptr_len(ptr: *const u8, len: usize) -> u64 {
@@ -23,11 +31,11 @@ fn pack_ptr_len(ptr: *const u8, len: usize) -> u64 {
 #[unsafe(no_mangle)]
 pub extern "C" fn alloc(size: usize) -> *mut u8 {
   if size == 0 {
-    return std::ptr::null_mut();
+    return core::ptr::null_mut();
   }
   let layout = match Layout::array::<u8>(size) {
     Ok(l) => l,
-    Err(_) => return std::ptr::null_mut(),
+    Err(_) => return core::ptr::null_mut(),
   };
   unsafe { sys_alloc(layout) }
 }
@@ -55,7 +63,7 @@ pub unsafe extern "C" fn dealloc(ptr: *mut u8, size: usize) {
 #[unsafe(no_mangle)]
 pub extern "C" fn service_new(channels: u32, sample_rate: u32) -> *mut PxtoneService {
   if channels != 1 && channels != 2 {
-    return std::ptr::null_mut();
+    return core::ptr::null_mut();
   }
   let quality = DestinationQuality {
     channels: channels as u8,
@@ -63,7 +71,7 @@ pub extern "C" fn service_new(channels: u32, sample_rate: u32) -> *mut PxtoneSer
   };
   match PxtoneService::new(quality) {
     Ok(svc) => Box::into_raw(Box::new(svc)),
-    Err(_) => std::ptr::null_mut(),
+    Err(_) => core::ptr::null_mut(),
   }
 }
 
@@ -90,7 +98,7 @@ pub unsafe extern "C" fn service_read(svc: *mut PxtoneService, data: *const u8, 
     return -1;
   }
   let svc = unsafe { &mut *svc };
-  let slice = unsafe { std::slice::from_raw_parts(data, len) };
+  let slice = unsafe { core::slice::from_raw_parts(data, len) };
   match svc.read(slice.to_vec()) {
     Ok(()) => 0,
     Err(_) => -1,
@@ -107,7 +115,7 @@ pub unsafe extern "C" fn validate(data: *const u8, len: usize) -> i32 {
   if data.is_null() {
     return -1;
   }
-  let slice = unsafe { std::slice::from_raw_parts(data, len) };
+  let slice = unsafe { core::slice::from_raw_parts(data, len) };
   let Ok(mut svc) = PxtoneService::new(DestinationQuality::default()) else {
     return -1;
   };
@@ -191,7 +199,7 @@ pub unsafe extern "C" fn service_moo(svc: *mut PxtoneService, buf: *mut u8, len:
     return 0;
   }
   let svc = unsafe { &mut *svc };
-  let slice = unsafe { std::slice::from_raw_parts_mut(buf, len) };
+  let slice = unsafe { core::slice::from_raw_parts_mut(buf, len) };
   let written = svc.moo(slice);
   pack_ptr_len(buf, written)
 }
@@ -215,7 +223,7 @@ pub unsafe extern "C" fn service_render_noise(
     return 0;
   }
   let svc = unsafe { &mut *svc };
-  let slice = unsafe { std::slice::from_raw_parts(data, data_len) };
+  let slice = unsafe { core::slice::from_raw_parts(data, data_len) };
   let wave = match svc.render_noise(slice) {
     Ok(w) => w,
     Err(_) => return 0,
@@ -232,7 +240,7 @@ pub unsafe extern "C" fn service_render_noise(
   if ptr.is_null() {
     return 0;
   }
-  unsafe { std::ptr::copy_nonoverlapping(wave.samples.as_ptr(), ptr, len) };
+  unsafe { core::ptr::copy_nonoverlapping(wave.samples.as_ptr(), ptr, len) };
   pack_ptr_len(ptr, len)
 }
 
@@ -246,7 +254,7 @@ pub unsafe extern "C" fn validate_noise(data: *const u8, len: usize) -> i32 {
   if data.is_null() {
     return -1;
   }
-  let slice = unsafe { std::slice::from_raw_parts(data, len) };
+  let slice = unsafe { core::slice::from_raw_parts(data, len) };
   let mut noise = Noise::new();
   match noise.read(&mut Reader::new(slice)) {
     Ok(()) => 0,

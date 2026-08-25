@@ -1,6 +1,7 @@
 use crate::error::PxtoneError;
 use crate::reader::Reader;
 use crate::unit::{MAX_GROUP_COUNT, MixPlanes};
+use alloc::{vec, vec::Vec};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 #[repr(u16)]

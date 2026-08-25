@@ -1,6 +1,8 @@
 // Frequency table (pxtnPulse_Frequency)
 //   16 octaves × 12 keys × 16 samples/key = 3072 entries
 
+use alloc::boxed::Box;
+
 const OCTAVE_COUNT: usize = 16;
 const KEY_PER_OCTAVE: usize = 12;
 const FREQUENCY_PER_KEY: usize = 0x10; // 16

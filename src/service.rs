@@ -15,6 +15,7 @@ use crate::reader::Reader;
 use crate::text::Text;
 use crate::unit::{MAX_CHANNEL, MAX_GROUP_COUNT, MAX_UNIT_CONTROL_VOICE, MixPlanes, Unit};
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_BEATFIT, VOICE_FLAG_WAVELOOP, Woice};
+use alloc::{string::String, vec, vec::Vec};
 use tinyvec::ArrayVec;
 
 // ---- Constants ----
@@ -143,7 +144,7 @@ impl Default for VomitPreparation {
 /// `%` would call libm's `fmod` on wasm, which drags 128 bit division in. This
 /// only runs when seeking into a note, where sub-sample drift is inaudible.
 fn wrap_sample_pos(pos: f64, body: f64) -> f64 {
-  let wrapped = pos - body * (pos / body).floor();
+  let wrapped = pos - body * lite_math::floor(pos / body);
   // Rounding can put the result just outside the interval.
   if wrapped >= 0.0 && wrapped < body {
     wrapped

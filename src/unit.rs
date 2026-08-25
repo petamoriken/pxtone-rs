@@ -4,6 +4,7 @@ use crate::event::{
 };
 use crate::pulse::frequency::FrequencyTable;
 use crate::woice::{BUFSIZE_TIMEPAN, VOICE_FLAG_SMOOTH, VOICE_FLAG_WAVELOOP, VoiceInstance};
+use alloc::vec::Vec;
 
 pub const MAX_CHANNEL: usize = 2;
 pub const MAX_UNIT_CONTROL_VOICE: usize = 2;

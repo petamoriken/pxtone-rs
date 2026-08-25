@@ -2,6 +2,7 @@
 // RIFF WAV loading and channel/bit-depth/sample-rate conversion
 
 use crate::error::PxtoneError;
+use alloc::{vec, vec::Vec};
 
 #[derive(Debug)]
 pub(crate) struct Pcm {
