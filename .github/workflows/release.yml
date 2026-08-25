@@ -3,18 +3,21 @@ name: Release
 on:
   workflow_dispatch:
     inputs:
-      tag:
-        description: Release tag (e.g. v0.1.0)
+      version:
+        description: Version to release (e.g. 0.11.1)
         required: true
 
 permissions:
   contents: write
+  pull-requests: write
 
 jobs:
   release:
+    name: Release
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
+      - name: Checkout repository
+        uses: actions/checkout@v7.0.1
 
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
@@ -30,11 +33,99 @@ jobs:
       - name: Setup Deno
         uses: denoland/setup-deno@v2.0.5
 
+      - name: Bump version
+        run: deno run --allow-read --allow-write tools/bump_version.ts "${{ inputs.version }}"
+
+      # This also refreshes Cargo.lock, which the commit below picks up.
       - name: Build WASM
         run: deno task build:wasm
 
-      - name: Create release
+      - name: Commit version bump
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git checkout -b "release/v${{ inputs.version }}"
+          git commit -am "chore: bump version to v${{ inputs.version }}"
+          git push origin "release/v${{ inputs.version }}"
+
+      # A PR opened with GITHUB_TOKEN does not trigger workflows, so the
+      # required checks would never register. RELEASE_PAT is a PAT with
+      # contents and pull-requests write access.
+      - name: Open version bump PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          url=$(gh pr create \
+            --base main \
+            --head "release/v${{ inputs.version }}" \
+            --title "chore: bump version to v${{ inputs.version }}" \
+            --body "Automated version bump for release v${{ inputs.version }}.")
+
+          echo "number=${url##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for checks to be registered
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          for i in {1..30}; do
+            count=$(gh pr checks "${{ steps.pr.outputs.number }}" \
+              --required --json name --jq 'length' 2>/dev/null || true)
+
+            if [ "$count" -gt 0 ]; then
+              exit 0
+            fi
+
+            echo "Checks are not registered yet ($i/30)"
+            sleep 10
+          done
+
+          echo "Timed out waiting for checks to be registered"
+          exit 1
+
+      - name: Wait for required checks
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: gh pr checks "${{ steps.pr.outputs.number }}" --watch --required
+
+      # Squashing rewrites the commit, so the tag cannot point at the branch
+      # head that was pushed above; take the sha the merge produced on main.
+      # The head branch is dropped by the repository's delete-branch-on-merge
+      # setting, so --delete-branch is not passed here.
+      - name: Merge version bump PR
+        id: merge
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_PAT }}
+        run: |
+          gh pr merge "${{ steps.pr.outputs.number }}" --squash
+
+          for i in {1..30}; do
+            sha=$(gh pr view "${{ steps.pr.outputs.number }}" \
+              --json mergeCommit --jq '.mergeCommit.oid // empty')
+
+            if [ -n "$sha" ]; then
+              echo "sha=$sha" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+
+            echo "The squash commit is not available yet ($i/30)"
+            sleep 2
+          done
+
+          echo "Timed out waiting for the squash commit"
+          exit 1
+
+      - name: Tag the squash commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api "repos/${{ github.repository }}/git/refs" \
+            -f ref="refs/tags/v${{ inputs.version }}" \
+            -f sha="${{ steps.merge.outputs.sha }}"
+
+      - name: Create GitHub Release
         uses: softprops/action-gh-release@v3.0.2
         with:
-          tag_name: ${{ github.event.inputs.tag }}
+          tag_name: v${{ inputs.version }}
+          generate_release_notes: true
           files: target/wasm32-unknown-unknown/release-wasm/pxtone.wasm
