@@ -835,7 +835,7 @@ fn dct_iv_slow(buffer: &mut [f32]) {
 	let n = buffer.len();
 	let nmask = (n << 3) - 1;
 	let mcos = (0..8 * n)
-		.map(|i| lite_math::cos_f32(core::f32::consts::FRAC_PI_4 * (i as f32) / (n as f32)))
+		.map(|i| lite_math::cosf(core::f32::consts::FRAC_PI_4 * (i as f32) / (n as f32)))
 		.collect::<Vec<_>>();
 	for i in 0..n {
 		let mut acc = 0.;

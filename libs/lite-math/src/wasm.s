@@ -8,18 +8,18 @@
 
 	.text
 
-	.globl	lite_math_sqrt_f64
-	.type	lite_math_sqrt_f64,@function
-lite_math_sqrt_f64:
-	.functype	lite_math_sqrt_f64 (f64) -> (f64)
+	.globl	lite_math_sqrt
+	.type	lite_math_sqrt,@function
+lite_math_sqrt:
+	.functype	lite_math_sqrt (f64) -> (f64)
 	local.get	0
 	f64.sqrt
 	end_function
 
-	.globl	lite_math_floor_f32
-	.type	lite_math_floor_f32,@function
-lite_math_floor_f32:
-	.functype	lite_math_floor_f32 (f32) -> (f32)
+	.globl	lite_math_floorf
+	.type	lite_math_floorf,@function
+lite_math_floorf:
+	.functype	lite_math_floorf (f32) -> (f32)
 	local.get	0
 	f32.floor
 	end_function
