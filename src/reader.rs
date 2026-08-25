@@ -27,6 +27,12 @@ impl<'a> Reader<'a> {
     self.pos as u64
   }
 
+  /// Bytes left to read. A caller sizing a buffer from a count the file states
+  /// can cap it against this rather than trusting it.
+  pub(crate) fn remaining(&self) -> usize {
+    self.data.len() - self.pos
+  }
+
   /// Moves to an absolute offset. Seeking to the end of the file is allowed.
   pub(crate) fn set_position(&mut self, pos: u64) -> Result<(), PxtoneError> {
     let pos = usize::try_from(pos).map_err(|_| PxtoneError::BrokenFile)?;

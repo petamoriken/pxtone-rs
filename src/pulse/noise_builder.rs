@@ -12,6 +12,8 @@ const SMP_COUNT_RAND: usize = 44100;
 /// 40 key, the range a frequency oscillator's table read is scaled into.
 const KEY_TOP: i32 = 0x3200;
 const SMP_COUNT: usize = (BASIC_SAMPLE_RATE / BASIC_FREQUENCY) as usize; // 441
+/// Frames a noise render accumulates before writing them out.
+const BLOCK_FRAMES: usize = 1024;
 
 // ---- PRNG ----
 struct Rand {
@@ -34,20 +36,28 @@ impl Rand {
 }
 
 // ---- Internal oscillator state ----
-#[derive(Clone)]
-struct OscState {
+#[derive(Clone, Copy)]
+struct OscState<'a> {
   increment: f64,
   offset: f64,
   volume: f64,
   wave_type: WaveType,
+  /// The wave table this oscillator reads, resolved once. Empty for the two
+  /// random types, which read none, and for a type with no table built.
+  table: &'a [i16],
   reversed: bool,
   rdm_start: i16,
   rdm_margin: i32,
   rdm_index: usize,
 }
 
-impl OscState {
-  fn from_design(osc: &NoiseOscillator, sample_rate: u32, rand_tbl: &[i16]) -> Self {
+impl<'a> OscState<'a> {
+  fn from_design(
+    osc: &NoiseOscillator,
+    sample_rate: u32,
+    tables: &'a [Option<Vec<i16>>; WAVETYPE_COUNT],
+    rand_tbl: &[i16],
+  ) -> Self {
     let ran = matches!(osc.wave_type, WaveType::Random | WaveType::Random2);
     let increment =
       (BASIC_SAMPLE_RATE / sample_rate as f64) * (osc.frequency as f64 / BASIC_FREQUENCY);
@@ -77,6 +87,7 @@ impl OscState {
       offset,
       volume,
       wave_type: osc.wave_type,
+      table: tables[osc.wave_type as usize].as_deref().unwrap_or(&[]),
       reversed: osc.reversed,
       rdm_start: 0,
       rdm_margin,
@@ -93,7 +104,7 @@ impl OscState {
   /// `FREQUENCY` marks the oscillator that drives the playback rate rather than
   /// the waveform. A table read of its scales down into the key range; the
   /// random types do not.
-  fn get_sample<const FREQUENCY: bool>(&self, tables: &[Option<Vec<i16>>; WAVETYPE_COUNT]) -> f64 {
+  fn get_sample<const FREQUENCY: bool>(&self) -> f64 {
     let offset = self.offset as usize;
     let work = match self.wave_type {
       WaveType::Random => {
@@ -101,7 +112,7 @@ impl OscState {
       }
       WaveType::Random2 => self.rdm_start as f64,
       _ => {
-        let tbl = tables[self.wave_type as usize].as_deref().unwrap_or(&[]);
+        let tbl = self.table;
         if tbl.is_empty() {
           return 0.0;
         }
@@ -143,17 +154,16 @@ impl OscState {
 }
 
 // ---- Unit state ----
-struct UnitState {
-  enabled: bool,
+struct UnitState<'a> {
   pan: [f64; 2],
   enves: Vec<(u32, f64)>, // (smp, mag)
   enve_index: usize,
   enve_mag_start: f64,
   enve_mag_margin: f64,
   enve_count: u32,
-  main: OscState,
-  frequency: OscState,
-  volume: OscState,
+  main: OscState<'a>,
+  frequency: OscState<'a>,
+  volume: OscState<'a>,
 }
 
 // ---- NoiseBuilder ----
@@ -352,9 +362,13 @@ impl NoiseBuilder {
     let frame_count = (noise.frame_count_44k as f64 / (44100.0 / sample_rate as f64)) as u32;
 
     // Build unit states
+    // The disabled ones neither sound nor advance, so leaving them out is what
+    // skipping them every sample amounted to. The rest keep their order, which
+    // is the order their samples are summed in.
     let mut units: Vec<UnitState> = noise
       .units
       .iter()
+      .filter(|du| du.enabled)
       .map(|du| {
         let pan = if du.pan == 0 {
           [1.0, 1.0]
@@ -383,16 +397,15 @@ impl NoiseBuilder {
         }
 
         UnitState {
-          enabled: du.enabled,
           pan,
           enves,
           enve_index,
           enve_mag_start,
           enve_mag_margin,
           enve_count: 0,
-          main: OscState::from_design(&du.main, sample_rate, rand_tbl),
-          frequency: OscState::from_design(&du.frequency, sample_rate, rand_tbl),
-          volume: OscState::from_design(&du.volume, sample_rate, rand_tbl),
+          main: OscState::from_design(&du.main, sample_rate, &self.tables, rand_tbl),
+          frequency: OscState::from_design(&du.frequency, sample_rate, &self.tables, rand_tbl),
+          volume: OscState::from_design(&du.volume, sample_rate, &self.tables, rand_tbl),
         }
       })
       .collect();
@@ -401,28 +414,88 @@ impl NoiseBuilder {
     let buf = pcm.samples_mut();
     let mut buf_pos = 0usize;
 
-    for _ in 0..frame_count as usize {
-      for c in 0..channels as usize {
-        let store: f64 = units
-          .iter()
-          .filter(|u| u.enabled)
-          .map(|u| {
-            let main = u.main.get_sample::<false>(&self.tables);
-            let vol = u.volume.get_sample::<false>(&self.tables);
-            let work = main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0) * u.pan[c];
-            let envelope = if u.enve_index < u.enves.len() {
-              let smp = u.enves[u.enve_index].0;
-              if smp > 0 {
-                u.enve_mag_start + u.enve_mag_margin * u.enve_count as f64 / smp as f64
-              } else {
-                u.enve_mag_start
+    // A unit at a time, a block of frames at a time. The frames a unit sounds
+    // are independent of each other, so the whole of its state -- three
+    // oscillators and an envelope -- can stay in registers for a block rather
+    // than being read back out of the list for every frame. The sum is a left
+    // fold from zero either way, so adding the units into the block in turn
+    // adds the same numbers in the same order the per frame sum did.
+    //
+    // The oscillators do not advance between the channels of a frame, so
+    // `main`, `vol` and the envelope are the same for both; only the pan
+    // differs, and it enters last.
+    let mut plane = alloc::vec![0.0f64; BLOCK_FRAMES * channels as usize];
+
+    let channels = channels as usize;
+    let mut remaining = frame_count as usize;
+
+    while remaining > 0 {
+      let frames = remaining.min(BLOCK_FRAMES);
+      let block = &mut plane[..frames * channels];
+      block.fill(0.0);
+
+      for u in units.iter_mut() {
+        let enves = u.enves.as_slice();
+        let pan = u.pan;
+        let (mut main_osc, mut freq_osc, mut volu_osc) = (u.main, u.frequency, u.volume);
+        let mut index = u.enve_index;
+        let mut mag_start = u.enve_mag_start;
+        let mut mag_margin = u.enve_mag_margin;
+        let mut count = u.enve_count;
+
+        for slots in block.chunks_exact_mut(channels) {
+          let main = main_osc.get_sample::<false>();
+          let vol = volu_osc.get_sample::<false>();
+          let work = main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0);
+          let envelope = match enves.get(index) {
+            Some(&(smp, _)) if smp > 0 => mag_start + mag_margin * count as f64 / smp as f64,
+            _ => mag_start,
+          };
+          for (slot, &pan) in slots.iter_mut().zip(pan.iter()) {
+            *slot += work * pan * envelope;
+          }
+
+          // Advance the oscillators.
+          // freq → fre
+          // Already reversed and scaled by volume in `get_sample`.
+          let fre = freq_osc.get_sample::<true>();
+          let main_inc = main_osc.increment * frequency.get(fre as i32) as f64;
+          main_osc.increment(main_inc, rand_tbl);
+          let freq_inc = freq_osc.increment;
+          freq_osc.increment(freq_inc, rand_tbl);
+          let volu_inc = volu_osc.increment;
+          volu_osc.increment(volu_inc, rand_tbl);
+
+          // envelope
+          if let Some(&(smp, _)) = enves.get(index) {
+            count += 1;
+            if count >= smp {
+              count = 0;
+              mag_start = enves[index].1;
+              mag_margin = 0.0;
+              index += 1;
+              while let Some(&(smp, mag)) = enves.get(index) {
+                mag_margin = mag - mag_start;
+                if smp != 0 {
+                  break;
+                }
+                mag_start = mag;
+                index += 1;
               }
-            } else {
-              u.enve_mag_start
-            };
-            work * envelope
-          })
-          .sum();
+            }
+          }
+        }
+
+        u.main = main_osc;
+        u.frequency = freq_osc;
+        u.volume = volu_osc;
+        u.enve_index = index;
+        u.enve_mag_start = mag_start;
+        u.enve_mag_margin = mag_margin;
+        u.enve_count = count;
+      }
+
+      for &store in block.iter() {
         let byte4 = (store as i32).clamp(-SAMPLING_TOP as i32, SAMPLING_TOP as i32);
         if bits_per_sample == 8 {
           buf[buf_pos] = ((byte4 >> 8) + 128) as u8;
@@ -435,41 +508,7 @@ impl NoiseBuilder {
         }
       }
 
-      // increment all oscillators
-      for u in units.iter_mut() {
-        if !u.enabled {
-          continue;
-        }
-        // freq → fre
-        // Already reversed and scaled by volume in `get_sample`.
-        let fre = u.frequency.get_sample::<true>(&self.tables);
-        let main_inc = u.main.increment * frequency.get(fre as i32) as f64;
-        u.main.increment(main_inc, rand_tbl);
-        let freq_inc = u.frequency.increment;
-        u.frequency.increment(freq_inc, rand_tbl);
-        let volu_inc = u.volume.increment;
-        u.volume.increment(volu_inc, rand_tbl);
-
-        // envelope
-        if u.enve_index < u.enves.len() {
-          u.enve_count += 1;
-          let smp = u.enves[u.enve_index].0;
-          if u.enve_count >= smp {
-            u.enve_count = 0;
-            u.enve_mag_start = u.enves[u.enve_index].1;
-            u.enve_mag_margin = 0.0;
-            u.enve_index += 1;
-            while u.enve_index < u.enves.len() {
-              u.enve_mag_margin = u.enves[u.enve_index].1 - u.enve_mag_start;
-              if u.enves[u.enve_index].0 != 0 {
-                break;
-              }
-              u.enve_mag_start = u.enves[u.enve_index].1;
-              u.enve_index += 1;
-            }
-          }
-        }
-      }
+      remaining -= frames;
     }
 
     Ok(pcm)

@@ -119,29 +119,39 @@ built even though the handler ignores it. Dropping `std` is worth 268 bytes,
 which is small because that step was already removing most of it -- the value is
 in the guarantee, not the size.
 
-### Size over speed, except where it is not
+### Speed first, with the size as the check on it
 
-The module is meant to be base64'd into a JavaScript bundle, so the last step
-optimizes for size: `-Oz --converge` is 3,319 bytes smaller than `-O3` and costs
-at most 1.2% of `moo` time -- running Binaryen's size passes over output LLVM
-already compiled at `-O3` is nothing like lowering the Rust `opt-level`, which
-costs 22% to 78%. simd128 is the one trade the other way: 4,575 bytes for 12 to
-15% of `moo`.
+The trades go to speed: simd128 is 4,575 bytes for 12 to 15% of `moo`, and
+halving the load path cost 2,510. The module is base64'd into a JavaScript
+bundle, though, so size is what those are weighed against -- a percent bought
+with tens of kilobytes is one to look at twice, and a file growing that way is
+the sign to weigh the two again.
+
+Size that comes for nothing is still taken. `-Oz --converge` as the last step is
+3,319 bytes under `-O3` and costs at most 1.2% of `moo`, which does not leave
+the noise: running Binaryen's size passes over LLVM output already compiled at
+`-O3` is nothing like lowering the Rust `opt-level`, which costs 22% to 78%.
 
 ## Performance
 
 ```sh
 # One module for absolute timings, two to compare them
 deno run --allow-read tools/bench_wasm.ts <wasm> [baseline_wasm]
+
+# The phases before playback, over the whole sample corpus
+deno run --allow-read tools/bench_load.ts <wasm> [baseline_wasm]
 ```
 
 The benchmark renders three of the sample songs to completion and reports the
-median of ten runs. For load time or a per-function breakdown, profile a native
-release build instead: put a harness under `examples/` and run it under macOS
-`sample`. Everything inlines into `main` there, so getting attribution means
-replacing `#[inline(always)]` and `#[inline]` with `#[inline(never)]` across
-`src/`, which makes `moo` 2.1x slower but keeps the proportions readable. Trust
-only the functions with substantial bodies: a helper of a few instructions looks
+median of ten runs. `bench_load.ts` takes the same arguments and times
+`service_read`, `service_tones_ready` and `service_render_noise` over the 6
+songs and 47 noise designs under `tests/sample`, the median of 21 runs a file
+summed over the corpus. For a per-function breakdown, profile a native release
+build instead: put a harness under `examples/` and run it under macOS `sample`.
+Everything inlines into `main` there, so getting attribution means replacing
+`#[inline(always)]` and `#[inline]` with `#[inline(never)]` across `src/`, which
+makes `moo` 2.1x slower but keeps the proportions readable. Trust only the
+functions with substantial bodies: a helper of a few instructions looks
 expensive once every call to it is real.
 
 ### The sample loop is not short of arithmetic
@@ -208,12 +218,51 @@ Native gets 13 to 17% out of that on its own (SSE2 vectorizes the plane loops
 with no flag), wasm 3.5 to 6% and 1,838 bytes. With simd128 on, wasm gets 14.9,
 21.7 and 15.9% on the three sample songs.
 
+### Loading is the noise render and the event list
+
+`moo` is where a player spends its time, but nothing sounds until a file has
+been read, its voices readied and its noise designs rendered. Over the corpus:
+
+| Phase                  | Before  | Now     |
+| ---------------------- | ------- | ------- |
+| `service_read`         | 3.14ms  | 0.72ms  |
+| `service_tones_ready`  | 7.80ms  | 6.31ms  |
+| `service_render_noise` | 38.49ms | 16.07ms |
+
+Native `sample` puts 92% of a noise render inside `build_noise` and 40% of
+reading a song inside `read_x4x_block`, 28 of those points in the `memmove`
+behind `Vec::insert`. Both turned out to be shape rather than arithmetic.
+
+- **A noise design renders a unit at a time.** The loops were frames outside and
+  units inside, so every frame read three oscillators and an envelope back out
+  of the unit list. A unit now runs 1,024 frames at a stretch with its state in
+  locals, accumulating into an `f64` block. The sum is a left fold from zero
+  either way, so the units are added in the same order they were. Worth 40.7% of
+  the phase.
+- **A frame is computed once for both channels.** The oscillators do not advance
+  between the channels, and the pan enters last, so only the pan was ever
+  different. Worth 22.2%.
+- **An oscillator resolves its wave table once**, rather than unwrapping
+  `tables[wave_type]` per sample, and the units a design disables are dropped
+  when the states are built. Worth 9.3%.
+- **An x4x block is merged, not inserted.** Each block holds one (unit, kind)
+  pair with non-negative tick deltas, which makes it a sorted run going into a
+  sorted list; inserting it a record at a time moves 17.2M records for
+  `overworld2_orche` against 0.17M copied by a merge. The order of events
+  sharing a tick is audible, so `merging_a_block_matches_inserting_its_records`
+  holds the merge to what the insertions produced, replacements and all. Worth
+  76.1% of the phase and 1,732 bytes.
+
+Together they take the corpus from 49.5ms to 23.3ms for 2,510 bytes, most of it
+the merge; the rest is 534 bytes for the noise loops and 295 back from folding
+`lite-math`'s sine into one function.
+
 ### Optimizations considered and rejected
 
 | Option                                           | Result                                         |
 | ------------------------------------------------ | ---------------------------------------------- |
 | `f32`/`f64` `algebraic_*` (Rust 1.98)            | 37 bytes smaller, time within noise            |
-| Fixed width SIMD in `libs/lite-math`             | Nothing to speed up: `moo` never calls it      |
+| Fixed width SIMD in `libs/lite-math`             | 0.1ms a song at best, and 4.8% down to start   |
 | `wasm-opt --low-memory-unused`                   | 1,925 bytes smaller, but unsound here          |
 | `wasm-opt -O4`                                   | Larger than `-O3`                              |
 | `opt-level = "s"` / `"z"` for the `pxtone` crate | 5.6KB / 10.4KB smaller, `moo` 22% / 78% slower |
@@ -228,17 +277,21 @@ Vectorizing `libs/lite-math` by hand does not pay either, and not for a reason
 of precision: lane wise IEEE multiplies and adds are the same operations in the
 same order, so a two lane version of these series is bit identical to the scalar
 one, which is what separates this from the algebraic operators above. It is that
-there is no time there to win. Counting the calls shows **`moo` reaching
-`lite-math` zero times** on every sample song -- the frequency table is built
-from literal octave bases and the mixing pass holds no transcendental at all.
-Every call happens while loading: 1,600 to 90,000 of them per song, which is 0.2
-to 1.0 ms of `tones_ready` against 30 to 112 ms of `moo`. `sin` costs 4.79 ns a
-call, 2.98 ns once its three `#[inline(never)]` hops collapse into one, and 1.96
-ns as a branch free body that the caller's loop can keep two arguments in flight
-through -- so the entire headroom is about one nanosecond times at most 90,000
-calls, under 0.1 ms per file loaded, and the `#[inline]` step alone costs 366
-bytes of wasm. The `wide` crate would work now that simd128 is on, but there is
-still nothing for it to do.
+there is not enough time there to win. **`moo` reaches `lite-math` zero times**
+on every sample song -- the frequency table is built from literal octave bases
+and the mixing pass holds no transcendental at all -- so all of it is load time,
+and a build with `sin` and `cos` stubbed out, which is the whole of what
+vectorizing them could ever return, moves `tones_ready` 20.6% and a noise render
+0.8%.
+
+Two lanes cannot have that. They can land in different quadrants, so the body
+has to lose its branch and evaluate both series to blend them, and doing that
+costs 4.8% of the phase before a second lane has bought anything back: halving
+what is left of a 25% share is about a tenth of a millisecond on a song. What
+the same measurement did turn up is that the three `#[inline(never)]` hops a
+call went through were worth 4.1% and 295 bytes to fold into one, which is what
+`portable` does now. The `wide` crate would work now that simd128 is on; there
+is still nothing for it to do.
 
 The overtone oscillator, which makes most of those calls, cannot use wider lanes
 in place anyway: it sums the harmonics into one accumulator, and that order is

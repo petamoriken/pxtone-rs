@@ -192,7 +192,14 @@ mod portable {
   const PI_2_HI: f64 = 1.570_796_326_734_125_6;
   const PI_2_LO: f64 = 6.077_100_506_506_192e-11;
 
-  #[inline(never)]
+  /// The sine and cosine inline, where [`exp`] and [`atan`] below do not: the
+  /// wave tables call these often enough for the reduction, the quadrant and
+  /// the series to be worth folding into the caller, and the four functions
+  /// come out 295 bytes smaller as one, worth 4.1% of `tones_ready`. Dropping
+  /// the quadrant branch to evaluate both series and blend them -- what a
+  /// two lane version would have to do -- costs 4.8% instead, which is where
+  /// hand vectorizing this crate stops being worth measuring.
+  #[inline]
   pub(super) fn sin(x: f64) -> f64 {
     match reduce(x) {
       Some((quadrant, r)) => quadrant_sin(quadrant, r),
@@ -200,7 +207,7 @@ mod portable {
     }
   }
 
-  #[inline(never)]
+  #[inline]
   pub(super) fn cos(x: f64) -> f64 {
     match reduce(x) {
       // cos(x) == sin(x + pi/2), one quadrant along.
@@ -232,7 +239,7 @@ mod portable {
   }
 
   /// Evaluates `sin(quadrant * pi/2 + r)`, using only the polynomial it needs.
-  #[inline(never)]
+  #[inline]
   fn quadrant_sin(quadrant: i64, r: f64) -> f64 {
     match quadrant & 3 {
       0 => sin_poly(r),
@@ -249,7 +256,7 @@ mod portable {
   /// caller to narrow, and 0.03 `f32` ulp of error lands on the wrong side of
   /// the rounding boundary for one argument in fifty -- which is what kept the
   /// window and MDCT tables off libvorbis'.
-  #[inline(never)]
+  #[inline]
   fn sin_poly(r: f64) -> f64 {
     const S0: f64 = 1.0;
     const S1: f64 = -0.166_666_666_666_666_66;
@@ -266,7 +273,7 @@ mod portable {
 
   /// Maclaurin series for `cos(r)`, truncated the same way: `r^18/18!` is
   /// 2.2e-18 of the result over `[-pi/4, pi/4]`. See [`sin_poly`].
-  #[inline(never)]
+  #[inline]
   fn cos_poly(r: f64) -> f64 {
     const C0: f64 = 1.0;
     const C1: f64 = -0.5;
