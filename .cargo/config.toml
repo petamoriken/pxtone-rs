@@ -1,3 +1,6 @@
+# A `RUSTFLAGS` in the environment replaces these rather than adding to them, so
+# the build tasks must not pass any: doing so silently dropped every feature
+# below, simd128 included.
 [target.wasm32-unknown-unknown]
 rustflags = [
     "-C", "target-feature=+multivalue,+bulk-memory,+nontrapping-fptoint,+sign-ext,+mutable-globals,+simd128"
