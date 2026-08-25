@@ -12,6 +12,8 @@ const SMP_COUNT_RAND: usize = 44100;
 /// 40 key, the range a frequency oscillator's table read is scaled into.
 const KEY_TOP: i32 = 0x3200;
 const SMP_COUNT: usize = (BASIC_SAMPLE_RATE / BASIC_FREQUENCY) as usize; // 441
+/// Frames a noise render accumulates before writing them out.
+const BLOCK_FRAMES: usize = 1024;
 
 // ---- PRNG ----
 struct Rand {
@@ -34,7 +36,7 @@ impl Rand {
 }
 
 // ---- Internal oscillator state ----
-#[derive(Clone)]
+#[derive(Clone, Copy)]
 struct OscState<'a> {
   increment: f64,
   offset: f64,
@@ -412,37 +414,88 @@ impl NoiseBuilder {
     let buf = pcm.samples_mut();
     let mut buf_pos = 0usize;
 
-    // Per frame scratch: the oscillators do not advance between the channels,
-    // so `main`, `vol` and the envelope are the same for both. Only the pan
-    // differs, and it enters last, so hoisting the rest out of the channel
-    // loop is the same arithmetic in the same order.
-    let mut per_unit: Vec<(f64, f64)> = alloc::vec![(0.0, 0.0); units.len()];
+    // A unit at a time, a block of frames at a time. The frames a unit sounds
+    // are independent of each other, so the whole of its state -- three
+    // oscillators and an envelope -- can stay in registers for a block rather
+    // than being read back out of the list for every frame. The sum is a left
+    // fold from zero either way, so adding the units into the block in turn
+    // adds the same numbers in the same order the per frame sum did.
+    //
+    // The oscillators do not advance between the channels of a frame, so
+    // `main`, `vol` and the envelope are the same for both; only the pan
+    // differs, and it enters last.
+    let mut plane = alloc::vec![0.0f64; BLOCK_FRAMES * channels as usize];
 
-    for _ in 0..frame_count as usize {
-      for (slot, u) in per_unit.iter_mut().zip(units.iter()) {
-        let main = u.main.get_sample::<false>();
-        let vol = u.volume.get_sample::<false>();
-        let envelope = if u.enve_index < u.enves.len() {
-          let smp = u.enves[u.enve_index].0;
-          if smp > 0 {
-            u.enve_mag_start + u.enve_mag_margin * u.enve_count as f64 / smp as f64
-          } else {
-            u.enve_mag_start
+    let channels = channels as usize;
+    let mut remaining = frame_count as usize;
+
+    while remaining > 0 {
+      let frames = remaining.min(BLOCK_FRAMES);
+      let block = &mut plane[..frames * channels];
+      block.fill(0.0);
+
+      for u in units.iter_mut() {
+        let enves = u.enves.as_slice();
+        let pan = u.pan;
+        let (mut main_osc, mut freq_osc, mut volu_osc) = (u.main, u.frequency, u.volume);
+        let mut index = u.enve_index;
+        let mut mag_start = u.enve_mag_start;
+        let mut mag_margin = u.enve_mag_margin;
+        let mut count = u.enve_count;
+
+        for slots in block.chunks_exact_mut(channels) {
+          let main = main_osc.get_sample::<false>();
+          let vol = volu_osc.get_sample::<false>();
+          let work = main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0);
+          let envelope = match enves.get(index) {
+            Some(&(smp, _)) if smp > 0 => mag_start + mag_margin * count as f64 / smp as f64,
+            _ => mag_start,
+          };
+          for (slot, &pan) in slots.iter_mut().zip(pan.iter()) {
+            *slot += work * pan * envelope;
           }
-        } else {
-          u.enve_mag_start
-        };
-        *slot = (
-          main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0),
-          envelope,
-        );
+
+          // Advance the oscillators.
+          // freq → fre
+          // Already reversed and scaled by volume in `get_sample`.
+          let fre = freq_osc.get_sample::<true>();
+          let main_inc = main_osc.increment * frequency.get(fre as i32) as f64;
+          main_osc.increment(main_inc, rand_tbl);
+          let freq_inc = freq_osc.increment;
+          freq_osc.increment(freq_inc, rand_tbl);
+          let volu_inc = volu_osc.increment;
+          volu_osc.increment(volu_inc, rand_tbl);
+
+          // envelope
+          if let Some(&(smp, _)) = enves.get(index) {
+            count += 1;
+            if count >= smp {
+              count = 0;
+              mag_start = enves[index].1;
+              mag_margin = 0.0;
+              index += 1;
+              while let Some(&(smp, mag)) = enves.get(index) {
+                mag_margin = mag - mag_start;
+                if smp != 0 {
+                  break;
+                }
+                mag_start = mag;
+                index += 1;
+              }
+            }
+          }
+        }
+
+        u.main = main_osc;
+        u.frequency = freq_osc;
+        u.volume = volu_osc;
+        u.enve_index = index;
+        u.enve_mag_start = mag_start;
+        u.enve_mag_margin = mag_margin;
+        u.enve_count = count;
       }
-      for c in 0..channels as usize {
-        let store: f64 = units
-          .iter()
-          .zip(per_unit.iter())
-          .map(|(u, &(work, envelope))| work * u.pan[c] * envelope)
-          .sum();
+
+      for &store in block.iter() {
         let byte4 = (store as i32).clamp(-SAMPLING_TOP as i32, SAMPLING_TOP as i32);
         if bits_per_sample == 8 {
           buf[buf_pos] = ((byte4 >> 8) + 128) as u8;
@@ -455,38 +508,7 @@ impl NoiseBuilder {
         }
       }
 
-      // increment all oscillators
-      for u in units.iter_mut() {
-        // freq → fre
-        // Already reversed and scaled by volume in `get_sample`.
-        let fre = u.frequency.get_sample::<true>();
-        let main_inc = u.main.increment * frequency.get(fre as i32) as f64;
-        u.main.increment(main_inc, rand_tbl);
-        let freq_inc = u.frequency.increment;
-        u.frequency.increment(freq_inc, rand_tbl);
-        let volu_inc = u.volume.increment;
-        u.volume.increment(volu_inc, rand_tbl);
-
-        // envelope
-        if u.enve_index < u.enves.len() {
-          u.enve_count += 1;
-          let smp = u.enves[u.enve_index].0;
-          if u.enve_count >= smp {
-            u.enve_count = 0;
-            u.enve_mag_start = u.enves[u.enve_index].1;
-            u.enve_mag_margin = 0.0;
-            u.enve_index += 1;
-            while u.enve_index < u.enves.len() {
-              u.enve_mag_margin = u.enves[u.enve_index].1 - u.enve_mag_start;
-              if u.enves[u.enve_index].0 != 0 {
-                break;
-              }
-              u.enve_mag_start = u.enves[u.enve_index].1;
-              u.enve_index += 1;
-            }
-          }
-        }
-      }
+      remaining -= frames;
     }
 
     Ok(pcm)
