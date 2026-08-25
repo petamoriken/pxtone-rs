@@ -119,14 +119,18 @@ built even though the handler ignores it. Dropping `std` is worth 268 bytes,
 which is small because that step was already removing most of it -- the value is
 in the guarantee, not the size.
 
-### Size over speed, except where it is not
+### Speed first, with the size as the check on it
 
-The module is meant to be base64'd into a JavaScript bundle, so the last step
-optimizes for size: `-Oz --converge` is 3,319 bytes smaller than `-O3` and costs
-at most 1.2% of `moo` time -- running Binaryen's size passes over output LLVM
-already compiled at `-O3` is nothing like lowering the Rust `opt-level`, which
-costs 22% to 78%. simd128 is the one trade the other way: 4,575 bytes for 12 to
-15% of `moo`.
+The trades go to speed: simd128 is 4,575 bytes for 12 to 15% of `moo`, and
+halving the load path cost 2,510. The module is base64'd into a JavaScript
+bundle, though, so size is what those are weighed against -- a percent bought
+with tens of kilobytes is one to look at twice, and a file growing that way is
+the sign to weigh the two again.
+
+Size that comes for nothing is still taken. `-Oz --converge` as the last step is
+3,319 bytes under `-O3` and costs at most 1.2% of `moo`, which does not leave
+the noise: running Binaryen's size passes over LLVM output already compiled at
+`-O3` is nothing like lowering the Rust `opt-level`, which costs 22% to 78%.
 
 ## Performance
 
