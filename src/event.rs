@@ -149,7 +149,12 @@ impl EventList {
 
     let mut absolute = 0i32;
 
-    self.events.reserve(eve_count as usize);
+    // Four bytes a record at the very least, two varints and two plain bytes,
+    // so the stated count is worth reserving for only as far as the bytes
+    // behind it go.
+    self
+      .events
+      .reserve((eve_count as usize).min(r.remaining() / 4));
     for _ in 0..eve_count {
       let tick_delta = r.read_var_i32()?;
       let unit_index = r.read_u8()?;
@@ -198,7 +203,10 @@ impl EventList {
       return Err(PxtoneError::UnknownFormat);
     }
 
-    let mut block: Vec<EventRecord> = Vec::new();
+    // Two varints a record, so a byte each at the very least: a count the file
+    // states can be taken at face value only as far as the bytes behind it.
+    let capacity = (event_count as usize).min(r.remaining() / 2);
+    let mut block: Vec<EventRecord> = Vec::with_capacity(capacity);
     let mut absolute = 0i32;
     let mut ascending = true;
 
