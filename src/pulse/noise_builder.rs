@@ -401,27 +401,40 @@ impl NoiseBuilder {
     let buf = pcm.samples_mut();
     let mut buf_pos = 0usize;
 
+    // Per frame scratch: the oscillators do not advance between the channels,
+    // so `main`, `vol` and the envelope are the same for both. Only the pan
+    // differs, and it enters last, so hoisting the rest out of the channel
+    // loop is the same arithmetic in the same order.
+    let mut per_unit: Vec<(f64, f64)> = alloc::vec![(0.0, 0.0); units.len()];
+
     for _ in 0..frame_count as usize {
+      for (slot, u) in per_unit.iter_mut().zip(units.iter()) {
+        if !u.enabled {
+          continue;
+        }
+        let main = u.main.get_sample::<false>(&self.tables);
+        let vol = u.volume.get_sample::<false>(&self.tables);
+        let envelope = if u.enve_index < u.enves.len() {
+          let smp = u.enves[u.enve_index].0;
+          if smp > 0 {
+            u.enve_mag_start + u.enve_mag_margin * u.enve_count as f64 / smp as f64
+          } else {
+            u.enve_mag_start
+          }
+        } else {
+          u.enve_mag_start
+        };
+        *slot = (
+          main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0),
+          envelope,
+        );
+      }
       for c in 0..channels as usize {
         let store: f64 = units
           .iter()
-          .filter(|u| u.enabled)
-          .map(|u| {
-            let main = u.main.get_sample::<false>(&self.tables);
-            let vol = u.volume.get_sample::<false>(&self.tables);
-            let work = main * (vol + SAMPLING_TOP as f64) / (SAMPLING_TOP as f64 * 2.0) * u.pan[c];
-            let envelope = if u.enve_index < u.enves.len() {
-              let smp = u.enves[u.enve_index].0;
-              if smp > 0 {
-                u.enve_mag_start + u.enve_mag_margin * u.enve_count as f64 / smp as f64
-              } else {
-                u.enve_mag_start
-              }
-            } else {
-              u.enve_mag_start
-            };
-            work * envelope
-          })
+          .zip(per_unit.iter())
+          .filter(|(u, _)| u.enabled)
+          .map(|(u, &(work, envelope))| work * u.pan[c] * envelope)
           .sum();
         let byte4 = (store as i32).clamp(-SAMPLING_TOP as i32, SAMPLING_TOP as i32);
         if bits_per_sample == 8 {
