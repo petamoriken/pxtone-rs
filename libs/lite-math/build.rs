@@ -1,10 +1,11 @@
-//! Assembles `src/wasm.s` (the `f32.sqrt` and `f32.floor` instructions) with
+//! Assembles `src/wasm.s` (the `f64.sqrt` and `f32.floor` instructions) with
 //! clang and links it in.
 //!
 //! clang is optional -- Apple's cannot target wasm -- and without it the crate
-//! falls back to its portable implementations. The archive around the object is
-//! written here rather than with llvm-ar, which is missing or version suffixed
-//! on many systems, the CI runners included.
+//! falls back to its portable floor, and to whatever libm the target has for
+//! the square root. The archive around the object is written here rather than
+//! with llvm-ar, which is missing or version suffixed on many systems, the CI
+//! runners included.
 
 use std::env;
 use std::ffi::OsStr;
@@ -17,7 +18,7 @@ use std::process::Command;
 const LLVM_DIRS: [&str; 2] = ["/opt/homebrew/opt/llvm/bin", "/usr/local/opt/llvm/bin"];
 
 /// The symbols `src/wasm.s` defines, for the archive's index.
-const SYMBOLS: [&str; 2] = ["lite_math_sqrt_f32", "lite_math_floor_f32"];
+const SYMBOLS: [&str; 2] = ["lite_math_sqrt", "lite_math_floorf"];
 
 /// Name of the object inside the archive, `/` terminated as GNU ar writes it.
 const MEMBER_NAME: &str = "lite_math_wasm.o/";
