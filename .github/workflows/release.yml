@@ -124,7 +124,7 @@ jobs:
             -f sha="${{ steps.merge.outputs.sha }}"
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v3.0.2
+        uses: softprops/action-gh-release@v3.0.3
         with:
           tag_name: v${{ inputs.version }}
           generate_release_notes: true
