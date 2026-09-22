@@ -465,6 +465,117 @@ impl Unit {
     self.pan_delay_buffers[1][time_pan_index] = buf1;
   }
 
+  /// `voice_count` lives are still running. Matches [`Unit::is_sounding`] for a
+  /// block that holds its voice state in locals.
+  #[inline(always)]
+  fn tones_live(voice_count: usize, tone0: &VoiceTone, tone1: &VoiceTone) -> bool {
+    (voice_count > 0 && tone0.life_count > 0) || (voice_count > 1 && tone1.life_count > 0)
+  }
+
+  /// Both pan-delay slots. `index` is masked to the ring length by the caller.
+  #[inline(always)]
+  fn write_ring(ring0: *mut i32, ring1: *mut i32, index: usize, s0: i32, s1: i32) {
+    unsafe {
+      ring0.add(index).write(s0);
+      ring1.add(index).write(s1);
+    }
+  }
+
+  /// [`Unit::tone_silence`] against locals and a ring pointer.
+  #[inline(always)]
+  fn silence_at(quiet_run: &mut u32, ring0: *mut i32, ring1: *mut i32, index: usize) {
+    if *quiet_run < BUFSIZE_TIMEPAN as u32 {
+      Self::write_ring(ring0, ring1, index, 0, 0);
+      *quiet_run += 1;
+    }
+  }
+
+  /// Muted sample: envelope, then playback advance, no wave. Voice order matches
+  /// [`Unit::tone_envelope`] followed by [`Unit::tone_increment_sample`].
+  #[inline(always)]
+  fn advance_muted(
+    tone0: &mut VoiceTone,
+    tone1: &mut VoiceTone,
+    params: &ToneParams,
+    instances: &[VoiceInstance],
+    frequency: f32,
+  ) {
+    let n = params.voice_count.min(instances.len());
+    if n > 0 {
+      Self::advance_muted_voice(tone0, &instances[0], params, 0, frequency);
+    }
+    if n > 1 {
+      Self::advance_muted_voice(tone1, &instances[1], params, 1, frequency);
+    }
+  }
+
+  #[inline(always)]
+  fn advance_muted_voice(
+    vt: &mut VoiceTone,
+    vi: &VoiceInstance,
+    params: &ToneParams,
+    v: usize,
+    frequency: f32,
+  ) {
+    if vt.life_count > 0 && params.has_envelope[v] {
+      Self::step_envelope(vt, vi);
+    }
+    if vt.life_count > 0 {
+      Self::step_advance(
+        vt,
+        params.has_envelope[v],
+        params.bodies[v],
+        params.voice_flags[v],
+        params.steps[v],
+        frequency,
+      );
+    }
+  }
+
+  /// One sounding sample, voice 0 then voice 1, summed the way [`Unit::tone_sample`]
+  /// sums them.
+  #[inline(always)]
+  fn mix_voices(
+    tone0: &mut VoiceTone,
+    tone1: &mut VoiceTone,
+    params: &ToneParams,
+    instances: &[VoiceInstance],
+    channels: u8,
+    smooth_smp: u32,
+    frequency: f32,
+  ) -> [i32; 2] {
+    let mut buf0 = 0i32;
+    let mut buf1 = 0i32;
+    let n = params.voice_count.min(instances.len());
+    if n > 0 && tone0.life_count > 0 {
+      let [w0, w1] = Self::voice_sample::<true>(
+        tone0,
+        &instances[0],
+        params,
+        0,
+        channels,
+        smooth_smp,
+        frequency,
+      );
+      buf0 += w0;
+      buf1 += w1;
+    }
+    if n > 1 && tone1.life_count > 0 {
+      let [w0, w1] = Self::voice_sample::<true>(
+        tone1,
+        &instances[1],
+        params,
+        1,
+        channels,
+        smooth_smp,
+        frequency,
+      );
+      buf0 += w0;
+      buf1 += w1;
+    }
+    [buf0, buf1]
+  }
+
   /// Renders one block of samples for this unit, accumulating into `mix`.
   ///
   /// `mix[i]` is the group accumulator for the `i`-th sample of the block and
@@ -506,9 +617,23 @@ impl Unit {
     let params = self.tone_params(mute_by_unit, instances);
     // The key only moves while a portamento is in flight; otherwise it, and the
     // playback rate that comes out of the frequency table, are the same for
-    // every sample in the block. `tone_increment_key` is idempotent in that
-    // case, so calling it once leaves the same state behind.
+    // every sample in the block. `advance_key` is idempotent in that case, so
+    // calling it once leaves the same state behind.
     let steady = self.portamento_duration == 0 || self.key_delta == 0;
+
+    // Voice fields and the pan-delay ring share `&mut self`. A store into the
+    // ring forces every voice field out to memory, and the next sample loads it
+    // back; on wasm that round trip is what the sample loop spends. Hold the
+    // fields in locals for the block, write the ring through a pointer that
+    // does not alias them, and copy the fields back once.
+    let mut tone0 = self.tones[0];
+    let mut tone1 = self.tones[1];
+    let mut quiet_run = self.quiet_run;
+    let mut key = self.key;
+    let mut key_start = self.key_start;
+    let mut key_delta = self.key_delta;
+    let mut portamento_pos = self.portamento_pos;
+    let portamento_duration = self.portamento_duration;
 
     // Rendering fills the pan-delay ring and reading it back trails behind by
     // the pan delay, so a run longer than the slots left before the ring turns
@@ -523,24 +648,35 @@ impl Unit {
     let mut start = 0;
     while start < count {
       let end = (start + chunk).min(count);
+      // `addr_of_mut` does not borrow, so the pointer stays valid for the writes
+      // below and the shared borrow in `add_ring` can follow them.
+      let ring0 = core::ptr::addr_of_mut!(self.pan_delay_buffers[0]).cast::<i32>();
+      let ring1 = core::ptr::addr_of_mut!(self.pan_delay_buffers[1]).cast::<i32>();
       for i in start..end {
         let time_pan_index = (time_pan_index + i) & (BUFSIZE_TIMEPAN - 1);
         if !have_freq || !steady {
-          let key = self.tone_increment_key();
+          key = Self::advance_key(
+            &mut key_start,
+            &mut key_delta,
+            &mut portamento_pos,
+            portamento_duration,
+          );
           freq = frequency.get2(key) * sample_stride;
           have_freq = true;
         }
-        if self.is_sounding() {
-          self.tone_sample::<true>(
-            params,
-            channels,
-            time_pan_index,
-            smooth_smp,
-            freq,
-            instances,
-          );
+        if Self::tones_live(params.voice_count, &tone0, &tone1) {
+          if params.muted {
+            Self::advance_muted(&mut tone0, &mut tone1, &params, instances, freq);
+            Self::silence_at(&mut quiet_run, ring0, ring1, time_pan_index);
+          } else {
+            quiet_run = 0;
+            let [s0, s1] = Self::mix_voices(
+              &mut tone0, &mut tone1, &params, instances, channels, smooth_smp, freq,
+            );
+            Self::write_ring(ring0, ring1, time_pan_index, s0, s1);
+          }
         } else {
-          self.tone_silence(time_pan_index);
+          Self::silence_at(&mut quiet_run, ring0, ring1, time_pan_index);
         }
       }
 
@@ -549,7 +685,7 @@ impl Unit {
       // flushed here wrote nothing but silence for the last 64 slots, which is
       // every slot the run reads back. A muted unit writes silence too and can
       // report the same, and it costs nothing: those slots are all zero.
-      if !self.is_flushed() {
+      if quiet_run < BUFSIZE_TIMEPAN as u32 {
         for (ch, plane) in planes.iter_mut().enumerate().take(channel_count) {
           let from = time_pan_index + start + BUFSIZE_TIMEPAN - params.pan_delays[ch];
           add_ring(&mut plane[start..end], &self.pan_delay_buffers[ch], from);
@@ -557,6 +693,14 @@ impl Unit {
       }
       start = end;
     }
+
+    self.tones[0] = tone0;
+    self.tones[1] = tone1;
+    self.quiet_run = quiet_run;
+    self.key = key;
+    self.key_start = key_start;
+    self.key_delta = key_delta;
+    self.portamento_pos = portamento_pos;
   }
 
   /// Reads the constants a block of samples shares. See [`ToneParams`].
@@ -602,29 +746,50 @@ impl Unit {
     }
   }
 
-  // Applies portamento processing and returns the current key
-  #[inline]
-  pub(crate) fn tone_increment_key(&mut self) -> i32 {
-    if self.portamento_duration != 0 && self.key_delta != 0 {
-      if self.portamento_pos < self.portamento_duration {
-        self.portamento_pos += 1;
+  /// One step of [`Unit::tone_increment_key`], on the key fields alone.
+  ///
+  /// Split out so a block can keep the fields in locals: the sample loop must
+  /// not store through `&mut self`, or the voice state is written back with
+  /// them.
+  #[inline(always)]
+  fn advance_key(
+    key_start: &mut i32,
+    key_delta: &mut i32,
+    portamento_pos: &mut u32,
+    portamento_duration: u32,
+  ) -> i32 {
+    if portamento_duration != 0 && *key_delta != 0 {
+      if *portamento_pos < portamento_duration {
+        *portamento_pos += 1;
         // The C++ truncates the whole sum, not just the fraction:
         //   _key_now = (int32_t)( _key_start + (double)_key_margin * pos / num );
         // For a downward portamento the margin is negative, and truncating
         // toward zero after the addition lands a key lower than truncating
         // before it.
-        self.key = (self.key_start as f64
-          + self.key_delta as f64 * self.portamento_pos as f64 / self.portamento_duration as f64)
-          as i32;
+        (*key_start as f64
+          + *key_delta as f64 * *portamento_pos as f64 / portamento_duration as f64) as i32
       } else {
-        self.key = self.key_start + self.key_delta;
-        self.key_start = self.key;
-        self.key_delta = 0;
+        let key = *key_start + *key_delta;
+        *key_start = key;
+        *key_delta = 0;
+        key
       }
     } else {
-      self.key = self.key_start + self.key_delta;
+      *key_start + *key_delta
     }
-    self.key
+  }
+
+  // Applies portamento processing and returns the current key
+  #[inline]
+  pub(crate) fn tone_increment_key(&mut self) -> i32 {
+    let key = Self::advance_key(
+      &mut self.key_start,
+      &mut self.key_delta,
+      &mut self.portamento_pos,
+      self.portamento_duration,
+    );
+    self.key = key;
+    key
   }
 
   /// Advances one voice layer's lifetime and sample position by a sample.

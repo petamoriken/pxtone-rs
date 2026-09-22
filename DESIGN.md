@@ -184,6 +184,14 @@ both.
   itself and is `#[inline(never)]`.
 - **`is_flushed` is taken from what the frame did** instead of read back.
   Rendering a frame clears the quiet run, so the unit is not flushed.
+- **A block's voice fields stay in locals.** The pan-delay ring and the voice
+  state share `&mut self`, so a store into the ring was writing every voice
+  field back out and the next sample was loading it again. Copying the two
+  voices out for the block, and writing the ring through a pointer, leaves the
+  sample position in a local with no per-sample store. Worth about 2% on
+  `overworld2_orche` and `overworld2_nes` and 3 to 5% on `5LOVE`, for 196 bytes.
+  Copying the tones into a local array and still indexing it had gone the other
+  way, 33% slower: an index keeps the fields in memory.
 
 ### The mixer is a set of planes
 
